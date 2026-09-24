@@ -6,13 +6,20 @@ from __future__ import annotations
 import argparse
 import json
 import re
-import shutil
+import sys
 from pathlib import Path
 from typing import Any
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-ROOT = Path(__file__).resolve().parents[1]
-SOURCE = ROOT / "docs" / "marketo-swagger-asset.json"
+from marketo_codegen import (  # noqa: E402
+    ROOT,
+    check_output,
+    load_document,
+    write_output,
+)
+
+
 OUTPUT = ROOT / "src" / "asset-definitions"
 CATEGORIES = ("models", "requests", "responses")
 
@@ -148,7 +155,7 @@ class TypeScriptGenerator:
         source_category = category(source)
         target_category = category(target)
         target_file = file_name(target)
-        return f'./{target_file}.js' if source_category == target_category else f'../{target_category}/{target_file}.js'
+        return f'./{target_file}' if source_category == target_category else f'../{target_category}/{target_file}'
 
 
 def generated_files(definitions: dict[str, dict[str, Any]]) -> dict[Path, str]:
@@ -161,36 +168,12 @@ def generated_files(definitions: dict[str, dict[str, Any]]) -> dict[Path, str]:
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--check", action="store_true", help="fail if generated files are stale")
-    args = parser.parse_args()
+    parser.add_argument("--check", action="store_true", help="fail if generated definitions are stale")
+    arguments = parser.parse_args()
 
-    with SOURCE.open() as source_file:
-        definitions = json.load(source_file)["definitions"]
-    files = generated_files(definitions)
-
-    if args.check:
-        stale = [path for path, content in files.items() if not path.is_file() or path.read_text() != content]
-        unexpected = [
-            path
-            for category_name in CATEGORIES
-            for path in (OUTPUT / category_name).glob("*.ts")
-            if path not in files
-        ]
-        if stale or unexpected:
-            print(f"Generated definitions are stale: {len(stale)} missing or changed, {len(unexpected)} unexpected.")
-            return 1
-        print(f"All {len(files)} TypeScript definitions are current.")
-        return 0
-
-    for category_name in CATEGORIES:
-        directory = OUTPUT / category_name
-        if directory.exists():
-            shutil.rmtree(directory)
-        directory.mkdir(parents=True)
-    for path, content in files.items():
-        path.write_text(content)
-    print(f"Generated {len(files)} TypeScript definitions.")
-    return 0
+    files = generated_files(load_document()["definitions"])
+    label = "TypeScript definitions"
+    return check_output(OUTPUT, files, label) if arguments.check else write_output(OUTPUT, files, label)
 
 
 if __name__ == "__main__":
