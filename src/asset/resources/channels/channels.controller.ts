@@ -1,7 +1,7 @@
 import { Controller, Get, Query } from '@nestjs/common'
 import { ChannelsService } from './channels.service'
 
-import type { ResponseOfChannelResponse } from '../../../asset-definitions/responses/response-of-channel-response'
+import type { ResponseOfChannelResponse } from '../../asset-definitions/responses/response-of-channel-response'
 
 @Controller()
 export class ChannelsController {

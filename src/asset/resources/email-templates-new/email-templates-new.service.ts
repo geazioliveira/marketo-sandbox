@@ -1,92 +1,81 @@
-import { Injectable, NotImplementedException } from '@nestjs/common'
+import { Injectable } from '@nestjs/common'
+import { makeBulkUsedByResponse } from '../../asset-mocks/factories/bulk-used-by-response'
+import { makeDeleteResponse } from '../../asset-mocks/factories/delete-response'
+import { makeEmailTemplateFilterResponse } from '../../asset-mocks/factories/email-template-filter-response'
+import { makeEmailTemplateNewResponse } from '../../asset-mocks/factories/email-template-new-response'
+import { makeUsedByResponse } from '../../asset-mocks/factories/used-by-response'
+
+import type { BulkUsedByResponse } from '../../asset-definitions/responses/bulk-used-by-response'
+import type { DeleteResponse } from '../../asset-definitions/responses/delete-response'
+import type { EmailTemplateFilterResponse } from '../../asset-definitions/responses/email-template-filter-response'
+import type { EmailTemplateNewResponse } from '../../asset-definitions/responses/email-template-new-response'
+import type { UsedByResponse } from '../../asset-definitions/responses/used-by-response'
 
 @Injectable()
 export class EmailTemplatesNewService {
   async createContentUsingPOST_emailtemplate(
     ..._arguments: unknown[]
-  ): Promise<never> {
-    throw new NotImplementedException(
-      'createContentUsingPOST_emailtemplate is not implemented.',
-    )
+  ): Promise<EmailTemplateNewResponse> {
+    return makeEmailTemplateNewResponse()
   }
 
   async cloneContentUsingPOST_emailtemplate(
     ..._arguments: unknown[]
-  ): Promise<never> {
-    throw new NotImplementedException(
-      'cloneContentUsingPOST_emailtemplate is not implemented.',
-    )
+  ): Promise<EmailTemplateNewResponse> {
+    return makeEmailTemplateNewResponse()
   }
 
   async filterContentUsingGET_emailtemplate(
     ..._arguments: unknown[]
-  ): Promise<never> {
-    throw new NotImplementedException(
-      'filterContentUsingGET_emailtemplate is not implemented.',
-    )
+  ): Promise<EmailTemplateFilterResponse> {
+    return makeEmailTemplateFilterResponse()
   }
 
   async stateTransitionUsingPOST_emailtemplate(
     ..._arguments: unknown[]
-  ): Promise<never> {
-    throw new NotImplementedException(
-      'stateTransitionUsingPOST_emailtemplate is not implemented.',
-    )
+  ): Promise<EmailTemplateNewResponse> {
+    return makeEmailTemplateNewResponse()
   }
 
   async getContentUsedByUsingPOST_emailtemplate(
     ..._arguments: unknown[]
-  ): Promise<never> {
-    throw new NotImplementedException(
-      'getContentUsedByUsingPOST_emailtemplate is not implemented.',
-    )
+  ): Promise<UsedByResponse> {
+    return makeUsedByResponse()
   }
 
   async getContentUsingGET_emailtemplate(
     ..._arguments: unknown[]
-  ): Promise<never> {
-    throw new NotImplementedException(
-      'getContentUsingGET_emailtemplate is not implemented.',
-    )
+  ): Promise<EmailTemplateNewResponse> {
+    return makeEmailTemplateNewResponse()
   }
 
   async deleteContentUsingPOST_emailtemplate(
     ..._arguments: unknown[]
-  ): Promise<never> {
-    throw new NotImplementedException(
-      'deleteContentUsingPOST_emailtemplate is not implemented.',
-    )
+  ): Promise<DeleteResponse> {
+    return makeDeleteResponse()
   }
 
   async updateContentUsingPOST_emailtemplate(
     ..._arguments: unknown[]
-  ): Promise<never> {
-    throw new NotImplementedException(
-      'updateContentUsingPOST_emailtemplate is not implemented.',
-    )
+  ): Promise<EmailTemplateNewResponse> {
+    return makeEmailTemplateNewResponse()
   }
 
   async bulkGetUsingPOST_emailtemplate(
     ..._arguments: unknown[]
-  ): Promise<never> {
-    throw new NotImplementedException(
-      'bulkGetUsingPOST_emailtemplate is not implemented.',
-    )
+  ): Promise<EmailTemplateNewResponse> {
+    return makeEmailTemplateNewResponse()
   }
 
   async bulkDeleteUsingPOST_emailtemplate(
     ..._arguments: unknown[]
-  ): Promise<never> {
-    throw new NotImplementedException(
-      'bulkDeleteUsingPOST_emailtemplate is not implemented.',
-    )
+  ): Promise<DeleteResponse> {
+    return makeDeleteResponse()
   }
 
   async bulkUsedByUsingPOST_emailtemplate(
     ..._arguments: unknown[]
-  ): Promise<never> {
-    throw new NotImplementedException(
-      'bulkUsedByUsingPOST_emailtemplate is not implemented.',
-    )
+  ): Promise<BulkUsedByResponse> {
+    return makeBulkUsedByResponse()
   }
 }

@@ -5,5 +5,6 @@ import { SegmentsService } from './segments.service'
 @Module({
   controllers: [SegmentsController],
   providers: [SegmentsService],
+  exports: [SegmentsService],
 })
 export class SegmentsModule {}

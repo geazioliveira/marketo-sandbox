@@ -1,42 +1,45 @@
-import { Injectable, NotImplementedException } from '@nestjs/common'
+import { Injectable } from '@nestjs/common'
+import { makeResponseOfIdResponse } from '../../asset-mocks/factories/response-of-id-response'
+import { makeResponseOfStaticListResponse } from '../../asset-mocks/factories/response-of-static-list-response'
+
+import type { ResponseOfIdResponse } from '../../asset-definitions/responses/response-of-id-response'
+import type { ResponseOfStaticListResponse } from '../../asset-definitions/responses/response-of-static-list-response'
 
 @Injectable()
 export class StaticListsService {
-  async getStaticListByIdUsingGET(..._arguments: unknown[]): Promise<never> {
-    throw new NotImplementedException(
-      'getStaticListByIdUsingGET is not implemented.',
-    )
+  async getStaticListByIdUsingGET(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfStaticListResponse> {
+    return makeResponseOfStaticListResponse()
   }
 
-  async updateStaticListUsingPOST(..._arguments: unknown[]): Promise<never> {
-    throw new NotImplementedException(
-      'updateStaticListUsingPOST is not implemented.',
-    )
+  async updateStaticListUsingPOST(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfStaticListResponse> {
+    return makeResponseOfStaticListResponse()
   }
 
-  async getStaticListsUsingGET(..._arguments: unknown[]): Promise<never> {
-    throw new NotImplementedException(
-      'getStaticListsUsingGET is not implemented.',
-    )
+  async getStaticListsUsingGET(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfStaticListResponse> {
+    return makeResponseOfStaticListResponse()
   }
 
-  async createStaticListUsingPOST(..._arguments: unknown[]): Promise<never> {
-    throw new NotImplementedException(
-      'createStaticListUsingPOST is not implemented.',
-    )
+  async createStaticListUsingPOST(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfStaticListResponse> {
+    return makeResponseOfStaticListResponse()
   }
 
-  async getStaticListByNameUsingGET(..._arguments: unknown[]): Promise<never> {
-    throw new NotImplementedException(
-      'getStaticListByNameUsingGET is not implemented.',
-    )
+  async getStaticListByNameUsingGET(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfStaticListResponse> {
+    return makeResponseOfStaticListResponse()
   }
 
   async deleteStaticListByIdUsingPOST(
     ..._arguments: unknown[]
-  ): Promise<never> {
-    throw new NotImplementedException(
-      'deleteStaticListByIdUsingPOST is not implemented.',
-    )
+  ): Promise<ResponseOfIdResponse> {
+    return makeResponseOfIdResponse()
   }
 }

@@ -5,5 +5,6 @@ import { FragmentsNewService } from './fragments-new.service'
 @Module({
   controllers: [FragmentsNewController],
   providers: [FragmentsNewService],
+  exports: [FragmentsNewService],
 })
 export class FragmentsNewModule {}

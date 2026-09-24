@@ -1,18 +1,21 @@
-import { Injectable, NotImplementedException } from '@nestjs/common'
+import { Injectable } from '@nestjs/common'
+import { makeResponseOfSegmentationResponse } from '../../asset-mocks/factories/response-of-segmentation-response'
+import { makeResponseOfSegmentsResponse } from '../../asset-mocks/factories/response-of-segments-response'
+
+import type { ResponseOfSegmentationResponse } from '../../asset-definitions/responses/response-of-segmentation-response'
+import type { ResponseOfSegmentsResponse } from '../../asset-definitions/responses/response-of-segments-response'
 
 @Injectable()
 export class SegmentsService {
-  async getSegmentationUsingGET(..._arguments: unknown[]): Promise<never> {
-    throw new NotImplementedException(
-      'getSegmentationUsingGET is not implemented.',
-    )
+  async getSegmentationUsingGET(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfSegmentationResponse> {
+    return makeResponseOfSegmentationResponse()
   }
 
   async getSegmentsForSegmentationUsingGET(
     ..._arguments: unknown[]
-  ): Promise<never> {
-    throw new NotImplementedException(
-      'getSegmentsForSegmentationUsingGET is not implemented.',
-    )
+  ): Promise<ResponseOfSegmentsResponse> {
+    return makeResponseOfSegmentsResponse()
   }
 }

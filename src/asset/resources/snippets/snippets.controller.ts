@@ -1,14 +1,14 @@
 import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common'
 import { SnippetsService } from './snippets.service'
 
-import type { CloneSnippetRequest } from '../../../asset-definitions/requests/clone-snippet-request'
-import type { CreateSnippetRequest } from '../../../asset-definitions/requests/create-snippet-request'
-import type { ModelResponse } from '../../../asset-definitions/responses/model-response'
-import type { ResponseOfIdResponse } from '../../../asset-definitions/responses/response-of-id-response'
-import type { ResponseOfSnippetContentResponse } from '../../../asset-definitions/responses/response-of-snippet-content-response'
-import type { ResponseOfSnippetResponse } from '../../../asset-definitions/responses/response-of-snippet-response'
-import type { UpdateSnippetDynamicContentRequest } from '../../../asset-definitions/requests/update-snippet-dynamic-content-request'
-import type { UpdateSnippetRequest } from '../../../asset-definitions/requests/update-snippet-request'
+import type { CloneSnippetRequest } from '../../asset-definitions/requests/clone-snippet-request'
+import type { CreateSnippetRequest } from '../../asset-definitions/requests/create-snippet-request'
+import type { ModelResponse } from '../../asset-definitions/responses/model-response'
+import type { ResponseOfIdResponse } from '../../asset-definitions/responses/response-of-id-response'
+import type { ResponseOfSnippetContentResponse } from '../../asset-definitions/responses/response-of-snippet-content-response'
+import type { ResponseOfSnippetResponse } from '../../asset-definitions/responses/response-of-snippet-response'
+import type { UpdateSnippetDynamicContentRequest } from '../../asset-definitions/requests/update-snippet-dynamic-content-request'
+import type { UpdateSnippetRequest } from '../../asset-definitions/requests/update-snippet-request'
 
 @Controller()
 export class SnippetsController {

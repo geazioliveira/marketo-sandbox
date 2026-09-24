@@ -1,104 +1,105 @@
-import { Injectable, NotImplementedException } from '@nestjs/common'
+import { Injectable } from '@nestjs/common'
+import { makeResponseOfAutoSuggestValue } from '../../asset-mocks/factories/response-of-auto-suggest-value'
+import { makeResponseOfIdResponse } from '../../asset-mocks/factories/response-of-id-response'
+import { makeResponseOfSmartListResponse } from '../../asset-mocks/factories/response-of-smart-list-response'
+import { makeResponseOfSmartListResponseWithRules } from '../../asset-mocks/factories/response-of-smart-list-response-with-rules'
+import { makeResponseOfSmartListRuleType } from '../../asset-mocks/factories/response-of-smart-list-rule-type'
+
+import type { ResponseOfAutoSuggestValue } from '../../asset-definitions/models/response-of-auto-suggest-value'
+import type { ResponseOfIdResponse } from '../../asset-definitions/responses/response-of-id-response'
+import type { ResponseOfSmartListResponse } from '../../asset-definitions/responses/response-of-smart-list-response'
+import type { ResponseOfSmartListResponseWithRules } from '../../asset-definitions/models/response-of-smart-list-response-with-rules'
+import type { ResponseOfSmartListRuleType } from '../../asset-definitions/models/response-of-smart-list-rule-type'
 
 @Injectable()
 export class SmartListsService {
-  async getSmartListByIdUsingGET(..._arguments: unknown[]): Promise<never> {
-    throw new NotImplementedException(
-      'getSmartListByIdUsingGET is not implemented.',
-    )
+  async getSmartListByIdUsingGET(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfSmartListResponseWithRules> {
+    return makeResponseOfSmartListResponseWithRules()
   }
 
-  async getSmartListByNameUsingGET(..._arguments: unknown[]): Promise<never> {
-    throw new NotImplementedException(
-      'getSmartListByNameUsingGET is not implemented.',
-    )
+  async getSmartListByNameUsingGET(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfSmartListResponse> {
+    return makeResponseOfSmartListResponse()
   }
 
-  async deleteSmartListByIdUsingPOST(..._arguments: unknown[]): Promise<never> {
-    throw new NotImplementedException(
-      'deleteSmartListByIdUsingPOST is not implemented.',
-    )
+  async deleteSmartListByIdUsingPOST(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfIdResponse> {
+    return makeResponseOfIdResponse()
   }
 
-  async getSmartListsUsingGET(..._arguments: unknown[]): Promise<never> {
-    throw new NotImplementedException(
-      'getSmartListsUsingGET is not implemented.',
-    )
+  async getSmartListsUsingGET(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfSmartListResponse> {
+    return makeResponseOfSmartListResponse()
   }
 
-  async createSmartListUsingPOST(..._arguments: unknown[]): Promise<never> {
-    throw new NotImplementedException(
-      'createSmartListUsingPOST is not implemented.',
-    )
+  async createSmartListUsingPOST(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfSmartListResponse> {
+    return makeResponseOfSmartListResponse()
   }
 
-  async getSmartListRulesUsingGET(..._arguments: unknown[]): Promise<never> {
-    throw new NotImplementedException(
-      'getSmartListRulesUsingGET is not implemented.',
-    )
+  async getSmartListRulesUsingGET(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfSmartListRuleType> {
+    return makeResponseOfSmartListRuleType()
   }
 
   async getSmartListAutoSuggestUsingGET(
     ..._arguments: unknown[]
-  ): Promise<never> {
-    throw new NotImplementedException(
-      'getSmartListAutoSuggestUsingGET is not implemented.',
-    )
+  ): Promise<ResponseOfAutoSuggestValue> {
+    return makeResponseOfAutoSuggestValue()
   }
 
-  async addSmartListRuleUsingPOST(..._arguments: unknown[]): Promise<never> {
-    throw new NotImplementedException(
-      'addSmartListRuleUsingPOST is not implemented.',
-    )
+  async addSmartListRuleUsingPOST(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfSmartListResponseWithRules> {
+    return makeResponseOfSmartListResponseWithRules()
   }
 
-  async updateSmartListRuleUsingPOST(..._arguments: unknown[]): Promise<never> {
-    throw new NotImplementedException(
-      'updateSmartListRuleUsingPOST is not implemented.',
-    )
+  async updateSmartListRuleUsingPOST(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfSmartListResponseWithRules> {
+    return makeResponseOfSmartListResponseWithRules()
   }
 
   async updateSmartListFilterLogicUsingPOST(
     ..._arguments: unknown[]
-  ): Promise<never> {
-    throw new NotImplementedException(
-      'updateSmartListFilterLogicUsingPOST is not implemented.',
-    )
+  ): Promise<ResponseOfSmartListResponseWithRules> {
+    return makeResponseOfSmartListResponseWithRules()
   }
 
-  async deleteSmartListRuleUsingPOST(..._arguments: unknown[]): Promise<never> {
-    throw new NotImplementedException(
-      'deleteSmartListRuleUsingPOST is not implemented.',
-    )
+  async deleteSmartListRuleUsingPOST(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfIdResponse> {
+    return makeResponseOfIdResponse()
   }
 
   async removeSmartListRuleConstraintUsingPOST(
     ..._arguments: unknown[]
-  ): Promise<never> {
-    throw new NotImplementedException(
-      'removeSmartListRuleConstraintUsingPOST is not implemented.',
-    )
+  ): Promise<ResponseOfSmartListResponseWithRules> {
+    return makeResponseOfSmartListResponseWithRules()
   }
 
   async reorderSmartListRulesUsingPOST(
     ..._arguments: unknown[]
-  ): Promise<never> {
-    throw new NotImplementedException(
-      'reorderSmartListRulesUsingPOST is not implemented.',
-    )
+  ): Promise<ResponseOfSmartListResponseWithRules> {
+    return makeResponseOfSmartListResponseWithRules()
   }
 
   async deleteAllSmartListRulesUsingPOST(
     ..._arguments: unknown[]
-  ): Promise<never> {
-    throw new NotImplementedException(
-      'deleteAllSmartListRulesUsingPOST is not implemented.',
-    )
+  ): Promise<ResponseOfSmartListResponseWithRules> {
+    return makeResponseOfSmartListResponseWithRules()
   }
 
-  async cloneSmartListUsingPOST(..._arguments: unknown[]): Promise<never> {
-    throw new NotImplementedException(
-      'cloneSmartListUsingPOST is not implemented.',
-    )
+  async cloneSmartListUsingPOST(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfSmartListResponse> {
+    return makeResponseOfSmartListResponse()
   }
 }

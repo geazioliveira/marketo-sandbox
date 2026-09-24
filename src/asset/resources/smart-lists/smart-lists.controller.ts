@@ -1,13 +1,13 @@
 import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common'
 import { SmartListsService } from './smart-lists.service'
 
-import type { CloneSmartListRequest } from '../../../asset-definitions/requests/clone-smart-list-request'
-import type { CreateSmartListRequest } from '../../../asset-definitions/requests/create-smart-list-request'
-import type { ResponseOfAutoSuggestValue } from '../../../asset-definitions/models/response-of-auto-suggest-value'
-import type { ResponseOfIdResponse } from '../../../asset-definitions/responses/response-of-id-response'
-import type { ResponseOfSmartListResponse } from '../../../asset-definitions/responses/response-of-smart-list-response'
-import type { ResponseOfSmartListResponseWithRules } from '../../../asset-definitions/models/response-of-smart-list-response-with-rules'
-import type { ResponseOfSmartListRuleType } from '../../../asset-definitions/models/response-of-smart-list-rule-type'
+import type { CloneSmartListRequest } from '../../asset-definitions/requests/clone-smart-list-request'
+import type { CreateSmartListRequest } from '../../asset-definitions/requests/create-smart-list-request'
+import type { ResponseOfAutoSuggestValue } from '../../asset-definitions/models/response-of-auto-suggest-value'
+import type { ResponseOfIdResponse } from '../../asset-definitions/responses/response-of-id-response'
+import type { ResponseOfSmartListResponse } from '../../asset-definitions/responses/response-of-smart-list-response'
+import type { ResponseOfSmartListResponseWithRules } from '../../asset-definitions/models/response-of-smart-list-response-with-rules'
+import type { ResponseOfSmartListRuleType } from '../../asset-definitions/models/response-of-smart-list-rule-type'
 
 @Controller()
 export class SmartListsController {

@@ -1,14 +1,14 @@
 import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common'
 import { EmailTemplatesService } from './email-templates.service'
 
-import type { CloneEmailTemplateRequest } from '../../../asset-definitions/requests/clone-email-template-request'
-import type { CreateEmailTemplateRequest } from '../../../asset-definitions/requests/create-email-template-request'
-import type { ResponseOfEmailTemplateContentResponse } from '../../../asset-definitions/responses/response-of-email-template-content-response'
-import type { ResponseOfEmailTemplateResponse } from '../../../asset-definitions/responses/response-of-email-template-response'
-import type { ResponseOfEmailTemplateUsedByResponse } from '../../../asset-definitions/responses/response-of-email-template-used-by-response'
-import type { ResponseOfIdResponse } from '../../../asset-definitions/responses/response-of-id-response'
-import type { UpdateEmailTemplateContentRequest } from '../../../asset-definitions/requests/update-email-template-content-request'
-import type { UpdateEmailTemplateMetaDataRequest } from '../../../asset-definitions/requests/update-email-template-meta-data-request'
+import type { CloneEmailTemplateRequest } from '../../asset-definitions/requests/clone-email-template-request'
+import type { CreateEmailTemplateRequest } from '../../asset-definitions/requests/create-email-template-request'
+import type { ResponseOfEmailTemplateContentResponse } from '../../asset-definitions/responses/response-of-email-template-content-response'
+import type { ResponseOfEmailTemplateResponse } from '../../asset-definitions/responses/response-of-email-template-response'
+import type { ResponseOfEmailTemplateUsedByResponse } from '../../asset-definitions/responses/response-of-email-template-used-by-response'
+import type { ResponseOfIdResponse } from '../../asset-definitions/responses/response-of-id-response'
+import type { UpdateEmailTemplateContentRequest } from '../../asset-definitions/requests/update-email-template-content-request'
+import type { UpdateEmailTemplateMetaDataRequest } from '../../asset-definitions/requests/update-email-template-meta-data-request'
 
 @Controller()
 export class EmailTemplatesController {

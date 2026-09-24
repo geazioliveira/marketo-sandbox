@@ -1,22 +1,27 @@
-import { Injectable, NotImplementedException } from '@nestjs/common'
+import { Injectable } from '@nestjs/common'
+import { makeResponseOfIdResponse } from '../../asset-mocks/factories/response-of-id-response'
+import { makeResponseOfTokenResponse } from '../../asset-mocks/factories/response-of-token-response'
+
+import type { ResponseOfIdResponse } from '../../asset-definitions/responses/response-of-id-response'
+import type { ResponseOfTokenResponse } from '../../asset-definitions/responses/response-of-token-response'
 
 @Injectable()
 export class TokensService {
-  async getTokensByFolderIdUsingGET(..._arguments: unknown[]): Promise<never> {
-    throw new NotImplementedException(
-      'getTokensByFolderIdUsingGET is not implemented.',
-    )
+  async getTokensByFolderIdUsingGET(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfTokenResponse> {
+    return makeResponseOfTokenResponse()
   }
 
-  async addTokenTOFolderUsingPOST(..._arguments: unknown[]): Promise<never> {
-    throw new NotImplementedException(
-      'addTokenTOFolderUsingPOST is not implemented.',
-    )
+  async addTokenTOFolderUsingPOST(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfTokenResponse> {
+    return makeResponseOfTokenResponse()
   }
 
-  async deleteTokenByNameUsingPOST(..._arguments: unknown[]): Promise<never> {
-    throw new NotImplementedException(
-      'deleteTokenByNameUsingPOST is not implemented.',
-    )
+  async deleteTokenByNameUsingPOST(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfIdResponse> {
+    return makeResponseOfIdResponse()
   }
 }

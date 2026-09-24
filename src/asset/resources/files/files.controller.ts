@@ -1,8 +1,8 @@
 import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common'
 import { FilesService } from './files.service'
 
-import type { CreateFileRequest } from '../../../asset-definitions/requests/create-file-request'
-import type { ResponseOfFileResponse } from '../../../asset-definitions/responses/response-of-file-response'
+import type { CreateFileRequest } from '../../asset-definitions/requests/create-file-request'
+import type { ResponseOfFileResponse } from '../../asset-definitions/responses/response-of-file-response'
 
 @Controller()
 export class FilesController {

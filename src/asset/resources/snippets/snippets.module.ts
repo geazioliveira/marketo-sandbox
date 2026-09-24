@@ -5,5 +5,6 @@ import { SnippetsService } from './snippets.service'
 @Module({
   controllers: [SnippetsController],
   providers: [SnippetsService],
+  exports: [SnippetsService],
 })
 export class SnippetsModule {}

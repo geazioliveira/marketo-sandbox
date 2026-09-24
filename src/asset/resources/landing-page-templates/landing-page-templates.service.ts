@@ -1,90 +1,83 @@
-import { Injectable, NotImplementedException } from '@nestjs/common'
+import { Injectable } from '@nestjs/common'
+import { makeResponseOfIdResponse } from '../../asset-mocks/factories/response-of-id-response'
+import { makeResponseOfLpTemplateGetContentResponse } from '../../asset-mocks/factories/response-of-lp-template-get-content-response'
+import { makeResponseOfLpTemplateResponse } from '../../asset-mocks/factories/response-of-lp-template-response'
+
+import type { ResponseOfIdResponse } from '../../asset-definitions/responses/response-of-id-response'
+import type { ResponseOfLpTemplateGetContentResponse } from '../../asset-definitions/responses/response-of-lp-template-get-content-response'
+import type { ResponseOfLpTemplateResponse } from '../../asset-definitions/responses/response-of-lp-template-response'
 
 @Injectable()
 export class LandingPageTemplatesService {
   async getLandingPageTemplateByNameUsingGET(
     ..._arguments: unknown[]
-  ): Promise<never> {
-    throw new NotImplementedException(
-      'getLandingPageTemplateByNameUsingGET is not implemented.',
-    )
+  ): Promise<ResponseOfLpTemplateResponse> {
+    return makeResponseOfLpTemplateResponse()
   }
 
   async getLandingPageTemplateByIdUsingGET(
     ..._arguments: unknown[]
-  ): Promise<never> {
-    throw new NotImplementedException(
-      'getLandingPageTemplateByIdUsingGET is not implemented.',
-    )
+  ): Promise<ResponseOfLpTemplateResponse> {
+    return makeResponseOfLpTemplateResponse()
   }
 
-  async updateLpTemplateUsingPOST(..._arguments: unknown[]): Promise<never> {
-    throw new NotImplementedException(
-      'updateLpTemplateUsingPOST is not implemented.',
-    )
+  async updateLpTemplateUsingPOST(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfLpTemplateResponse> {
+    return makeResponseOfLpTemplateResponse()
   }
 
   async approveLandingPageTemplateUsingPOST(
     ..._arguments: unknown[]
-  ): Promise<never> {
-    throw new NotImplementedException(
-      'approveLandingPageTemplateUsingPOST is not implemented.',
-    )
+  ): Promise<ResponseOfLpTemplateResponse> {
+    return makeResponseOfLpTemplateResponse()
   }
 
-  async cloneLpTemplateUsingPOST(..._arguments: unknown[]): Promise<never> {
-    throw new NotImplementedException(
-      'cloneLpTemplateUsingPOST is not implemented.',
-    )
+  async cloneLpTemplateUsingPOST(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfLpTemplateResponse> {
+    return makeResponseOfLpTemplateResponse()
   }
 
   async getLandingPageTemplateContentUsingGET(
     ..._arguments: unknown[]
-  ): Promise<never> {
-    throw new NotImplementedException(
-      'getLandingPageTemplateContentUsingGET is not implemented.',
-    )
+  ): Promise<ResponseOfLpTemplateGetContentResponse> {
+    return makeResponseOfLpTemplateGetContentResponse()
   }
 
   async updateLandingPageTemplateContentUsingPOST(
     ..._arguments: unknown[]
-  ): Promise<never> {
-    throw new NotImplementedException(
-      'updateLandingPageTemplateContentUsingPOST is not implemented.',
-    )
+  ): Promise<ResponseOfIdResponse> {
+    return makeResponseOfIdResponse()
   }
 
-  async deleteLpTemplateUsingPOST(..._arguments: unknown[]): Promise<never> {
-    throw new NotImplementedException(
-      'deleteLpTemplateUsingPOST is not implemented.',
-    )
+  async deleteLpTemplateUsingPOST(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfIdResponse> {
+    return makeResponseOfIdResponse()
   }
 
-  async discardDraftUsingPOST_2(..._arguments: unknown[]): Promise<never> {
-    throw new NotImplementedException(
-      'discardDraftUsingPOST_2 is not implemented.',
-    )
+  async discardDraftUsingPOST_2(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfIdResponse> {
+    return makeResponseOfIdResponse()
   }
 
   async unapproveLandingPageTemplateUsingPOST(
     ..._arguments: unknown[]
-  ): Promise<never> {
-    throw new NotImplementedException(
-      'unapproveLandingPageTemplateUsingPOST is not implemented.',
-    )
+  ): Promise<ResponseOfLpTemplateResponse> {
+    return makeResponseOfLpTemplateResponse()
   }
 
   async getLandingPageTemplatesUsingGET(
     ..._arguments: unknown[]
-  ): Promise<never> {
-    throw new NotImplementedException(
-      'getLandingPageTemplatesUsingGET is not implemented.',
-    )
+  ): Promise<ResponseOfLpTemplateResponse> {
+    return makeResponseOfLpTemplateResponse()
   }
 
-  async createLpTemplateUsingPOST(..._arguments: unknown[]): Promise<never> {
-    throw new NotImplementedException(
-      'createLpTemplateUsingPOST is not implemented.',
-    )
+  async createLpTemplateUsingPOST(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfLpTemplateResponse> {
+    return makeResponseOfLpTemplateResponse()
   }
 }

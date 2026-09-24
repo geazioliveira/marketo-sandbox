@@ -1,22 +1,31 @@
-import { Injectable, NotImplementedException } from '@nestjs/common'
+import { Injectable } from '@nestjs/common'
+import { makeResponseOfFileResponse } from '../../asset-mocks/factories/response-of-file-response'
+
+import type { ResponseOfFileResponse } from '../../asset-definitions/responses/response-of-file-response'
 
 @Injectable()
 export class FilesService {
-  async getFileByNameUsingGET(..._arguments: unknown[]): Promise<never> {
-    throw new NotImplementedException(
-      'getFileByNameUsingGET is not implemented.',
-    )
+  async getFileByNameUsingGET(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfFileResponse> {
+    return makeResponseOfFileResponse()
   }
 
-  async getFileByIdUsingGET(..._arguments: unknown[]): Promise<never> {
-    throw new NotImplementedException('getFileByIdUsingGET is not implemented.')
+  async getFileByIdUsingGET(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfFileResponse> {
+    return makeResponseOfFileResponse()
   }
 
-  async getFilesUsingGET(..._arguments: unknown[]): Promise<never> {
-    throw new NotImplementedException('getFilesUsingGET is not implemented.')
+  async getFilesUsingGET(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfFileResponse> {
+    return makeResponseOfFileResponse()
   }
 
-  async createFileUsingPOST(..._arguments: unknown[]): Promise<never> {
-    throw new NotImplementedException('createFileUsingPOST is not implemented.')
+  async createFileUsingPOST(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfFileResponse> {
+    return makeResponseOfFileResponse()
   }
 }

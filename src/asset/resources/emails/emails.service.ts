@@ -1,160 +1,181 @@
-import { Injectable, NotImplementedException } from '@nestjs/common'
+import { Injectable } from '@nestjs/common'
+import { makeResponseOfEmailCCFieldsResponse } from '../../asset-mocks/factories/response-of-email-cc-fields-response'
+import { makeResponseOfEmailContentResponse } from '../../asset-mocks/factories/response-of-email-content-response'
+import { makeResponseOfEmailDynamicContentResponse } from '../../asset-mocks/factories/response-of-email-dynamic-content-response'
+import { makeResponseOfEmailModuleResponse } from '../../asset-mocks/factories/response-of-email-module-response'
+import { makeResponseOfEmailResponse } from '../../asset-mocks/factories/response-of-email-response'
+import { makeResponseOfEmailVariableResponse } from '../../asset-mocks/factories/response-of-email-variable-response'
+import { makeResponseOfGetEmailFullContentResponse } from '../../asset-mocks/factories/response-of-get-email-full-content-response'
+import { makeResponseOfIdResponse } from '../../asset-mocks/factories/response-of-id-response'
+import { makeResponseOfSendSampleResponse } from '../../asset-mocks/factories/response-of-send-sample-response'
+import { makeResponseOfUpdateEmailFullContentResponse } from '../../asset-mocks/factories/response-of-update-email-full-content-response'
+
+import type { ResponseOfEmailCCFieldsResponse } from '../../asset-definitions/responses/response-of-email-cc-fields-response'
+import type { ResponseOfEmailContentResponse } from '../../asset-definitions/responses/response-of-email-content-response'
+import type { ResponseOfEmailDynamicContentResponse } from '../../asset-definitions/responses/response-of-email-dynamic-content-response'
+import type { ResponseOfEmailModuleResponse } from '../../asset-definitions/responses/response-of-email-module-response'
+import type { ResponseOfEmailResponse } from '../../asset-definitions/responses/response-of-email-response'
+import type { ResponseOfEmailVariableResponse } from '../../asset-definitions/responses/response-of-email-variable-response'
+import type { ResponseOfGetEmailFullContentResponse } from '../../asset-definitions/responses/response-of-get-email-full-content-response'
+import type { ResponseOfIdResponse } from '../../asset-definitions/responses/response-of-id-response'
+import type { ResponseOfSendSampleResponse } from '../../asset-definitions/responses/response-of-send-sample-response'
+import type { ResponseOfUpdateEmailFullContentResponse } from '../../asset-definitions/responses/response-of-update-email-full-content-response'
 
 @Injectable()
 export class EmailsService {
-  async getEmailByNameUsingGET(..._arguments: unknown[]): Promise<never> {
-    throw new NotImplementedException(
-      'getEmailByNameUsingGET is not implemented.',
-    )
+  async getEmailByNameUsingGET(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfEmailResponse> {
+    return makeResponseOfEmailResponse()
   }
 
-  async getEmailByIdUsingGET(..._arguments: unknown[]): Promise<never> {
-    throw new NotImplementedException(
-      'getEmailByIdUsingGET is not implemented.',
-    )
+  async getEmailByIdUsingGET(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfEmailResponse> {
+    return makeResponseOfEmailResponse()
   }
 
-  async updateEmailUsingPOST(..._arguments: unknown[]): Promise<never> {
-    throw new NotImplementedException(
-      'updateEmailUsingPOST is not implemented.',
-    )
+  async updateEmailUsingPOST(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfEmailResponse> {
+    return makeResponseOfEmailResponse()
   }
 
-  async approveDraftUsingPOST(..._arguments: unknown[]): Promise<never> {
-    throw new NotImplementedException(
-      'approveDraftUsingPOST is not implemented.',
-    )
+  async approveDraftUsingPOST(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfIdResponse> {
+    return makeResponseOfIdResponse()
   }
 
-  async cloneEmailUsingPOST(..._arguments: unknown[]): Promise<never> {
-    throw new NotImplementedException('cloneEmailUsingPOST is not implemented.')
+  async cloneEmailUsingPOST(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfEmailResponse> {
+    return makeResponseOfEmailResponse()
   }
 
-  async getEmailContentByIdUsingGET(..._arguments: unknown[]): Promise<never> {
-    throw new NotImplementedException(
-      'getEmailContentByIdUsingGET is not implemented.',
-    )
+  async getEmailContentByIdUsingGET(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfEmailContentResponse> {
+    return makeResponseOfEmailContentResponse()
   }
 
-  async updateEmailContentUsingPOST(..._arguments: unknown[]): Promise<never> {
-    throw new NotImplementedException(
-      'updateEmailContentUsingPOST is not implemented.',
-    )
+  async updateEmailContentUsingPOST(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfIdResponse> {
+    return makeResponseOfIdResponse()
   }
 
-  async rearrangeModulesUsingPOST(..._arguments: unknown[]): Promise<never> {
-    throw new NotImplementedException(
-      'rearrangeModulesUsingPOST is not implemented.',
-    )
+  async rearrangeModulesUsingPOST(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfEmailModuleResponse> {
+    return makeResponseOfEmailModuleResponse()
   }
 
   async updateEmailComponentContentUsingPOST(
     ..._arguments: unknown[]
-  ): Promise<never> {
-    throw new NotImplementedException(
-      'updateEmailComponentContentUsingPOST is not implemented.',
-    )
+  ): Promise<ResponseOfIdResponse> {
+    return makeResponseOfIdResponse()
   }
 
-  async addModuleUsingPOST(..._arguments: unknown[]): Promise<never> {
-    throw new NotImplementedException('addModuleUsingPOST is not implemented.')
+  async addModuleUsingPOST(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfEmailModuleResponse> {
+    return makeResponseOfEmailModuleResponse()
   }
 
-  async deleteModuleUsingPOST(..._arguments: unknown[]): Promise<never> {
-    throw new NotImplementedException(
-      'deleteModuleUsingPOST is not implemented.',
-    )
+  async deleteModuleUsingPOST(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfEmailModuleResponse> {
+    return makeResponseOfEmailModuleResponse()
   }
 
-  async duplicateModuleUsingPOST(..._arguments: unknown[]): Promise<never> {
-    throw new NotImplementedException(
-      'duplicateModuleUsingPOST is not implemented.',
-    )
+  async duplicateModuleUsingPOST(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfEmailModuleResponse> {
+    return makeResponseOfEmailModuleResponse()
   }
 
-  async renameUsingPOST(..._arguments: unknown[]): Promise<never> {
-    throw new NotImplementedException('renameUsingPOST is not implemented.')
+  async renameUsingPOST(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfEmailModuleResponse> {
+    return makeResponseOfEmailModuleResponse()
   }
 
-  async deleteEmailUsingPOST(..._arguments: unknown[]): Promise<never> {
-    throw new NotImplementedException(
-      'deleteEmailUsingPOST is not implemented.',
-    )
+  async deleteEmailUsingPOST(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfIdResponse> {
+    return makeResponseOfIdResponse()
   }
 
-  async discardDraftUsingPOST(..._arguments: unknown[]): Promise<never> {
-    throw new NotImplementedException(
-      'discardDraftUsingPOST is not implemented.',
-    )
+  async discardDraftUsingPOST(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfIdResponse> {
+    return makeResponseOfIdResponse()
   }
 
   async getEmailDynamicContentUsingGET(
     ..._arguments: unknown[]
-  ): Promise<never> {
-    throw new NotImplementedException(
-      'getEmailDynamicContentUsingGET is not implemented.',
-    )
+  ): Promise<ResponseOfEmailDynamicContentResponse> {
+    return makeResponseOfEmailDynamicContentResponse()
   }
 
   async updateEmailDynamicContentUsingPOST(
     ..._arguments: unknown[]
-  ): Promise<never> {
-    throw new NotImplementedException(
-      'updateEmailDynamicContentUsingPOST is not implemented.',
-    )
+  ): Promise<ResponseOfIdResponse> {
+    return makeResponseOfIdResponse()
   }
 
-  async sendSampleEmailUsingPOST(..._arguments: unknown[]): Promise<never> {
-    throw new NotImplementedException(
-      'sendSampleEmailUsingPOST is not implemented.',
-    )
+  async sendSampleEmailUsingPOST(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfSendSampleResponse> {
+    return makeResponseOfSendSampleResponse()
   }
 
-  async unapproveDraftUsingPOST(..._arguments: unknown[]): Promise<never> {
-    throw new NotImplementedException(
-      'unapproveDraftUsingPOST is not implemented.',
-    )
+  async unapproveDraftUsingPOST(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfIdResponse> {
+    return makeResponseOfIdResponse()
   }
 
-  async updateVariableUsingPOST(..._arguments: unknown[]): Promise<never> {
-    throw new NotImplementedException(
-      'updateVariableUsingPOST is not implemented.',
-    )
+  async updateVariableUsingPOST(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfEmailVariableResponse> {
+    return makeResponseOfEmailVariableResponse()
   }
 
-  async getEmailVariablesUsingGET(..._arguments: unknown[]): Promise<never> {
-    throw new NotImplementedException(
-      'getEmailVariablesUsingGET is not implemented.',
-    )
+  async getEmailVariablesUsingGET(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfEmailVariableResponse> {
+    return makeResponseOfEmailVariableResponse()
   }
 
-  async getEmailCCFieldsUsingGET(..._arguments: unknown[]): Promise<never> {
-    throw new NotImplementedException(
-      'getEmailCCFieldsUsingGET is not implemented.',
-    )
+  async getEmailCCFieldsUsingGET(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfEmailCCFieldsResponse> {
+    return makeResponseOfEmailCCFieldsResponse()
   }
 
-  async getEmailUsingGET(..._arguments: unknown[]): Promise<never> {
-    throw new NotImplementedException('getEmailUsingGET is not implemented.')
+  async getEmailUsingGET(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfEmailResponse> {
+    return makeResponseOfEmailResponse()
   }
 
-  async createEmailUsingPOST(..._arguments: unknown[]): Promise<never> {
-    throw new NotImplementedException(
-      'createEmailUsingPOST is not implemented.',
-    )
+  async createEmailUsingPOST(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfEmailResponse> {
+    return makeResponseOfEmailResponse()
   }
 
-  async getEmailFullContentUsingGET(..._arguments: unknown[]): Promise<never> {
-    throw new NotImplementedException(
-      'getEmailFullContentUsingGET is not implemented.',
-    )
+  async getEmailFullContentUsingGET(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfGetEmailFullContentResponse> {
+    return makeResponseOfGetEmailFullContentResponse()
   }
 
   async createEmailFullContentUsingPOST(
     ..._arguments: unknown[]
-  ): Promise<never> {
-    throw new NotImplementedException(
-      'createEmailFullContentUsingPOST is not implemented.',
-    )
+  ): Promise<ResponseOfUpdateEmailFullContentResponse> {
+    return makeResponseOfUpdateEmailFullContentResponse()
   }
 }

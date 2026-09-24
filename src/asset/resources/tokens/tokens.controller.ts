@@ -1,10 +1,10 @@
 import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common'
 import { TokensService } from './tokens.service'
 
-import type { CreateTokenRequest } from '../../../asset-definitions/requests/create-token-request'
-import type { DeleteTokenRequest } from '../../../asset-definitions/requests/delete-token-request'
-import type { ResponseOfIdResponse } from '../../../asset-definitions/responses/response-of-id-response'
-import type { ResponseOfTokenResponse } from '../../../asset-definitions/responses/response-of-token-response'
+import type { CreateTokenRequest } from '../../asset-definitions/requests/create-token-request'
+import type { DeleteTokenRequest } from '../../asset-definitions/requests/delete-token-request'
+import type { ResponseOfIdResponse } from '../../asset-definitions/responses/response-of-id-response'
+import type { ResponseOfTokenResponse } from '../../asset-definitions/responses/response-of-token-response'
 
 @Controller()
 export class TokensController {

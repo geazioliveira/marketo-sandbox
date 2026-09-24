@@ -1,84 +1,91 @@
-import { Injectable, NotImplementedException } from '@nestjs/common'
+import { Injectable } from '@nestjs/common'
+import { makeModelResponse } from '../../asset-mocks/factories/model-response'
+import { makeResponseOfIdResponse } from '../../asset-mocks/factories/response-of-id-response'
+import { makeResponseOfSnippetContentResponse } from '../../asset-mocks/factories/response-of-snippet-content-response'
+import { makeResponseOfSnippetResponse } from '../../asset-mocks/factories/response-of-snippet-response'
+
+import type { ModelResponse } from '../../asset-definitions/responses/model-response'
+import type { ResponseOfIdResponse } from '../../asset-definitions/responses/response-of-id-response'
+import type { ResponseOfSnippetContentResponse } from '../../asset-definitions/responses/response-of-snippet-content-response'
+import type { ResponseOfSnippetResponse } from '../../asset-definitions/responses/response-of-snippet-response'
 
 @Injectable()
 export class SnippetsService {
-  async getSnippetByIdUsingGET(..._arguments: unknown[]): Promise<never> {
-    throw new NotImplementedException(
-      'getSnippetByIdUsingGET is not implemented.',
-    )
+  async getSnippetByIdUsingGET(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfSnippetResponse> {
+    return makeResponseOfSnippetResponse()
   }
 
-  async updateSnippetUsingPOST(..._arguments: unknown[]): Promise<never> {
-    throw new NotImplementedException(
-      'updateSnippetUsingPOST is not implemented.',
-    )
+  async updateSnippetUsingPOST(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfSnippetResponse> {
+    return makeResponseOfSnippetResponse()
   }
 
-  async approveSnippetUsingPOST(..._arguments: unknown[]): Promise<never> {
-    throw new NotImplementedException(
-      'approveSnippetUsingPOST is not implemented.',
-    )
+  async approveSnippetUsingPOST(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfSnippetResponse> {
+    return makeResponseOfSnippetResponse()
   }
 
-  async cloneSnippetUsingPOST(..._arguments: unknown[]): Promise<never> {
-    throw new NotImplementedException(
-      'cloneSnippetUsingPOST is not implemented.',
-    )
+  async cloneSnippetUsingPOST(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfSnippetResponse> {
+    return makeResponseOfSnippetResponse()
   }
 
   async getSnippetContentByIdUsingGET(
     ..._arguments: unknown[]
-  ): Promise<never> {
-    throw new NotImplementedException(
-      'getSnippetContentByIdUsingGET is not implemented.',
-    )
+  ): Promise<ResponseOfSnippetContentResponse> {
+    return makeResponseOfSnippetContentResponse()
   }
 
-  async updateContentUsingPOST_1(..._arguments: unknown[]): Promise<never> {
-    throw new NotImplementedException(
-      'updateContentUsingPOST_1 is not implemented.',
-    )
+  async updateContentUsingPOST_1(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfIdResponse> {
+    return makeResponseOfIdResponse()
   }
 
-  async deleteSnippetUsingPOST(..._arguments: unknown[]): Promise<never> {
-    throw new NotImplementedException(
-      'deleteSnippetUsingPOST is not implemented.',
-    )
+  async deleteSnippetUsingPOST(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfIdResponse> {
+    return makeResponseOfIdResponse()
   }
 
-  async discardSnippetUsingPOST(..._arguments: unknown[]): Promise<never> {
-    throw new NotImplementedException(
-      'discardSnippetUsingPOST is not implemented.',
-    )
+  async discardSnippetUsingPOST(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfIdResponse> {
+    return makeResponseOfIdResponse()
   }
 
-  async getDynamicContentUsingGET(..._arguments: unknown[]): Promise<never> {
-    throw new NotImplementedException(
-      'getDynamicContentUsingGET is not implemented.',
-    )
+  async getDynamicContentUsingGET(
+    ..._arguments: unknown[]
+  ): Promise<ModelResponse> {
+    return makeModelResponse()
   }
 
   async updateDynamicContentUsingPOST(
     ..._arguments: unknown[]
-  ): Promise<never> {
-    throw new NotImplementedException(
-      'updateDynamicContentUsingPOST is not implemented.',
-    )
+  ): Promise<ResponseOfIdResponse> {
+    return makeResponseOfIdResponse()
   }
 
-  async unapproveSnippetUsingPOST(..._arguments: unknown[]): Promise<never> {
-    throw new NotImplementedException(
-      'unapproveSnippetUsingPOST is not implemented.',
-    )
+  async unapproveSnippetUsingPOST(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfSnippetResponse> {
+    return makeResponseOfSnippetResponse()
   }
 
-  async getSnippetUsingGET(..._arguments: unknown[]): Promise<never> {
-    throw new NotImplementedException('getSnippetUsingGET is not implemented.')
+  async getSnippetUsingGET(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfSnippetResponse> {
+    return makeResponseOfSnippetResponse()
   }
 
-  async createSnippetUsingPOST(..._arguments: unknown[]): Promise<never> {
-    throw new NotImplementedException(
-      'createSnippetUsingPOST is not implemented.',
-    )
+  async createSnippetUsingPOST(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfSnippetResponse> {
+    return makeResponseOfSnippetResponse()
   }
 }

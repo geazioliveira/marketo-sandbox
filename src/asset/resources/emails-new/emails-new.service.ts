@@ -1,74 +1,81 @@
-import { Injectable, NotImplementedException } from '@nestjs/common'
+import { Injectable } from '@nestjs/common'
+import { makeBulkUsedByResponse } from '../../asset-mocks/factories/bulk-used-by-response'
+import { makeDeleteResponse } from '../../asset-mocks/factories/delete-response'
+import { makeEmailFilterResponse } from '../../asset-mocks/factories/email-filter-response'
+import { makeEmailNewResponse } from '../../asset-mocks/factories/email-new-response'
+import { makeUsedByResponse } from '../../asset-mocks/factories/used-by-response'
+
+import type { BulkUsedByResponse } from '../../asset-definitions/responses/bulk-used-by-response'
+import type { DeleteResponse } from '../../asset-definitions/responses/delete-response'
+import type { EmailFilterResponse } from '../../asset-definitions/responses/email-filter-response'
+import type { EmailNewResponse } from '../../asset-definitions/responses/email-new-response'
+import type { UsedByResponse } from '../../asset-definitions/responses/used-by-response'
 
 @Injectable()
 export class EmailsNewService {
-  async createContentUsingPOST_email(..._arguments: unknown[]): Promise<never> {
-    throw new NotImplementedException(
-      'createContentUsingPOST_email is not implemented.',
-    )
+  async createContentUsingPOST_email(
+    ..._arguments: unknown[]
+  ): Promise<EmailNewResponse> {
+    return makeEmailNewResponse()
   }
 
-  async cloneContentUsingPOST_email(..._arguments: unknown[]): Promise<never> {
-    throw new NotImplementedException(
-      'cloneContentUsingPOST_email is not implemented.',
-    )
+  async cloneContentUsingPOST_email(
+    ..._arguments: unknown[]
+  ): Promise<EmailNewResponse> {
+    return makeEmailNewResponse()
   }
 
-  async filterContentUsingGET_email(..._arguments: unknown[]): Promise<never> {
-    throw new NotImplementedException(
-      'filterContentUsingGET_email is not implemented.',
-    )
+  async filterContentUsingGET_email(
+    ..._arguments: unknown[]
+  ): Promise<EmailFilterResponse> {
+    return makeEmailFilterResponse()
   }
 
   async stateTransitionUsingPOST_email(
     ..._arguments: unknown[]
-  ): Promise<never> {
-    throw new NotImplementedException(
-      'stateTransitionUsingPOST_email is not implemented.',
-    )
+  ): Promise<EmailNewResponse> {
+    return makeEmailNewResponse()
   }
 
   async getContentUsedByUsingPOST_email(
     ..._arguments: unknown[]
-  ): Promise<never> {
-    throw new NotImplementedException(
-      'getContentUsedByUsingPOST_email is not implemented.',
-    )
+  ): Promise<UsedByResponse> {
+    return makeUsedByResponse()
   }
 
-  async getContentUsingGET_email(..._arguments: unknown[]): Promise<never> {
-    throw new NotImplementedException(
-      'getContentUsingGET_email is not implemented.',
-    )
+  async getContentUsingGET_email(
+    ..._arguments: unknown[]
+  ): Promise<EmailNewResponse> {
+    return makeEmailNewResponse()
   }
 
-  async deleteContentUsingPOST_email(..._arguments: unknown[]): Promise<never> {
-    throw new NotImplementedException(
-      'deleteContentUsingPOST_email is not implemented.',
-    )
+  async deleteContentUsingPOST_email(
+    ..._arguments: unknown[]
+  ): Promise<DeleteResponse> {
+    return makeDeleteResponse()
   }
 
-  async updateContentUsingPOST_email(..._arguments: unknown[]): Promise<never> {
-    throw new NotImplementedException(
-      'updateContentUsingPOST_email is not implemented.',
-    )
+  async updateContentUsingPOST_email(
+    ..._arguments: unknown[]
+  ): Promise<EmailNewResponse> {
+    return makeEmailNewResponse()
   }
 
-  async bulkGetUsingPOST_email(..._arguments: unknown[]): Promise<never> {
-    throw new NotImplementedException(
-      'bulkGetUsingPOST_email is not implemented.',
-    )
+  async bulkGetUsingPOST_email(
+    ..._arguments: unknown[]
+  ): Promise<EmailNewResponse> {
+    return makeEmailNewResponse()
   }
 
-  async bulkDeleteUsingPOST_email(..._arguments: unknown[]): Promise<never> {
-    throw new NotImplementedException(
-      'bulkDeleteUsingPOST_email is not implemented.',
-    )
+  async bulkDeleteUsingPOST_email(
+    ..._arguments: unknown[]
+  ): Promise<DeleteResponse> {
+    return makeDeleteResponse()
   }
 
-  async bulkUsedByUsingPOST_email(..._arguments: unknown[]): Promise<never> {
-    throw new NotImplementedException(
-      'bulkUsedByUsingPOST_email is not implemented.',
-    )
+  async bulkUsedByUsingPOST_email(
+    ..._arguments: unknown[]
+  ): Promise<BulkUsedByResponse> {
+    return makeBulkUsedByResponse()
   }
 }

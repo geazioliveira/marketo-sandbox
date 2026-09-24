@@ -1,72 +1,79 @@
-import { Injectable, NotImplementedException } from '@nestjs/common'
+import { Injectable } from '@nestjs/common'
+import { makeResponseOfBrowseAllPrograms } from '../../asset-mocks/factories/response-of-browse-all-programs'
+import { makeResponseOfIdResponse } from '../../asset-mocks/factories/response-of-id-response'
+import { makeResponseOfProgramResponse } from '../../asset-mocks/factories/response-of-program-response'
+import { makeResponseOfSmartListResponseWithRules } from '../../asset-mocks/factories/response-of-smart-list-response-with-rules'
+
+import type { ResponseOfBrowseAllPrograms } from '../../asset-definitions/models/response-of-browse-all-programs'
+import type { ResponseOfIdResponse } from '../../asset-definitions/responses/response-of-id-response'
+import type { ResponseOfProgramResponse } from '../../asset-definitions/responses/response-of-program-response'
+import type { ResponseOfSmartListResponseWithRules } from '../../asset-definitions/models/response-of-smart-list-response-with-rules'
 
 @Injectable()
 export class ProgramsService {
-  async getProgramByNameUsingGET(..._arguments: unknown[]): Promise<never> {
-    throw new NotImplementedException(
-      'getProgramByNameUsingGET is not implemented.',
-    )
+  async getProgramByNameUsingGET(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfProgramResponse> {
+    return makeResponseOfProgramResponse()
   }
 
-  async getProgramListByTagUsingGET(..._arguments: unknown[]): Promise<never> {
-    throw new NotImplementedException(
-      'getProgramListByTagUsingGET is not implemented.',
-    )
+  async getProgramListByTagUsingGET(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfProgramResponse> {
+    return makeResponseOfProgramResponse()
   }
 
-  async getProgramByIdUsingGET(..._arguments: unknown[]): Promise<never> {
-    throw new NotImplementedException(
-      'getProgramByIdUsingGET is not implemented.',
-    )
+  async getProgramByIdUsingGET(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfProgramResponse> {
+    return makeResponseOfProgramResponse()
   }
 
-  async updateProgramUsingPOST(..._arguments: unknown[]): Promise<never> {
-    throw new NotImplementedException(
-      'updateProgramUsingPOST is not implemented.',
-    )
+  async updateProgramUsingPOST(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfProgramResponse> {
+    return makeResponseOfProgramResponse()
   }
 
   async getSmartListByProgramIdUsingGET(
     ..._arguments: unknown[]
-  ): Promise<never> {
-    throw new NotImplementedException(
-      'getSmartListByProgramIdUsingGET is not implemented.',
-    )
+  ): Promise<ResponseOfSmartListResponseWithRules> {
+    return makeResponseOfSmartListResponseWithRules()
   }
 
-  async approveProgramUsingPOST(..._arguments: unknown[]): Promise<never> {
-    throw new NotImplementedException(
-      'approveProgramUsingPOST is not implemented.',
-    )
+  async approveProgramUsingPOST(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfIdResponse> {
+    return makeResponseOfIdResponse()
   }
 
-  async cloneProgramUsingPOST(..._arguments: unknown[]): Promise<never> {
-    throw new NotImplementedException(
-      'cloneProgramUsingPOST is not implemented.',
-    )
+  async cloneProgramUsingPOST(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfProgramResponse> {
+    return makeResponseOfProgramResponse()
   }
 
-  async deleteProgramUsingPOST(..._arguments: unknown[]): Promise<never> {
-    throw new NotImplementedException(
-      'deleteProgramUsingPOST is not implemented.',
-    )
+  async deleteProgramUsingPOST(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfIdResponse> {
+    return makeResponseOfIdResponse()
   }
 
-  async unapproveProgramUsingPOST(..._arguments: unknown[]): Promise<never> {
-    throw new NotImplementedException(
-      'unapproveProgramUsingPOST is not implemented.',
-    )
+  async unapproveProgramUsingPOST(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfIdResponse> {
+    return makeResponseOfIdResponse()
   }
 
-  async browseProgramsUsingGET(..._arguments: unknown[]): Promise<never> {
-    throw new NotImplementedException(
-      'browseProgramsUsingGET is not implemented.',
-    )
+  async browseProgramsUsingGET(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfBrowseAllPrograms> {
+    return makeResponseOfBrowseAllPrograms()
   }
 
-  async createProgramUsingPOST(..._arguments: unknown[]): Promise<never> {
-    throw new NotImplementedException(
-      'createProgramUsingPOST is not implemented.',
-    )
+  async createProgramUsingPOST(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfProgramResponse> {
+    return makeResponseOfProgramResponse()
   }
 }

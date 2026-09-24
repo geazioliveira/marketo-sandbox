@@ -5,5 +5,6 @@ import { SmartListsService } from './smart-lists.service'
 @Module({
   controllers: [SmartListsController],
   providers: [SmartListsService],
+  exports: [SmartListsService],
 })
 export class SmartListsModule {}

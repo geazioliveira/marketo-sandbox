@@ -1,92 +1,91 @@
-import { Injectable, NotImplementedException } from '@nestjs/common'
+import { Injectable } from '@nestjs/common'
+import { makeResponseOfGetLandingPageFullContentResponse } from '../../asset-mocks/factories/response-of-get-landing-page-full-content-response'
+import { makeResponseOfIdResponse } from '../../asset-mocks/factories/response-of-id-response'
+import { makeResponseOfLandingPageResponse } from '../../asset-mocks/factories/response-of-landing-page-response'
+import { makeResponseOfLandingPageVariableResponse } from '../../asset-mocks/factories/response-of-landing-page-variable-response'
+
+import type { ResponseOfGetLandingPageFullContentResponse } from '../../asset-definitions/responses/response-of-get-landing-page-full-content-response'
+import type { ResponseOfIdResponse } from '../../asset-definitions/responses/response-of-id-response'
+import type { ResponseOfLandingPageResponse } from '../../asset-definitions/responses/response-of-landing-page-response'
+import type { ResponseOfLandingPageVariableResponse } from '../../asset-definitions/responses/response-of-landing-page-variable-response'
 
 @Injectable()
 export class LandingPagesService {
-  async getLandingPageByNameUsingGET(..._arguments: unknown[]): Promise<never> {
-    throw new NotImplementedException(
-      'getLandingPageByNameUsingGET is not implemented.',
-    )
+  async getLandingPageByNameUsingGET(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfLandingPageResponse> {
+    return makeResponseOfLandingPageResponse()
   }
 
-  async getLandingPageByIdUsingGET(..._arguments: unknown[]): Promise<never> {
-    throw new NotImplementedException(
-      'getLandingPageByIdUsingGET is not implemented.',
-    )
+  async getLandingPageByIdUsingGET(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfLandingPageResponse> {
+    return makeResponseOfLandingPageResponse()
   }
 
-  async updateLandingPageUsingPOST(..._arguments: unknown[]): Promise<never> {
-    throw new NotImplementedException(
-      'updateLandingPageUsingPOST is not implemented.',
-    )
+  async updateLandingPageUsingPOST(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfLandingPageResponse> {
+    return makeResponseOfLandingPageResponse()
   }
 
-  async approveLandingPageUsingPOST(..._arguments: unknown[]): Promise<never> {
-    throw new NotImplementedException(
-      'approveLandingPageUsingPOST is not implemented.',
-    )
+  async approveLandingPageUsingPOST(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfIdResponse> {
+    return makeResponseOfIdResponse()
   }
 
-  async cloneLandingPageUsingPOST(..._arguments: unknown[]): Promise<never> {
-    throw new NotImplementedException(
-      'cloneLandingPageUsingPOST is not implemented.',
-    )
+  async cloneLandingPageUsingPOST(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfLandingPageResponse> {
+    return makeResponseOfLandingPageResponse()
   }
 
   async deleteLandingPageByIdUsingPOST(
     ..._arguments: unknown[]
-  ): Promise<never> {
-    throw new NotImplementedException(
-      'deleteLandingPageByIdUsingPOST is not implemented.',
-    )
+  ): Promise<ResponseOfIdResponse> {
+    return makeResponseOfIdResponse()
   }
 
   async discardLandingPageByIdUsingPOST(
     ..._arguments: unknown[]
-  ): Promise<never> {
-    throw new NotImplementedException(
-      'discardLandingPageByIdUsingPOST is not implemented.',
-    )
+  ): Promise<ResponseOfIdResponse> {
+    return makeResponseOfIdResponse()
   }
 
   async unapproveLandingPageByIdUsingPOST(
     ..._arguments: unknown[]
-  ): Promise<never> {
-    throw new NotImplementedException(
-      'unapproveLandingPageByIdUsingPOST is not implemented.',
-    )
+  ): Promise<ResponseOfLandingPageResponse> {
+    return makeResponseOfLandingPageResponse()
   }
 
   async updateLandingPageVariableUsingPOST(
     ..._arguments: unknown[]
-  ): Promise<never> {
-    throw new NotImplementedException(
-      'updateLandingPageVariableUsingPOST is not implemented.',
-    )
+  ): Promise<ResponseOfLandingPageVariableResponse> {
+    return makeResponseOfLandingPageVariableResponse()
   }
 
-  async getVariablesUsingGET(..._arguments: unknown[]): Promise<never> {
-    throw new NotImplementedException(
-      'getVariablesUsingGET is not implemented.',
-    )
+  async getVariablesUsingGET(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfLandingPageVariableResponse> {
+    return makeResponseOfLandingPageVariableResponse()
   }
 
-  async browseLandingPagesUsingGET(..._arguments: unknown[]): Promise<never> {
-    throw new NotImplementedException(
-      'browseLandingPagesUsingGET is not implemented.',
-    )
+  async browseLandingPagesUsingGET(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfLandingPageResponse> {
+    return makeResponseOfLandingPageResponse()
   }
 
-  async createLandingPageUsingPOST(..._arguments: unknown[]): Promise<never> {
-    throw new NotImplementedException(
-      'createLandingPageUsingPOST is not implemented.',
-    )
+  async createLandingPageUsingPOST(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfLandingPageResponse> {
+    return makeResponseOfLandingPageResponse()
   }
 
   async getLandingPageFullContentUsingGET(
     ..._arguments: unknown[]
-  ): Promise<never> {
-    throw new NotImplementedException(
-      'getLandingPageFullContentUsingGET is not implemented.',
-    )
+  ): Promise<ResponseOfGetLandingPageFullContentResponse> {
+    return makeResponseOfGetLandingPageFullContentResponse()
   }
 }

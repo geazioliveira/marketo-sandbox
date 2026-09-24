@@ -5,5 +5,6 @@ import { SmartCampaignsService } from './smart-campaigns.service'
 @Module({
   controllers: [SmartCampaignsController],
   providers: [SmartCampaignsService],
+  exports: [SmartCampaignsService],
 })
 export class SmartCampaignsModule {}

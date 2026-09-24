@@ -1,44 +1,53 @@
-import { Injectable, NotImplementedException } from '@nestjs/common'
+import { Injectable } from '@nestjs/common'
+import { makeResponseOfFolderContentResponse } from '../../asset-mocks/factories/response-of-folder-content-response'
+import { makeResponseOfFolderResponse } from '../../asset-mocks/factories/response-of-folder-response'
+import { makeResponseOfIdResponse } from '../../asset-mocks/factories/response-of-id-response'
+
+import type { ResponseOfFolderContentResponse } from '../../asset-definitions/responses/response-of-folder-content-response'
+import type { ResponseOfFolderResponse } from '../../asset-definitions/responses/response-of-folder-response'
+import type { ResponseOfIdResponse } from '../../asset-definitions/responses/response-of-id-response'
 
 @Injectable()
 export class FoldersService {
-  async getFolderByNameUsingGET(..._arguments: unknown[]): Promise<never> {
-    throw new NotImplementedException(
-      'getFolderByNameUsingGET is not implemented.',
-    )
+  async getFolderByNameUsingGET(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfFolderResponse> {
+    return makeResponseOfFolderResponse()
   }
 
-  async getFolderByIdUsingGET(..._arguments: unknown[]): Promise<never> {
-    throw new NotImplementedException(
-      'getFolderByIdUsingGET is not implemented.',
-    )
+  async getFolderByIdUsingGET(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfFolderResponse> {
+    return makeResponseOfFolderResponse()
   }
 
-  async updateFolderUsingPOST(..._arguments: unknown[]): Promise<never> {
-    throw new NotImplementedException(
-      'updateFolderUsingPOST is not implemented.',
-    )
+  async updateFolderUsingPOST(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfFolderResponse> {
+    return makeResponseOfFolderResponse()
   }
 
-  async getFolderContentUsingGET(..._arguments: unknown[]): Promise<never> {
-    throw new NotImplementedException(
-      'getFolderContentUsingGET is not implemented.',
-    )
+  async getFolderContentUsingGET(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfFolderContentResponse> {
+    return makeResponseOfFolderContentResponse()
   }
 
-  async deleteFolderUsingPOST(..._arguments: unknown[]): Promise<never> {
-    throw new NotImplementedException(
-      'deleteFolderUsingPOST is not implemented.',
-    )
+  async deleteFolderUsingPOST(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfIdResponse> {
+    return makeResponseOfIdResponse()
   }
 
-  async getFolderUsingGET(..._arguments: unknown[]): Promise<never> {
-    throw new NotImplementedException('getFolderUsingGET is not implemented.')
+  async getFolderUsingGET(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfFolderResponse> {
+    return makeResponseOfFolderResponse()
   }
 
-  async createFolderUsingPOST(..._arguments: unknown[]): Promise<never> {
-    throw new NotImplementedException(
-      'createFolderUsingPOST is not implemented.',
-    )
+  async createFolderUsingPOST(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfFolderResponse> {
+    return makeResponseOfFolderResponse()
   }
 }

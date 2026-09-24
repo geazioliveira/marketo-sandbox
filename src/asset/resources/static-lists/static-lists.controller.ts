@@ -1,10 +1,10 @@
 import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common'
 import { StaticListsService } from './static-lists.service'
 
-import type { CreateStaticListRequest } from '../../../asset-definitions/requests/create-static-list-request'
-import type { ResponseOfIdResponse } from '../../../asset-definitions/responses/response-of-id-response'
-import type { ResponseOfStaticListResponse } from '../../../asset-definitions/responses/response-of-static-list-response'
-import type { UpdateStaticListRequest } from '../../../asset-definitions/requests/update-static-list-request'
+import type { CreateStaticListRequest } from '../../asset-definitions/requests/create-static-list-request'
+import type { ResponseOfIdResponse } from '../../asset-definitions/responses/response-of-id-response'
+import type { ResponseOfStaticListResponse } from '../../asset-definitions/responses/response-of-static-list-response'
+import type { UpdateStaticListRequest } from '../../asset-definitions/requests/update-static-list-request'
 
 @Controller()
 export class StaticListsController {

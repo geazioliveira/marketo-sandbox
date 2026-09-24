@@ -1,8 +1,8 @@
 import { Controller, Get, Param, Query } from '@nestjs/common'
 import { SegmentsService } from './segments.service'
 
-import type { ResponseOfSegmentationResponse } from '../../../asset-definitions/responses/response-of-segmentation-response'
-import type { ResponseOfSegmentsResponse } from '../../../asset-definitions/responses/response-of-segments-response'
+import type { ResponseOfSegmentationResponse } from '../../asset-definitions/responses/response-of-segmentation-response'
+import type { ResponseOfSegmentsResponse } from '../../asset-definitions/responses/response-of-segments-response'
 
 @Controller()
 export class SegmentsController {

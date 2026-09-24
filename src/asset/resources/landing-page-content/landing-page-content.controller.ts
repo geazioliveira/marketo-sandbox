@@ -1,12 +1,12 @@
 import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common'
 import { LandingPageContentService } from './landing-page-content.service'
 
-import type { CreateLandingPageContentRequest } from '../../../asset-definitions/requests/create-landing-page-content-request'
-import type { ResponseOfIdResponse } from '../../../asset-definitions/responses/response-of-id-response'
-import type { ResponseOfLandingPageContentResponse } from '../../../asset-definitions/responses/response-of-landing-page-content-response'
-import type { ResponseOfLandingPageDynamicContentResponse } from '../../../asset-definitions/responses/response-of-landing-page-dynamic-content-response'
-import type { UpdateLandingPageContentRequest } from '../../../asset-definitions/requests/update-landing-page-content-request'
-import type { UpdateLandingPageDynamicContentRequest } from '../../../asset-definitions/requests/update-landing-page-dynamic-content-request'
+import type { CreateLandingPageContentRequest } from '../../asset-definitions/requests/create-landing-page-content-request'
+import type { ResponseOfIdResponse } from '../../asset-definitions/responses/response-of-id-response'
+import type { ResponseOfLandingPageContentResponse } from '../../asset-definitions/responses/response-of-landing-page-content-response'
+import type { ResponseOfLandingPageDynamicContentResponse } from '../../asset-definitions/responses/response-of-landing-page-dynamic-content-response'
+import type { UpdateLandingPageContentRequest } from '../../asset-definitions/requests/update-landing-page-content-request'
+import type { UpdateLandingPageDynamicContentRequest } from '../../asset-definitions/requests/update-landing-page-dynamic-content-request'
 
 @Controller()
 export class LandingPageContentController {

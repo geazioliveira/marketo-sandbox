@@ -1,15 +1,15 @@
 import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common'
 import { FormsService } from './forms.service'
 
-import type { CloneFormRequest } from '../../../asset-definitions/requests/clone-form-request'
-import type { CreateLpFormRequest } from '../../../asset-definitions/requests/create-lp-form-request'
-import type { ResponseOfFormUsedByResponse } from '../../../asset-definitions/responses/response-of-form-used-by-response'
-import type { ResponseOfIdResponse } from '../../../asset-definitions/responses/response-of-id-response'
-import type { ResponseOfLpFormResponse } from '../../../asset-definitions/responses/response-of-lp-form-response'
-import type { ResponseOfThankYouPageResponse } from '../../../asset-definitions/responses/response-of-thank-you-page-response'
-import type { SubmitButtonRequest } from '../../../asset-definitions/requests/submit-button-request'
-import type { UpdateFormMetaDataRequest } from '../../../asset-definitions/requests/update-form-meta-data-request'
-import type { UpdateThankYouPageRequest } from '../../../asset-definitions/requests/update-thank-you-page-request'
+import type { CloneFormRequest } from '../../asset-definitions/requests/clone-form-request'
+import type { CreateLpFormRequest } from '../../asset-definitions/requests/create-lp-form-request'
+import type { ResponseOfFormUsedByResponse } from '../../asset-definitions/responses/response-of-form-used-by-response'
+import type { ResponseOfIdResponse } from '../../asset-definitions/responses/response-of-id-response'
+import type { ResponseOfLpFormResponse } from '../../asset-definitions/responses/response-of-lp-form-response'
+import type { ResponseOfThankYouPageResponse } from '../../asset-definitions/responses/response-of-thank-you-page-response'
+import type { SubmitButtonRequest } from '../../asset-definitions/requests/submit-button-request'
+import type { UpdateFormMetaDataRequest } from '../../asset-definitions/requests/update-form-meta-data-request'
+import type { UpdateThankYouPageRequest } from '../../asset-definitions/requests/update-thank-you-page-request'
 
 @Controller()
 export class FormsController {

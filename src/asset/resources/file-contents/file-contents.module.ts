@@ -5,5 +5,6 @@ import { FileContentsService } from './file-contents.service'
 @Module({
   controllers: [FileContentsController],
   providers: [FileContentsService],
+  exports: [FileContentsService],
 })
 export class FileContentsModule {}

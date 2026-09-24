@@ -1,12 +1,12 @@
 import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common'
 import { LandingPageTemplatesService } from './landing-page-templates.service'
 
-import type { CloneLpTemplateRequest } from '../../../asset-definitions/requests/clone-lp-template-request'
-import type { CreateLpTemplateRequest } from '../../../asset-definitions/requests/create-lp-template-request'
-import type { ResponseOfIdResponse } from '../../../asset-definitions/responses/response-of-id-response'
-import type { ResponseOfLpTemplateGetContentResponse } from '../../../asset-definitions/responses/response-of-lp-template-get-content-response'
-import type { ResponseOfLpTemplateResponse } from '../../../asset-definitions/responses/response-of-lp-template-response'
-import type { UpdateLpTemplateRequest } from '../../../asset-definitions/requests/update-lp-template-request'
+import type { CloneLpTemplateRequest } from '../../asset-definitions/requests/clone-lp-template-request'
+import type { CreateLpTemplateRequest } from '../../asset-definitions/requests/create-lp-template-request'
+import type { ResponseOfIdResponse } from '../../asset-definitions/responses/response-of-id-response'
+import type { ResponseOfLpTemplateGetContentResponse } from '../../asset-definitions/responses/response-of-lp-template-get-content-response'
+import type { ResponseOfLpTemplateResponse } from '../../asset-definitions/responses/response-of-lp-template-response'
+import type { UpdateLpTemplateRequest } from '../../asset-definitions/requests/update-lp-template-request'
 
 @Controller()
 export class LandingPageTemplatesController {

@@ -5,5 +5,6 @@ import { LandingPageTemplatesService } from './landing-page-templates.service'
 @Module({
   controllers: [LandingPageTemplatesController],
   providers: [LandingPageTemplatesService],
+  exports: [LandingPageTemplatesService],
 })
 export class LandingPageTemplatesModule {}

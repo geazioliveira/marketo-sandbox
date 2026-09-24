@@ -1,52 +1,47 @@
-import { Injectable, NotImplementedException } from '@nestjs/common'
+import { Injectable } from '@nestjs/common'
+import { makeResponseOfIdResponse } from '../../asset-mocks/factories/response-of-id-response'
+import { makeResponseOfLandingPageContentResponse } from '../../asset-mocks/factories/response-of-landing-page-content-response'
+import { makeResponseOfLandingPageDynamicContentResponse } from '../../asset-mocks/factories/response-of-landing-page-dynamic-content-response'
+
+import type { ResponseOfIdResponse } from '../../asset-definitions/responses/response-of-id-response'
+import type { ResponseOfLandingPageContentResponse } from '../../asset-definitions/responses/response-of-landing-page-content-response'
+import type { ResponseOfLandingPageDynamicContentResponse } from '../../asset-definitions/responses/response-of-landing-page-dynamic-content-response'
 
 @Injectable()
 export class LandingPageContentService {
   async getLandingPageContentUsingGET(
     ..._arguments: unknown[]
-  ): Promise<never> {
-    throw new NotImplementedException(
-      'getLandingPageContentUsingGET is not implemented.',
-    )
+  ): Promise<ResponseOfLandingPageContentResponse> {
+    return makeResponseOfLandingPageContentResponse()
   }
 
   async addLandingPageContentUsingPOST(
     ..._arguments: unknown[]
-  ): Promise<never> {
-    throw new NotImplementedException(
-      'addLandingPageContentUsingPOST is not implemented.',
-    )
+  ): Promise<ResponseOfIdResponse> {
+    return makeResponseOfIdResponse()
   }
 
   async updateLandingPageContentUsingPOST(
     ..._arguments: unknown[]
-  ): Promise<never> {
-    throw new NotImplementedException(
-      'updateLandingPageContentUsingPOST is not implemented.',
-    )
+  ): Promise<ResponseOfIdResponse> {
+    return makeResponseOfIdResponse()
   }
 
   async removeLandingPageContentUsingPOST(
     ..._arguments: unknown[]
-  ): Promise<never> {
-    throw new NotImplementedException(
-      'removeLandingPageContentUsingPOST is not implemented.',
-    )
+  ): Promise<ResponseOfIdResponse> {
+    return makeResponseOfIdResponse()
   }
 
   async getLandingPageDynamicContentsUsingGET(
     ..._arguments: unknown[]
-  ): Promise<never> {
-    throw new NotImplementedException(
-      'getLandingPageDynamicContentsUsingGET is not implemented.',
-    )
+  ): Promise<ResponseOfLandingPageDynamicContentResponse> {
+    return makeResponseOfLandingPageDynamicContentResponse()
   }
 
   async updateLandingPageDynamicContentUsingPOST(
     ..._arguments: unknown[]
-  ): Promise<never> {
-    throw new NotImplementedException(
-      'updateLandingPageDynamicContentUsingPOST is not implemented.',
-    )
+  ): Promise<ResponseOfIdResponse> {
+    return makeResponseOfIdResponse()
   }
 }

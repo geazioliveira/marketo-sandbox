@@ -1,160 +1,149 @@
-import { Injectable, NotImplementedException } from '@nestjs/common'
+import { Injectable } from '@nestjs/common'
+import { makeResponseOfAutoSuggestValue } from '../../asset-mocks/factories/response-of-auto-suggest-value'
+import { makeResponseOfIdResponse } from '../../asset-mocks/factories/response-of-id-response'
+import { makeResponseOfSmartCampaignFlowStepActionType } from '../../asset-mocks/factories/response-of-smart-campaign-flow-step-action-type'
+import { makeResponseOfSmartCampaignFlowStepType } from '../../asset-mocks/factories/response-of-smart-campaign-flow-step-type'
+import { makeResponseOfSmartCampaignResponse } from '../../asset-mocks/factories/response-of-smart-campaign-response'
+import { makeResponseOfSmartCampaignResponseWithFlow } from '../../asset-mocks/factories/response-of-smart-campaign-response-with-flow'
+import { makeResponseOfSmartCampaignRuleType } from '../../asset-mocks/factories/response-of-smart-campaign-rule-type'
+import { makeResponseOfSmartCampaignUsedBy } from '../../asset-mocks/factories/response-of-smart-campaign-used-by'
+import { makeResponseOfSmartListResponseWithRules } from '../../asset-mocks/factories/response-of-smart-list-response-with-rules'
+
+import type { ResponseOfAutoSuggestValue } from '../../asset-definitions/models/response-of-auto-suggest-value'
+import type { ResponseOfIdResponse } from '../../asset-definitions/responses/response-of-id-response'
+import type { ResponseOfSmartCampaignFlowStepActionType } from '../../asset-definitions/models/response-of-smart-campaign-flow-step-action-type'
+import type { ResponseOfSmartCampaignFlowStepType } from '../../asset-definitions/models/response-of-smart-campaign-flow-step-type'
+import type { ResponseOfSmartCampaignResponse } from '../../asset-definitions/responses/response-of-smart-campaign-response'
+import type { ResponseOfSmartCampaignResponseWithFlow } from '../../asset-definitions/models/response-of-smart-campaign-response-with-flow'
+import type { ResponseOfSmartCampaignRuleType } from '../../asset-definitions/models/response-of-smart-campaign-rule-type'
+import type { ResponseOfSmartCampaignUsedBy } from '../../asset-definitions/models/response-of-smart-campaign-used-by'
+import type { ResponseOfSmartListResponseWithRules } from '../../asset-definitions/models/response-of-smart-list-response-with-rules'
 
 @Injectable()
 export class SmartCampaignsService {
-  async getSmartCampaignByIdUsingGET(..._arguments: unknown[]): Promise<never> {
-    throw new NotImplementedException(
-      'getSmartCampaignByIdUsingGET is not implemented.',
-    )
+  async getSmartCampaignByIdUsingGET(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfSmartCampaignResponseWithFlow> {
+    return makeResponseOfSmartCampaignResponseWithFlow()
   }
 
-  async updateSmartCampaignUsingPOST(..._arguments: unknown[]): Promise<never> {
-    throw new NotImplementedException(
-      'updateSmartCampaignUsingPOST is not implemented.',
-    )
+  async updateSmartCampaignUsingPOST(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfSmartCampaignResponse> {
+    return makeResponseOfSmartCampaignResponse()
   }
 
   async getSmartCampaignByNameUsingGET(
     ..._arguments: unknown[]
-  ): Promise<never> {
-    throw new NotImplementedException(
-      'getSmartCampaignByNameUsingGET is not implemented.',
-    )
+  ): Promise<ResponseOfSmartCampaignResponseWithFlow> {
+    return makeResponseOfSmartCampaignResponseWithFlow()
   }
 
   async getSmartCampaignUsedByUsingGET(
     ..._arguments: unknown[]
-  ): Promise<never> {
-    throw new NotImplementedException(
-      'getSmartCampaignUsedByUsingGET is not implemented.',
-    )
+  ): Promise<ResponseOfSmartCampaignUsedBy> {
+    return makeResponseOfSmartCampaignUsedBy()
   }
 
   async getSmartCampaignRulesUsingGET(
     ..._arguments: unknown[]
-  ): Promise<never> {
-    throw new NotImplementedException(
-      'getSmartCampaignRulesUsingGET is not implemented.',
-    )
+  ): Promise<ResponseOfSmartCampaignRuleType> {
+    return makeResponseOfSmartCampaignRuleType()
   }
 
   async getSmartCampaignFlowStepsUsingGET(
     ..._arguments: unknown[]
-  ): Promise<never> {
-    throw new NotImplementedException(
-      'getSmartCampaignFlowStepsUsingGET is not implemented.',
-    )
+  ): Promise<ResponseOfSmartCampaignFlowStepActionType> {
+    return makeResponseOfSmartCampaignFlowStepActionType()
   }
 
   async getSmartCampaignFlowStepTypesUsingGET(
     ..._arguments: unknown[]
-  ): Promise<never> {
-    throw new NotImplementedException(
-      'getSmartCampaignFlowStepTypesUsingGET is not implemented.',
-    )
+  ): Promise<ResponseOfSmartCampaignFlowStepType> {
+    return makeResponseOfSmartCampaignFlowStepType()
   }
 
   async getSmartCampaignAutoSuggestUsingGET(
     ..._arguments: unknown[]
-  ): Promise<never> {
-    throw new NotImplementedException(
-      'getSmartCampaignAutoSuggestUsingGET is not implemented.',
-    )
+  ): Promise<ResponseOfAutoSuggestValue> {
+    return makeResponseOfAutoSuggestValue()
   }
 
   async addSmartCampaignFlowStepUsingPOST(
     ..._arguments: unknown[]
-  ): Promise<never> {
-    throw new NotImplementedException(
-      'addSmartCampaignFlowStepUsingPOST is not implemented.',
-    )
+  ): Promise<ResponseOfSmartCampaignResponseWithFlow> {
+    return makeResponseOfSmartCampaignResponseWithFlow()
   }
 
   async addSmartCampaignFlowStepChoiceUsingPOST(
     ..._arguments: unknown[]
-  ): Promise<never> {
-    throw new NotImplementedException(
-      'addSmartCampaignFlowStepChoiceUsingPOST is not implemented.',
-    )
+  ): Promise<ResponseOfSmartCampaignResponseWithFlow> {
+    return makeResponseOfSmartCampaignResponseWithFlow()
   }
 
   async updateSmartCampaignFlowStepChoiceUsingPOST(
     ..._arguments: unknown[]
-  ): Promise<never> {
-    throw new NotImplementedException(
-      'updateSmartCampaignFlowStepChoiceUsingPOST is not implemented.',
-    )
+  ): Promise<ResponseOfSmartCampaignResponseWithFlow> {
+    return makeResponseOfSmartCampaignResponseWithFlow()
   }
 
   async removeSmartCampaignFlowStepUsingPOST(
     ..._arguments: unknown[]
-  ): Promise<never> {
-    throw new NotImplementedException(
-      'removeSmartCampaignFlowStepUsingPOST is not implemented.',
-    )
+  ): Promise<ResponseOfSmartCampaignResponseWithFlow> {
+    return makeResponseOfSmartCampaignResponseWithFlow()
   }
 
   async removeSmartCampaignFlowStepChoiceUsingPOST(
     ..._arguments: unknown[]
-  ): Promise<never> {
-    throw new NotImplementedException(
-      'removeSmartCampaignFlowStepChoiceUsingPOST is not implemented.',
-    )
+  ): Promise<ResponseOfSmartCampaignResponseWithFlow> {
+    return makeResponseOfSmartCampaignResponseWithFlow()
   }
 
   async reorderSmartCampaignFlowStepChoiceUsingPOST(
     ..._arguments: unknown[]
-  ): Promise<never> {
-    throw new NotImplementedException(
-      'reorderSmartCampaignFlowStepChoiceUsingPOST is not implemented.',
-    )
+  ): Promise<ResponseOfSmartCampaignResponseWithFlow> {
+    return makeResponseOfSmartCampaignResponseWithFlow()
   }
 
   async getSmartListBySmartCampaignIdUsingGET(
     ..._arguments: unknown[]
-  ): Promise<never> {
-    throw new NotImplementedException(
-      'getSmartListBySmartCampaignIdUsingGET is not implemented.',
-    )
+  ): Promise<ResponseOfSmartListResponseWithRules> {
+    return makeResponseOfSmartListResponseWithRules()
   }
 
-  async getAllSmartCampaignsGET(..._arguments: unknown[]): Promise<never> {
-    throw new NotImplementedException(
-      'getAllSmartCampaignsGET is not implemented.',
-    )
+  async getAllSmartCampaignsGET(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfSmartCampaignResponse> {
+    return makeResponseOfSmartCampaignResponse()
   }
 
-  async createSmartCampaignUsingPOST(..._arguments: unknown[]): Promise<never> {
-    throw new NotImplementedException(
-      'createSmartCampaignUsingPOST is not implemented.',
-    )
+  async createSmartCampaignUsingPOST(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfSmartCampaignResponse> {
+    return makeResponseOfSmartCampaignResponse()
   }
 
   async activateSmartCampaignUsingPOST(
     ..._arguments: unknown[]
-  ): Promise<never> {
-    throw new NotImplementedException(
-      'activateSmartCampaignUsingPOST is not implemented.',
-    )
+  ): Promise<ResponseOfIdResponse> {
+    return makeResponseOfIdResponse()
   }
 
   async deactivateSmartCampaignUsingPOST(
     ..._arguments: unknown[]
-  ): Promise<never> {
-    throw new NotImplementedException(
-      'deactivateSmartCampaignUsingPOST is not implemented.',
-    )
+  ): Promise<ResponseOfIdResponse> {
+    return makeResponseOfIdResponse()
   }
 
-  async cloneSmartCampaignUsingPOST(..._arguments: unknown[]): Promise<never> {
-    throw new NotImplementedException(
-      'cloneSmartCampaignUsingPOST is not implemented.',
-    )
+  async cloneSmartCampaignUsingPOST(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfSmartCampaignResponse> {
+    return makeResponseOfSmartCampaignResponse()
   }
 
-  async deleteSmartCampaignUsingPOST(..._arguments: unknown[]): Promise<never> {
-    throw new NotImplementedException(
-      'deleteSmartCampaignUsingPOST is not implemented.',
-    )
+  async deleteSmartCampaignUsingPOST(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfIdResponse> {
+    return makeResponseOfIdResponse()
   }
 }

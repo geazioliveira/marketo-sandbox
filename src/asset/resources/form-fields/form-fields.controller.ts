@@ -1,16 +1,16 @@
 import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common'
 import { FormFieldsService } from './form-fields.service'
 
-import type { AddFormFieldRequest } from '../../../asset-definitions/requests/add-form-field-request'
-import type { AddFormFieldSetRequest } from '../../../asset-definitions/requests/add-form-field-set-request'
-import type { AddFormFieldVisibilityRequest } from '../../../asset-definitions/requests/add-form-field-visibility-request'
-import type { AddRichTextRequest } from '../../../asset-definitions/requests/add-rich-text-request'
-import type { ReArrangeRequest } from '../../../asset-definitions/requests/re-arrange-request'
-import type { ResponseOfFieldsMetaDataResponse } from '../../../asset-definitions/responses/response-of-fields-meta-data-response'
-import type { ResponseOfFormVisibilityRuleResponse } from '../../../asset-definitions/responses/response-of-form-visibility-rule-response'
-import type { ResponseOfIdResponse } from '../../../asset-definitions/responses/response-of-id-response'
-import type { ResponseOfLpFormFieldResponse } from '../../../asset-definitions/responses/response-of-lp-form-field-response'
-import type { UpdateFormFieldRequest } from '../../../asset-definitions/requests/update-form-field-request'
+import type { AddFormFieldRequest } from '../../asset-definitions/requests/add-form-field-request'
+import type { AddFormFieldSetRequest } from '../../asset-definitions/requests/add-form-field-set-request'
+import type { AddFormFieldVisibilityRequest } from '../../asset-definitions/requests/add-form-field-visibility-request'
+import type { AddRichTextRequest } from '../../asset-definitions/requests/add-rich-text-request'
+import type { ReArrangeRequest } from '../../asset-definitions/requests/re-arrange-request'
+import type { ResponseOfFieldsMetaDataResponse } from '../../asset-definitions/responses/response-of-fields-meta-data-response'
+import type { ResponseOfFormVisibilityRuleResponse } from '../../asset-definitions/responses/response-of-form-visibility-rule-response'
+import type { ResponseOfIdResponse } from '../../asset-definitions/responses/response-of-id-response'
+import type { ResponseOfLpFormFieldResponse } from '../../asset-definitions/responses/response-of-lp-form-field-response'
+import type { UpdateFormFieldRequest } from '../../asset-definitions/requests/update-form-field-request'
 
 @Controller()
 export class FormFieldsController {

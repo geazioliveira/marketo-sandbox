@@ -1,13 +1,13 @@
 import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common'
 import { LandingPagesService } from './landing-pages.service'
 
-import type { CloneLandingPageRequest } from '../../../asset-definitions/requests/clone-landing-page-request'
-import type { CreateLandingPageRequest } from '../../../asset-definitions/requests/create-landing-page-request'
-import type { ResponseOfGetLandingPageFullContentResponse } from '../../../asset-definitions/responses/response-of-get-landing-page-full-content-response'
-import type { ResponseOfIdResponse } from '../../../asset-definitions/responses/response-of-id-response'
-import type { ResponseOfLandingPageResponse } from '../../../asset-definitions/responses/response-of-landing-page-response'
-import type { ResponseOfLandingPageVariableResponse } from '../../../asset-definitions/responses/response-of-landing-page-variable-response'
-import type { UpdateLandingPageRequest } from '../../../asset-definitions/requests/update-landing-page-request'
+import type { CloneLandingPageRequest } from '../../asset-definitions/requests/clone-landing-page-request'
+import type { CreateLandingPageRequest } from '../../asset-definitions/requests/create-landing-page-request'
+import type { ResponseOfGetLandingPageFullContentResponse } from '../../asset-definitions/responses/response-of-get-landing-page-full-content-response'
+import type { ResponseOfIdResponse } from '../../asset-definitions/responses/response-of-id-response'
+import type { ResponseOfLandingPageResponse } from '../../asset-definitions/responses/response-of-landing-page-response'
+import type { ResponseOfLandingPageVariableResponse } from '../../asset-definitions/responses/response-of-landing-page-variable-response'
+import type { UpdateLandingPageRequest } from '../../asset-definitions/requests/update-landing-page-request'
 
 @Controller()
 export class LandingPagesController {

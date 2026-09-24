@@ -1,13 +1,13 @@
 import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common'
 import { ProgramsService } from './programs.service'
 
-import type { CloneProgramRequest } from '../../../asset-definitions/requests/clone-program-request'
-import type { CreateProgramRequest } from '../../../asset-definitions/requests/create-program-request'
-import type { ResponseOfBrowseAllPrograms } from '../../../asset-definitions/models/response-of-browse-all-programs'
-import type { ResponseOfIdResponse } from '../../../asset-definitions/responses/response-of-id-response'
-import type { ResponseOfProgramResponse } from '../../../asset-definitions/responses/response-of-program-response'
-import type { ResponseOfSmartListResponseWithRules } from '../../../asset-definitions/models/response-of-smart-list-response-with-rules'
-import type { UpdateProgramRequest } from '../../../asset-definitions/requests/update-program-request'
+import type { CloneProgramRequest } from '../../asset-definitions/requests/clone-program-request'
+import type { CreateProgramRequest } from '../../asset-definitions/requests/create-program-request'
+import type { ResponseOfBrowseAllPrograms } from '../../asset-definitions/models/response-of-browse-all-programs'
+import type { ResponseOfIdResponse } from '../../asset-definitions/responses/response-of-id-response'
+import type { ResponseOfProgramResponse } from '../../asset-definitions/responses/response-of-program-response'
+import type { ResponseOfSmartListResponseWithRules } from '../../asset-definitions/models/response-of-smart-list-response-with-rules'
+import type { UpdateProgramRequest } from '../../asset-definitions/requests/update-program-request'
 
 @Controller()
 export class ProgramsController {

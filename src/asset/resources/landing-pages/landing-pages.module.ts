@@ -5,5 +5,6 @@ import { LandingPagesService } from './landing-pages.service'
 @Module({
   controllers: [LandingPagesController],
   providers: [LandingPagesService],
+  exports: [LandingPagesService],
 })
 export class LandingPagesModule {}

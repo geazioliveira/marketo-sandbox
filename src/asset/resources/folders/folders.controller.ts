@@ -1,11 +1,11 @@
 import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common'
 import { FoldersService } from './folders.service'
 
-import type { CreateFolderRequest } from '../../../asset-definitions/requests/create-folder-request'
-import type { ResponseOfFolderContentResponse } from '../../../asset-definitions/responses/response-of-folder-content-response'
-import type { ResponseOfFolderResponse } from '../../../asset-definitions/responses/response-of-folder-response'
-import type { ResponseOfIdResponse } from '../../../asset-definitions/responses/response-of-id-response'
-import type { UpdateFolderRequest } from '../../../asset-definitions/requests/update-folder-request'
+import type { CreateFolderRequest } from '../../asset-definitions/requests/create-folder-request'
+import type { ResponseOfFolderContentResponse } from '../../asset-definitions/responses/response-of-folder-content-response'
+import type { ResponseOfFolderResponse } from '../../asset-definitions/responses/response-of-folder-response'
+import type { ResponseOfIdResponse } from '../../asset-definitions/responses/response-of-id-response'
+import type { UpdateFolderRequest } from '../../asset-definitions/requests/update-folder-request'
 
 @Controller()
 export class FoldersController {
@@ -51,9 +51,9 @@ export class FoldersController {
   ): Promise<ResponseOfFolderContentResponse> {
     return this.foldersService.getFolderContentUsingGET(
       id,
+      type,
       maxReturn,
       offset,
-      type,
     )
   }
 

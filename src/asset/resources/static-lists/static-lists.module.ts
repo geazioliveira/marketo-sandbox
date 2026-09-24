@@ -5,5 +5,6 @@ import { StaticListsService } from './static-lists.service'
 @Module({
   controllers: [StaticListsController],
   providers: [StaticListsService],
+  exports: [StaticListsService],
 })
 export class StaticListsModule {}

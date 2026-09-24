@@ -5,5 +5,6 @@ import { LandingPageRedirectRulesService } from './landing-page-redirect-rules.s
 @Module({
   controllers: [LandingPageRedirectRulesController],
   providers: [LandingPageRedirectRulesService],
+  exports: [LandingPageRedirectRulesService],
 })
 export class LandingPageRedirectRulesModule {}
