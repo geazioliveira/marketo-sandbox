@@ -1,0 +1,28 @@
+import type { ChannelProgression } from '../models/channel-progression';
+
+export interface ChannelResponse {
+  /**
+   * Types of programs to which the channel can apply
+   */
+  applicableProgramType: string;
+  /**
+   * Datetime when the channel was created
+   */
+  createdAt: string;
+  /**
+   * Id of the Channel
+   */
+  id: number;
+  /**
+   * Name of the Channel
+   */
+  name: string;
+  /**
+   * List of available statuses for members of programs with the channel
+   */
+  progressionStatuses?: Array<ChannelProgression>;
+  /**
+   * Datetime when the channel was most recently updated
+   */
+  updatedAt: string;
+}

@@ -1,0 +1,30 @@
+export interface FlowStepChoiceAttribute {
+  /**
+   * Id of the attribute
+   */
+  id: number;
+  /**
+   * Id of the activity type attribute definition
+   */
+  activityTypeAttribId?: number;
+  /**
+   * Name of the attribute
+   */
+  name: string;
+  /**
+   * Data type of the attribute value
+   */
+  dataType?: string;
+  /**
+   * Value of the attribute
+   */
+  value?: string;
+  /**
+   * Display format of the value
+   */
+  format?: string;
+  /**
+   * Whether this is the primary attribute of the flow step
+   */
+  primary?: boolean;
+}

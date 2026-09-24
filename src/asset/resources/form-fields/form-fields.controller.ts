@@ -1,0 +1,138 @@
+import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common'
+import { FormFieldsService } from './form-fields.service'
+
+import type { AddFormFieldRequest } from '../../../asset-definitions/requests/add-form-field-request'
+import type { AddFormFieldSetRequest } from '../../../asset-definitions/requests/add-form-field-set-request'
+import type { AddFormFieldVisibilityRequest } from '../../../asset-definitions/requests/add-form-field-visibility-request'
+import type { AddRichTextRequest } from '../../../asset-definitions/requests/add-rich-text-request'
+import type { ReArrangeRequest } from '../../../asset-definitions/requests/re-arrange-request'
+import type { ResponseOfFieldsMetaDataResponse } from '../../../asset-definitions/responses/response-of-fields-meta-data-response'
+import type { ResponseOfFormVisibilityRuleResponse } from '../../../asset-definitions/responses/response-of-form-visibility-rule-response'
+import type { ResponseOfIdResponse } from '../../../asset-definitions/responses/response-of-id-response'
+import type { ResponseOfLpFormFieldResponse } from '../../../asset-definitions/responses/response-of-lp-form-field-response'
+import type { UpdateFormFieldRequest } from '../../../asset-definitions/requests/update-form-field-request'
+
+@Controller()
+export class FormFieldsController {
+  constructor(private readonly formFieldsService: FormFieldsService) {}
+
+  @Get('rest/asset/v1/form/fields.json')
+  async getAllFieldsUsingGET(
+    @Query('maxReturn') maxReturn?: number,
+    @Query('offset') offset?: number,
+  ): Promise<ResponseOfFieldsMetaDataResponse> {
+    return this.formFieldsService.getAllFieldsUsingGET(maxReturn, offset)
+  }
+
+  @Get('rest/asset/v1/form/programMemberFields.json')
+  async getAllProgramMemberFieldsUsingGET(
+    @Query('maxReturn') maxReturn?: number,
+    @Query('offset') offset?: number,
+  ): Promise<ResponseOfFieldsMetaDataResponse> {
+    return this.formFieldsService.getAllProgramMemberFieldsUsingGET(
+      maxReturn,
+      offset,
+    )
+  }
+
+  @Post('rest/asset/v1/form/:formId/field/:fieldId/visibility.json')
+  async addFormFieldVisibilityRuleUsingPOST(
+    @Param('formId') formId: number,
+    @Param('fieldId') fieldId: string,
+    @Body() addFormFieldVisibilityRequest: AddFormFieldVisibilityRequest,
+  ): Promise<ResponseOfFormVisibilityRuleResponse> {
+    return this.formFieldsService.addFormFieldVisibilityRuleUsingPOST(
+      formId,
+      fieldId,
+      addFormFieldVisibilityRequest,
+    )
+  }
+
+  @Post('rest/asset/v1/form/:id/field/:fieldId.json')
+  async updateFormFieldUsingPOST(
+    @Param('id') id: number,
+    @Param('fieldId') fieldId: string,
+    @Body() updateFormFieldRequest: UpdateFormFieldRequest,
+  ): Promise<ResponseOfLpFormFieldResponse> {
+    return this.formFieldsService.updateFormFieldUsingPOST(
+      id,
+      fieldId,
+      updateFormFieldRequest,
+    )
+  }
+
+  @Post('rest/asset/v1/form/:id/field/:fieldId/delete.json')
+  async deleteFormFieldUsingPOST(
+    @Param('id') id: number,
+    @Param('fieldId') fieldId: string,
+  ): Promise<ResponseOfIdResponse> {
+    return this.formFieldsService.deleteFormFieldUsingPOST(id, fieldId)
+  }
+
+  @Post('rest/asset/v1/form/:id/fieldSet.json')
+  async addFieldSetUsingPOST(
+    @Param('id') id: number,
+    @Body() addFormFieldSetRequest: AddFormFieldSetRequest,
+  ): Promise<ResponseOfLpFormFieldResponse> {
+    return this.formFieldsService.addFieldSetUsingPOST(
+      id,
+      addFormFieldSetRequest,
+    )
+  }
+
+  @Post(
+    'rest/asset/v1/form/:id/fieldSet/:fieldSetId/field/:fieldId/delete.json',
+  )
+  async deleteFormFieldFromFieldSetUsingPOST(
+    @Param('id') id: number,
+    @Param('fieldSetId') fieldSetId: string,
+    @Param('fieldId') fieldId: string,
+  ): Promise<ResponseOfIdResponse> {
+    return this.formFieldsService.deleteFormFieldFromFieldSetUsingPOST(
+      id,
+      fieldSetId,
+      fieldId,
+    )
+  }
+
+  @Get('rest/asset/v1/form/:id/fields.json')
+  async getFormFieldByFormVidUsingGET(
+    @Param('id') id: number,
+    @Query('status') status?: 'approved' | 'draft',
+  ): Promise<ResponseOfLpFormFieldResponse> {
+    return this.formFieldsService.getFormFieldByFormVidUsingGET(id, status)
+  }
+
+  @Post('rest/asset/v1/form/:id/fields.json')
+  async addFieldToAFormUsingPOST(
+    @Param('id') id: number,
+    @Body() addFormFieldSetRequest: AddFormFieldRequest,
+  ): Promise<ResponseOfLpFormFieldResponse> {
+    return this.formFieldsService.addFieldToAFormUsingPOST(
+      id,
+      addFormFieldSetRequest,
+    )
+  }
+
+  @Post('rest/asset/v1/form/:id/reArrange.json')
+  async updateFieldPositionsUsingPOST(
+    @Param('id') id: number,
+    @Body() reArrangeRequest?: ReArrangeRequest,
+  ): Promise<ResponseOfIdResponse> {
+    return this.formFieldsService.updateFieldPositionsUsingPOST(
+      id,
+      reArrangeRequest,
+    )
+  }
+
+  @Post('rest/asset/v1/form/:id/richText.json')
+  async addRichTextFieldUsingPOST(
+    @Param('id') id: number,
+    @Body() addRichTextRequest: AddRichTextRequest,
+  ): Promise<ResponseOfLpFormFieldResponse> {
+    return this.formFieldsService.addRichTextFieldUsingPOST(
+      id,
+      addRichTextRequest,
+    )
+  }
+}

@@ -1,0 +1,49 @@
+import type { Folder } from '../models/folder';
+import type { FormKnownVisitorDTO } from '../models/form-known-visitor-dto';
+
+export interface CreateLpFormRequest {
+  /**
+   * Description of the form
+   */
+  description?: string;
+  /**
+   * JSON representation of parent folder, with members 'id', and 'type' which may be 'Folder' or 'Program'
+   */
+  folder: Folder;
+  /**
+   * font-family property for the form
+   */
+  fontFamily?: string;
+  /**
+   * font-size property of the form
+   */
+  fontSize?: string;
+  /**
+   * Known visitor behavior for the form
+   */
+  knownVisitor?: FormKnownVisitorDTO;
+  /**
+   * Default positioning of labels.
+   */
+  labelPosition?: string;
+  /**
+   * Language of the form
+   */
+  language?: string;
+  /**
+   * Locale of the form
+   */
+  locale?: string;
+  /**
+   * Name of the form
+   */
+  name?: string;
+  /**
+   * Whether progressive profiling is enabled for the form
+   */
+  progressiveProfiling?: boolean;
+  /**
+   * CSS theme for the form to use
+   */
+  theme?: string;
+}

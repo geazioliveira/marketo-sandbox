@@ -1,0 +1,177 @@
+import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common'
+import { SmartListsService } from './smart-lists.service'
+
+import type { CloneSmartListRequest } from '../../../asset-definitions/requests/clone-smart-list-request'
+import type { CreateSmartListRequest } from '../../../asset-definitions/requests/create-smart-list-request'
+import type { ResponseOfAutoSuggestValue } from '../../../asset-definitions/models/response-of-auto-suggest-value'
+import type { ResponseOfIdResponse } from '../../../asset-definitions/responses/response-of-id-response'
+import type { ResponseOfSmartListResponse } from '../../../asset-definitions/responses/response-of-smart-list-response'
+import type { ResponseOfSmartListResponseWithRules } from '../../../asset-definitions/models/response-of-smart-list-response-with-rules'
+import type { ResponseOfSmartListRuleType } from '../../../asset-definitions/models/response-of-smart-list-rule-type'
+
+@Controller()
+export class SmartListsController {
+  constructor(private readonly smartListsService: SmartListsService) {}
+
+  @Get('rest/asset/v1/smartList/:id.json')
+  async getSmartListByIdUsingGET(
+    @Param('id') id: number,
+    @Query('includeRules') includeRules?: boolean,
+  ): Promise<ResponseOfSmartListResponseWithRules> {
+    return this.smartListsService.getSmartListByIdUsingGET(id, includeRules)
+  }
+
+  @Get('rest/asset/v1/smartList/byName.json')
+  async getSmartListByNameUsingGET(
+    @Query('name') name: string,
+  ): Promise<ResponseOfSmartListResponse> {
+    return this.smartListsService.getSmartListByNameUsingGET(name)
+  }
+
+  @Post('rest/asset/v1/smartList/:id/delete.json')
+  async deleteSmartListByIdUsingPOST(
+    @Param('id') id: number,
+  ): Promise<ResponseOfIdResponse> {
+    return this.smartListsService.deleteSmartListByIdUsingPOST(id)
+  }
+
+  @Get('rest/asset/v1/smartLists.json')
+  async getSmartListsUsingGET(
+    @Query('folder') folder?: string,
+    @Query('offset') offset?: number,
+    @Query('maxReturn') maxReturn?: number,
+    @Query('earliestUpdatedAt') earliestUpdatedAt?: string,
+    @Query('latestUpdatedAt') latestUpdatedAt?: string,
+  ): Promise<ResponseOfSmartListResponse> {
+    return this.smartListsService.getSmartListsUsingGET(
+      folder,
+      offset,
+      maxReturn,
+      earliestUpdatedAt,
+      latestUpdatedAt,
+    )
+  }
+
+  @Post('rest/asset/v1/smartLists.json')
+  async createSmartListUsingPOST(
+    @Body() createSmartListRequest: CreateSmartListRequest,
+  ): Promise<ResponseOfSmartListResponse> {
+    return this.smartListsService.createSmartListUsingPOST(
+      createSmartListRequest,
+    )
+  }
+
+  @Get('rest/asset/v1/smartList/rules.json')
+  async getSmartListRulesUsingGET(): Promise<ResponseOfSmartListRuleType> {
+    return this.smartListsService.getSmartListRulesUsingGET()
+  }
+
+  @Get('rest/asset/v1/smartList/:id/autoSuggest.json')
+  async getSmartListAutoSuggestUsingGET(
+    @Param('id') id: number,
+    @Query('ruleTypeId') ruleTypeId: string,
+    @Query('optionTypeId') optionTypeId: string,
+    @Query('primaryAttributeValue') primaryAttributeValue?: string,
+  ): Promise<ResponseOfAutoSuggestValue> {
+    return this.smartListsService.getSmartListAutoSuggestUsingGET(
+      id,
+      ruleTypeId,
+      optionTypeId,
+      primaryAttributeValue,
+    )
+  }
+
+  @Post('rest/asset/v1/smartList/:id/rules.json')
+  async addSmartListRuleUsingPOST(
+    @Param('id') id: number,
+    @Body('ruleId') ruleId: string,
+    @Body('index') index: number,
+    @Body('trigger') trigger?: boolean,
+    @Body('negative') negative?: boolean,
+  ): Promise<ResponseOfSmartListResponseWithRules> {
+    return this.smartListsService.addSmartListRuleUsingPOST(
+      id,
+      ruleId,
+      index,
+      trigger,
+      negative,
+    )
+  }
+
+  @Post('rest/asset/v1/smartList/:id/rule/:ruleId.json')
+  async updateSmartListRuleUsingPOST(
+    @Param('id') id: number,
+    @Param('ruleId') ruleId: number,
+    @Body('attributeId') attributeId: string,
+    @Body('values') values: string,
+    @Body('operator') operator?: string,
+  ): Promise<ResponseOfSmartListResponseWithRules> {
+    return this.smartListsService.updateSmartListRuleUsingPOST(
+      id,
+      ruleId,
+      attributeId,
+      values,
+      operator,
+    )
+  }
+
+  @Post('rest/asset/v1/smartList/:id/filterLogic.json')
+  async updateSmartListFilterLogicUsingPOST(
+    @Param('id') id: number,
+    @Body('matchType') matchType: 'all' | 'any' | 'custom',
+    @Body('customRuleLogic') customRuleLogic?: string,
+  ): Promise<ResponseOfSmartListResponseWithRules> {
+    return this.smartListsService.updateSmartListFilterLogicUsingPOST(
+      id,
+      matchType,
+      customRuleLogic,
+    )
+  }
+
+  @Post('rest/asset/v1/smartList/:id/rule/:ruleId/delete.json')
+  async deleteSmartListRuleUsingPOST(
+    @Param('id') id: number,
+    @Param('ruleId') ruleId: number,
+  ): Promise<ResponseOfIdResponse> {
+    return this.smartListsService.deleteSmartListRuleUsingPOST(id, ruleId)
+  }
+
+  @Post('rest/asset/v1/smartList/:id/rule/:ruleId/removeConstraint.json')
+  async removeSmartListRuleConstraintUsingPOST(
+    @Param('id') id: number,
+    @Param('ruleId') ruleId: number,
+    @Body('attributeId') attributeId: string,
+  ): Promise<ResponseOfSmartListResponseWithRules> {
+    return this.smartListsService.removeSmartListRuleConstraintUsingPOST(
+      id,
+      ruleId,
+      attributeId,
+    )
+  }
+
+  @Post('rest/asset/v1/smartList/:id/reorder.json')
+  async reorderSmartListRulesUsingPOST(
+    @Param('id') id: number,
+    @Body('order') order: string,
+  ): Promise<ResponseOfSmartListResponseWithRules> {
+    return this.smartListsService.reorderSmartListRulesUsingPOST(id, order)
+  }
+
+  @Post('rest/asset/v1/smartList/:id/rules/delete.json')
+  async deleteAllSmartListRulesUsingPOST(
+    @Param('id') id: number,
+  ): Promise<ResponseOfSmartListResponseWithRules> {
+    return this.smartListsService.deleteAllSmartListRulesUsingPOST(id)
+  }
+
+  @Post('rest/asset/v1/smartList/:id/clone.json')
+  async cloneSmartListUsingPOST(
+    @Param('id') id: number,
+    @Body() cloneSmartListRequest: CloneSmartListRequest,
+  ): Promise<ResponseOfSmartListResponse> {
+    return this.smartListsService.cloneSmartListUsingPOST(
+      id,
+      cloneSmartListRequest,
+    )
+  }
+}

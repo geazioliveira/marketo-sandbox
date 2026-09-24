@@ -1,0 +1,40 @@
+import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common'
+import { FilesService } from './files.service'
+
+import type { CreateFileRequest } from '../../../asset-definitions/requests/create-file-request'
+import type { ResponseOfFileResponse } from '../../../asset-definitions/responses/response-of-file-response'
+
+@Controller()
+export class FilesController {
+  constructor(private readonly filesService: FilesService) {}
+
+  @Get('rest/asset/v1/file/byName.json')
+  async getFileByNameUsingGET(
+    @Query('name') name: string,
+  ): Promise<ResponseOfFileResponse> {
+    return this.filesService.getFileByNameUsingGET(name)
+  }
+
+  @Get('rest/asset/v1/file/:id.json')
+  async getFileByIdUsingGET(
+    @Param('id') id: number,
+  ): Promise<ResponseOfFileResponse> {
+    return this.filesService.getFileByIdUsingGET(id)
+  }
+
+  @Get('rest/asset/v1/files.json')
+  async getFilesUsingGET(
+    @Query('folder') folder?: string,
+    @Query('offset') offset?: number,
+    @Query('maxReturn') maxReturn?: number,
+  ): Promise<ResponseOfFileResponse> {
+    return this.filesService.getFilesUsingGET(folder, offset, maxReturn)
+  }
+
+  @Post('rest/asset/v1/files.json')
+  async createFileUsingPOST(
+    @Body() createFileRequest: CreateFileRequest,
+  ): Promise<ResponseOfFileResponse> {
+    return this.filesService.createFileUsingPOST(createFileRequest)
+  }
+}

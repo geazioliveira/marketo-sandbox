@@ -1,0 +1,34 @@
+export interface UpdateEmailMetaDataRequest {
+  /**
+   * Description of the asset
+   */
+  description?: string;
+  /**
+   * Name of the Email
+   */
+  name?: string;
+  /**
+   * Preheader text for the email
+   */
+  preHeader?: string;
+  /**
+   * Whether the email is operational. Operational emails bypass unsubscribe status. Defaults to false
+   */
+  operational?: boolean;
+  /**
+   * Whether the email has been published to Sales Insight. Default false
+   */
+  published?: boolean;
+  /**
+   * Setting to include text-only version of email when sent
+   */
+  textOnly?: boolean;
+  /**
+   * Whether the email has been enabled to allow the 'View as Web Page' when received
+   */
+  webView?: boolean;
+  /**
+   * Setting to automatically copy HTML version to Text version
+   */
+  autoCopyToText?: boolean;
+}

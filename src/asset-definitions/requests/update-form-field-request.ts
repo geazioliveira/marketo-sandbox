@@ -1,0 +1,86 @@
+export interface UpdateFormFieldRequest {
+  /**
+   * Number of blank fields to show when progressive profiling is enabled
+   */
+  blankFields?: number;
+  /**
+   * Optional default value for the field
+   */
+  defaultValue?: string;
+  /**
+   * Type of field
+   */
+  fieldType?: string;
+  /**
+   * Width of the input or select element
+   */
+  fieldWidth?: number;
+  /**
+   * Whether the field should prefill. Default true
+   */
+  formPrefill?: boolean;
+  /**
+   * Whether the field is marked as sensitive. Default false
+   */
+  isSensitive?: boolean;
+  /**
+   * Hint text for the field
+   */
+  hintText?: string;
+  /**
+   * Whether the field should be checked upon loading. Default false
+   */
+  initiallyChecked?: boolean;
+  /**
+   * Instructions for the field
+   */
+  instructions?: string;
+  /**
+   * Label of the field
+   */
+  label?: string;
+  /**
+   * Whether the field label should be displayed to the right of the input/select element. Default false
+   */
+  labelToRight?: boolean;
+  /**
+   * Width of the field label element
+   */
+  labelWidth?: number;
+  /**
+   * Optional input mask for the field
+   */
+  maskInput?: string;
+  /**
+   * Maximum length for text type fields
+   */
+  maxLength?: number;
+  /**
+   * Maximum value accepted by the field
+   */
+  maxValue?: number;
+  /**
+   * Minimum value accepted by the field
+   */
+  minValue?: number;
+  /**
+   * Whether the field should allow multiple selections. Default false
+   */
+  multiSelect?: boolean;
+  /**
+   * Whether the field is required to submit the form. Default false
+   */
+  required?: boolean;
+  /**
+   * Validation message to display on failed validation
+   */
+  validationMessage?: string;
+  /**
+   * Array of JSON objects that contain field attributes. Only for select-field types. Example: values=[{'label':'Select...','value':'','isDefault':true,'selected':true}, {'label':'MR','value':'Mr'}, {'label':'MS','value':'Ms'}, {'label':'MRS','value':'Mrs'}, {'label':'DR','value':'Dr'}, {'label':'PROF','value':'Prof'}]
+   */
+  values?: string;
+  /**
+   * Number of lines to display for the field element
+   */
+  visibleLines?: number;
+}

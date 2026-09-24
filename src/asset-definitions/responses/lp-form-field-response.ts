@@ -1,0 +1,24 @@
+import type { FormFieldVisibilityRuleResponse } from './form-field-visibility-rule-response';
+
+export interface LpFormFieldResponse {
+  blankFields?: number;
+  columnNumber?: number;
+  dataType?: string;
+  defaultValue?: string;
+  fieldMetaData?: Record<string, unknown>;
+  fieldWidth?: number;
+  fields?: Array<string>;
+  formPrefill?: boolean;
+  isSensitive?: boolean;
+  hintText?: string;
+  id?: string;
+  instructions?: string;
+  label?: string;
+  labelWidth?: number;
+  maxLength?: number;
+  required?: boolean;
+  rowNumber?: number;
+  text?: string;
+  validationMessage?: Record<string, unknown>;
+  visibilityRules?: FormFieldVisibilityRuleResponse;
+}

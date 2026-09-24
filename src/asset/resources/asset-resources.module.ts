@@ -1,0 +1,53 @@
+import { Module } from '@nestjs/common'
+import { ChannelsModule } from './channels/channels.module'
+import { EmailTemplatesModule } from './email-templates/email-templates.module'
+import { EmailTemplatesNewModule } from './email-templates-new/email-templates-new.module'
+import { EmailsModule } from './emails/emails.module'
+import { EmailsNewModule } from './emails-new/emails-new.module'
+import { FileContentsModule } from './file-contents/file-contents.module'
+import { FilesModule } from './files/files.module'
+import { FoldersModule } from './folders/folders.module'
+import { FormFieldsModule } from './form-fields/form-fields.module'
+import { FormsModule } from './forms/forms.module'
+import { FragmentsNewModule } from './fragments-new/fragments-new.module'
+import { LandingPageContentModule } from './landing-page-content/landing-page-content.module'
+import { LandingPageRedirectRulesModule } from './landing-page-redirect-rules/landing-page-redirect-rules.module'
+import { LandingPageTemplatesModule } from './landing-page-templates/landing-page-templates.module'
+import { LandingPagesModule } from './landing-pages/landing-pages.module'
+import { ProgramsModule } from './programs/programs.module'
+import { SegmentsModule } from './segments/segments.module'
+import { SmartCampaignsModule } from './smart-campaigns/smart-campaigns.module'
+import { SmartListsModule } from './smart-lists/smart-lists.module'
+import { SnippetsModule } from './snippets/snippets.module'
+import { StaticListsModule } from './static-lists/static-lists.module'
+import { TagsModule } from './tags/tags.module'
+import { TokensModule } from './tokens/tokens.module'
+
+@Module({
+  imports: [
+    ChannelsModule,
+    EmailTemplatesModule,
+    EmailTemplatesNewModule,
+    EmailsModule,
+    EmailsNewModule,
+    FileContentsModule,
+    FilesModule,
+    FoldersModule,
+    FormFieldsModule,
+    FormsModule,
+    FragmentsNewModule,
+    LandingPageContentModule,
+    LandingPageRedirectRulesModule,
+    LandingPageTemplatesModule,
+    LandingPagesModule,
+    ProgramsModule,
+    SegmentsModule,
+    SmartCampaignsModule,
+    SmartListsModule,
+    SnippetsModule,
+    StaticListsModule,
+    TagsModule,
+    TokensModule,
+  ],
+})
+export class AssetResourcesModule {}
