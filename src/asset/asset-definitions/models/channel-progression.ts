@@ -1,0 +1,26 @@
+export interface ChannelProgression {
+  /**
+   * Description of the program status
+   */
+  description?: string
+  /**
+   * Whether the status has been hidden
+   */
+  hidden?: boolean
+  /**
+   * Name of the status
+   */
+  name?: string
+  /**
+   * Type of the status
+   */
+  type?: string
+  /**
+   * Step number of the status
+   */
+  step?: number
+  /**
+   * Whether this status is a success step for program members
+   */
+  success?: boolean
+}

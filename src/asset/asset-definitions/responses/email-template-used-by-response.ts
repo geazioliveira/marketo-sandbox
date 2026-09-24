@@ -1,0 +1,24 @@
+export type EmailTemplateUsedByResponseStatus = 'approved' | 'draft'
+
+export interface EmailTemplateUsedByResponse {
+  /**
+   * Id of the asset
+   */
+  id: number
+  /**
+   * Name of the asset
+   */
+  name: string
+  /**
+   * Type of asset
+   */
+  type: string
+  /**
+   * Status filter for draft or approved versions
+   */
+  status: EmailTemplateUsedByResponseStatus
+  /**
+   * Datetime the asset was most recently updated
+   */
+  updatedAt: string
+}

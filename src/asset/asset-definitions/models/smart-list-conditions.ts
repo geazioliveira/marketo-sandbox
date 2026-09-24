@@ -1,0 +1,38 @@
+export interface SmartListConditions {
+  /**
+   * Id of the activity attribute. Present on conditions of activity rules
+   */
+  activityAttributeId?: number
+  /**
+   * Name of the activity attribute. Present on conditions of activity rules
+   */
+  activityAttributeName?: string
+  /**
+   * Id of the field. Present on conditions of attribute rules
+   */
+  attributeId?: number
+  /**
+   * Name of the field. Present on conditions of attribute rules
+   */
+  attributeName?: string
+  /**
+   * Value of operator
+   */
+  operator?: string
+  /**
+   * List of values
+   */
+  values: Array<string>
+  /**
+   * Whether the condition is primary or not (first condition of the smart list)
+   */
+  isPrimary?: boolean
+  /**
+   * Whether the condition has a validation error
+   */
+  isError?: boolean
+  /**
+   * Validation error of the condition. Present when isError is true
+   */
+  errorMessage?: string
+}

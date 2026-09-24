@@ -1,0 +1,48 @@
+export type RecurrenceIntervalType = 'Daily' | 'Weekly' | 'Monthly'
+export type RecurrenceDayOfWeek =
+  | 'Monday'
+  | 'Tuesday'
+  | 'Wednesday'
+  | 'Thursday'
+  | 'Friday'
+  | 'Saturday'
+  | 'Sunday'
+
+export interface Recurrence {
+  /**
+   * Datetime of the first scheduled campaign to run. Required if setting recurrence. Not required to create a smart campaign that has no recurrence
+   */
+  startAt: string
+  /**
+   * Datetime after which no further runs will be automatically scheduled
+   */
+  endAt: string
+  /**
+   * Recurrence interval. Not required to create a smart campaign that has no recurrence
+   */
+  intervalType: RecurrenceIntervalType
+  /**
+   * Number of interval units between recurrences
+   */
+  interval: number
+  /**
+   * Only run smart campaign on weekdays. May only be set if intervalType is 'Daily'. Defaults to false
+   */
+  weekdayOnly: boolean
+  /**
+   * String array of empty or one or more of 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'. May only be set if intervalType is 'Weekly'
+   */
+  weekdayMask: Array<string>
+  /**
+   * Day of the month to recur. Permissible range 1-31. May only be set if intervalType is 'Monthly' and dayOfWeek and weekOfMonth are unset.
+   */
+  dayOfMonth: number
+  /**
+   * Day of the week to recur. May only be set if dayOfMonth is not set, and weekOfMonth is set
+   */
+  dayOfWeek: RecurrenceDayOfWeek
+  /**
+   * Week of the month to recur. Permissible range 1-4. May only be set if dayOfMonth is not set, and dayOfWeek is set
+   */
+  weekOfMonth: number
+}

@@ -1,0 +1,45 @@
+import type { JsonNode } from '../models/json-node'
+
+export type LandingPageContentResponseFollowupType =
+  'url' | 'lp' | 'formDefined'
+export type LandingPageContentResponseType =
+  | 'Image'
+  | 'SocialButton'
+  | 'Form'
+  | 'DynamicContent'
+  | 'Rectangle'
+  | 'Snippet'
+  | 'RichText'
+  | 'HTML'
+  | 'Video'
+  | 'Poll'
+  | 'ReferralOffer'
+  | 'Sweepstakes'
+
+export interface LandingPageContentResponse {
+  /**
+   * Content of the section. Expected values vary based on type. Image: An image URL. RichText: HTML Content. HTML: HTML Content. Form: A form id. Rectangle: Empty. Snippet: A snippet id.
+   */
+  content?: Record<string, unknown>
+  /**
+   * Follow-up behavior of a form. Only available for form-type content sections. Defaults to form defined behavior.
+   */
+  followupType?: LandingPageContentResponseFollowupType
+  /**
+   * Where to follow-up on form submission. When followupType is lp, accepts the integer id of a landing page. For url, it accepts a url string.
+   */
+  followupValue?: string
+  formattingOptions?: JsonNode
+  /**
+   * Id of the content section, may be a string or an int
+   */
+  id: Record<string, unknown>
+  /**
+   * Index of the content section. Index orients the elements from lowest to highest
+   */
+  index?: number
+  /**
+   * Type of content section
+   */
+  type: LandingPageContentResponseType
+}

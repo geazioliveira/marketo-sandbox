@@ -1,0 +1,59 @@
+import type { Folder } from './folder'
+
+export type BrowseAllProgramsStatus = 'locked' | 'unlocked' | 'on' | 'off'
+export type BrowseAllProgramsType = 'program' | 'event' | 'webinar' | 'nurture'
+
+export interface BrowseAllPrograms {
+  /**
+   * Channel of the program
+   */
+  channel: string
+  /**
+   * Datetime the asset was created
+   */
+  createdAt?: string
+  /**
+   * Description of the asset
+   */
+  description?: string
+  /**
+   * JSON representation of parent folder, with members 'id', and 'type' which may be 'Folder' or 'Program'
+   */
+  folder: Folder
+  /**
+   * Id of the asset
+   */
+  id?: number
+  /**
+   * Name of the asset
+   */
+  name?: string
+  /**
+   * SFDC id of the program if linked to an SFDC campaign
+   */
+  sfdcId?: string
+  /**
+   * Name of the linked SFDC campaign if applicable
+   */
+  sfdcName?: string
+  /**
+   * Status of the program. Only valid for Email and engagement program types.
+   */
+  status: BrowseAllProgramsStatus
+  /**
+   * Type of the program
+   */
+  type: BrowseAllProgramsType
+  /**
+   * Datetime the asset was most recently updated
+   */
+  updatedAt?: string
+  /**
+   * Url of the asset in the Marketo UI
+   */
+  url?: string
+  /**
+   * Name of the workspace
+   */
+  workspace?: string
+}

@@ -1,0 +1,26 @@
+export interface ThankYouPageRequest {
+  /**
+   * When true, this is the default rule, and will be applied when a user does not qualify for any of the other rules
+   */
+  default?: boolean
+  /**
+   * Type of followup. When set to url, will follow to the url set in followupValue. When set to lp, will follow to the Landing page with the id given in followupValue
+   */
+  followupType: string
+  /**
+   * Where to follow to on submission. Given as a URL or and Integer depending on followupType
+   */
+  followupValue: string
+  /**
+   * Operator to evaluate aginst the subject field
+   */
+  operator: string
+  /**
+   * Field to apply to operator to
+   */
+  subjectField: string
+  /**
+   * Comma-separated list of values to compare to with the operator
+   */
+  values: Array<string>
+}

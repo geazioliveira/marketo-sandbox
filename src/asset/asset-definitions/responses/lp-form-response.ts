@@ -1,0 +1,88 @@
+import type { Folder } from '../models/folder'
+import type { FormKnownVisitorDTO } from '../models/form-known-visitor-dto'
+import type { FormThankYouPageDTO } from '../models/form-thank-you-page-dto'
+
+export type LpFormResponseStatus = 'approved' | 'draft'
+
+export interface LpFormResponse {
+  /**
+   * Label text of the button
+   */
+  buttonLabel: string
+  /**
+   * Location in pixels of the button relative to the left of the form
+   */
+  buttonLocation: number
+  /**
+   * Datetime the asset was created
+   */
+  createdAt?: string
+  /**
+   * Description of the asset
+   */
+  description?: string
+  /**
+   * JSON representation of parent folder, with members 'id', and 'type' which may be 'Folder' or 'Program'
+   */
+  folder: Folder
+  /**
+   * font-family property for the form
+   */
+  fontFamily: string
+  /**
+   * font-size property of the form
+   */
+  fontSize: string
+  /**
+   * Id of the asset
+   */
+  id?: number
+  /**
+   * Known visitor behavior for the form
+   */
+  knownVisitor: FormKnownVisitorDTO
+  /**
+   * Default positioning of labels.
+   */
+  labelPosition: string
+  /**
+   * Language of the form
+   */
+  language: string
+  /**
+   * Locale of the form
+   */
+  locale: string
+  /**
+   * Name of the asset
+   */
+  name?: string
+  /**
+   * Whether progressive profiling is enabled for the form
+   */
+  progressiveProfiling: boolean
+  /**
+   * Status filter for draft or approved versions
+   */
+  status: LpFormResponseStatus
+  /**
+   * List of thank you page behaviors for the form
+   */
+  thankYouList: Array<FormThankYouPageDTO>
+  /**
+   * CSS theme for the form to use
+   */
+  theme: string
+  /**
+   * Datetime the asset was most recently updated
+   */
+  updatedAt?: string
+  /**
+   * Url of the asset in the Marketo UI
+   */
+  url?: string
+  /**
+   * Waiting text of the button
+   */
+  waitingLabel: string
+}

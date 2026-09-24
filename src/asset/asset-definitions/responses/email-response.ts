@@ -1,0 +1,93 @@
+import type { EmailCCFields } from '../models/email-cc-fields'
+import type { EmailHeaderField } from '../models/email-header-field'
+import type { Folder } from '../models/folder'
+
+export type EmailResponseVersion = 1 | 2
+
+export interface EmailResponse {
+  /**
+   * Datetime the asset was created
+   */
+  createdAt?: string
+  /**
+   * Description of the asset
+   */
+  description?: string
+  /**
+   * JSON representation of parent folder, with members 'id', and 'type' which may be 'Folder' or 'Program'
+   */
+  folder: Folder
+  /**
+   * From-address of the Email
+   */
+  fromEmail: EmailHeaderField
+  /**
+   * From-name of the Email
+   */
+  fromName: EmailHeaderField
+  /**
+   * Id of the asset
+   */
+  id?: number
+  /**
+   * Name of the asset
+   */
+  name?: string
+  /**
+   * Whether the email is operational. Operational emails bypass unsubscribe status. Defaults to false
+   */
+  operational: boolean
+  /**
+   * Whether the email is published to Marketo Sales Insight
+   */
+  publishToMSI: boolean
+  /**
+   * Reply-To address of the Email
+   */
+  replyEmail: EmailHeaderField
+  /**
+   * Status filter for draft or approved versions
+   */
+  status: string
+  /**
+   * Subject Line of the Email
+   */
+  subject: EmailHeaderField
+  /**
+   * Id of the parent template
+   */
+  template: number
+  /**
+   * Setting to include text-only version of email when sent
+   */
+  textOnly: boolean
+  /**
+   * Datetime the asset was most recently updated
+   */
+  updatedAt?: string
+  /**
+   * Url of the asset in the Marketo UI
+   */
+  url?: string
+  /**
+   * The type version of the email
+   */
+  version?: EmailResponseVersion
+  /**
+   * Whether 'View as Webpage' function is enabled for the email
+   */
+  webView: boolean
+  /**
+   * Name of the workspace
+   */
+  workspace?: string
+  /**
+   * Setting to automatically copy HTML version to Text version
+   */
+  autoCopyToText: boolean
+  /**
+   * The email preheader text (max 1024 characters)
+   */
+  preHeader: string
+  ccFields?: Array<EmailCCFields>
+}
