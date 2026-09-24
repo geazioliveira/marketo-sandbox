@@ -1,0 +1,37 @@
+import { faker } from '@faker-js/faker'
+import type { EmailResponse } from '../../asset-definitions/responses/email-response'
+import { makeEmailCCFields } from './email-cc-fields'
+import { makeEmailHeaderField } from './email-header-field'
+import { makeFolder } from './folder'
+
+export function makeEmailResponse(
+  overrides: Partial<EmailResponse> = {},
+): EmailResponse {
+  return {
+    createdAt: faker.date.recent().toISOString(),
+    description: faker.lorem.sentence(),
+    folder: makeFolder(),
+    fromEmail: makeEmailHeaderField(),
+    fromName: makeEmailHeaderField(),
+    id: faker.number.int({ min: 1, max: 99999 }),
+    name: faker.lorem.words({ min: 2, max: 3 }),
+    operational: faker.datatype.boolean(),
+    publishToMSI: faker.datatype.boolean(),
+    replyEmail: makeEmailHeaderField(),
+    status: faker.helpers.arrayElement(['approved', 'draft'] as const),
+    subject: makeEmailHeaderField(),
+    template: faker.number.int({ min: 1, max: 1000 }),
+    textOnly: faker.datatype.boolean(),
+    updatedAt: faker.date.recent().toISOString(),
+    url: faker.internet.url(),
+    version: faker.helpers.arrayElement([1, 2] as const),
+    webView: faker.datatype.boolean(),
+    workspace: 'Default',
+    autoCopyToText: faker.datatype.boolean(),
+    preHeader: faker.lorem.words({ min: 2, max: 5 }),
+    ccFields: faker.helpers.multiple(() => makeEmailCCFields(), {
+      count: { min: 1, max: 3 },
+    }),
+    ...overrides,
+  }
+}

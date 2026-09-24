@@ -1,0 +1,18 @@
+import { faker } from '@faker-js/faker'
+import type { CreateEmailTemplateV2Request } from '../../asset-definitions/requests/create-email-template-v2-request'
+import { makeAppDataDTO } from './app-data-dto'
+import { makeDataDTO } from './data-dto'
+import { makeEditorContextDto } from './editor-context-dto'
+
+export function makeCreateEmailTemplateV2Request(
+  overrides: Partial<CreateEmailTemplateV2Request> = {},
+): CreateEmailTemplateV2Request {
+  return {
+    name: faker.lorem.words({ min: 2, max: 3 }),
+    description: faker.lorem.sentence(),
+    appData: makeAppDataDTO(),
+    data: makeDataDTO(),
+    editorContext: makeEditorContextDto(),
+    ...overrides,
+  }
+}

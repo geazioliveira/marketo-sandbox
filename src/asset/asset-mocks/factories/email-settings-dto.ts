@@ -1,0 +1,16 @@
+import { faker } from '@faker-js/faker'
+import type { EmailSettingsDTO } from '../../asset-definitions/models/email-settings-dto'
+
+export function makeEmailSettingsDTO(
+  overrides: Partial<EmailSettingsDTO> = {},
+): EmailSettingsDTO {
+  return {
+    brandedDomain: faker.internet.domainName(),
+    dedicatedIp: faker.lorem.word(),
+    enableUrlTracking: faker.datatype.boolean(),
+    isOperational: faker.datatype.boolean(),
+    isTextOnly: faker.datatype.boolean(),
+    isWebPageView: faker.datatype.boolean(),
+    ...overrides,
+  }
+}

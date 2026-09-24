@@ -1,0 +1,33 @@
+import { faker } from '@faker-js/faker'
+import type { LpFormFieldResponse } from '../../asset-definitions/responses/lp-form-field-response'
+import { makeFormFieldVisibilityRuleResponse } from './form-field-visibility-rule-response'
+
+export function makeLpFormFieldResponse(
+  overrides: Partial<LpFormFieldResponse> = {},
+): LpFormFieldResponse {
+  return {
+    blankFields: faker.number.int({ min: 1, max: 1000 }),
+    columnNumber: faker.number.int({ min: 1, max: 1000 }),
+    dataType: faker.lorem.word(),
+    defaultValue: faker.lorem.word(),
+    fieldMetaData: {},
+    fieldWidth: faker.number.int({ min: 1, max: 1000 }),
+    fields: faker.helpers.multiple(() => faker.lorem.word(), {
+      count: { min: 1, max: 3 },
+    }),
+    formPrefill: faker.datatype.boolean(),
+    isSensitive: faker.datatype.boolean(),
+    hintText: faker.lorem.paragraph(),
+    id: faker.lorem.word(),
+    instructions: faker.lorem.word(),
+    label: faker.lorem.words({ min: 2, max: 5 }),
+    labelWidth: faker.number.int({ min: 1, max: 1000 }),
+    maxLength: faker.number.int({ min: 1, max: 1000 }),
+    required: faker.datatype.boolean(),
+    rowNumber: faker.number.int({ min: 1, max: 1000 }),
+    text: faker.lorem.paragraph(),
+    validationMessage: {},
+    visibilityRules: makeFormFieldVisibilityRuleResponse(),
+    ...overrides,
+  }
+}

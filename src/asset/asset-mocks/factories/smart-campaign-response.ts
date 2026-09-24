@@ -1,0 +1,51 @@
+import { faker } from '@faker-js/faker'
+import type { SmartCampaignResponse } from '../../asset-definitions/responses/smart-campaign-response'
+import { makeFolder } from './folder'
+import { makeRecurrence } from './recurrence'
+
+export function makeSmartCampaignResponse(
+  overrides: Partial<SmartCampaignResponse> = {},
+): SmartCampaignResponse {
+  return {
+    id: faker.number.int({ min: 1, max: 99999 }),
+    name: faker.lorem.words({ min: 2, max: 3 }),
+    description: faker.lorem.sentence(),
+    type: faker.helpers.arrayElement(['batch', 'default', 'trigger'] as const),
+    isSystem: faker.datatype.boolean(),
+    isActive: faker.datatype.boolean(),
+    isRequestable: faker.datatype.boolean(),
+    recurrence: makeRecurrence(),
+    qualificationRuleType: faker.helpers.arrayElement([
+      'once',
+      'any',
+      'interval',
+    ] as const),
+    qualificationRuleInterval: faker.number.int({ min: 1, max: 1000 }),
+    qualificationRuleUnit: faker.helpers.arrayElement([
+      'hour',
+      'day',
+      'week',
+      'month',
+    ] as const),
+    maxMembers: faker.number.int({ min: 1, max: 1000 }),
+    isCommunicationLimitEnabled: faker.datatype.boolean(),
+    smartListId: faker.number.int({ min: 1, max: 99999 }),
+    flowId: faker.number.int({ min: 1, max: 99999 }),
+    parentProgramId: faker.number.int({ min: 1, max: 99999 }),
+    folder: makeFolder(),
+    createdAt: faker.date.recent().toISOString(),
+    updatedAt: faker.date.recent().toISOString(),
+    workspace: 'Default',
+    computedUrl: faker.internet.url(),
+    status: faker.helpers.arrayElement([
+      'Inactive',
+      'Single Run',
+      'Invalid',
+      'Recurring Run',
+      'Active',
+      'Requested',
+      'Never Run',
+    ] as const),
+    ...overrides,
+  }
+}

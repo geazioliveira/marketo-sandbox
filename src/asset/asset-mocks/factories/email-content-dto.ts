@@ -1,0 +1,34 @@
+import { faker } from '@faker-js/faker'
+import type { EmailContentDTO } from '../../asset-definitions/models/email-content-dto'
+import { makeAssociatedStateDTO } from './associated-state-dto'
+import { makeContentMetadataDTO } from './content-metadata-dto'
+import { makeEditorContextDto } from './editor-context-dto'
+import { makeEmailAppDataResponseDTO } from './email-app-data-response-dto'
+import { makeEmailHeadersDTO } from './email-headers-dto'
+import { makeEmailSettingsResponseDTO } from './email-settings-response-dto'
+
+export function makeEmailContentDTO(
+  overrides: Partial<EmailContentDTO> = {},
+): EmailContentDTO {
+  return {
+    id: faker.lorem.word(),
+    name: faker.lorem.words({ min: 2, max: 3 }),
+    description: faker.lorem.sentence(),
+    appType: faker.lorem.word(),
+    headers: makeEmailHeadersDTO(),
+    metadata: makeContentMetadataDTO(),
+    settings: makeEmailSettingsResponseDTO(),
+    status: faker.lorem.word(),
+    state: faker.lorem.word(),
+    virtualId: faker.lorem.word(),
+    associatedStates: faker.helpers.multiple(() => makeAssociatedStateDTO(), {
+      count: { min: 1, max: 3 },
+    }),
+    appData: makeEmailAppDataResponseDTO(),
+    templateId: faker.lorem.word(),
+    externalId: faker.lorem.word(),
+    editorContext: makeEditorContextDto(),
+    scriptEngine: faker.lorem.word(),
+    ...overrides,
+  }
+}

@@ -1,0 +1,23 @@
+import { faker } from '@faker-js/faker'
+
+/** Reference date used so generated timestamps are stable when seeded. */
+const DEFAULT_REF_DATE = '2024-01-01T00:00:00.000Z'
+
+/**
+ * Seed faker so mock responses are reproducible across restarts.
+ * Set MARKETO_MOCK_SEED to any integer to pin the generated data, and
+ * MARKETO_MOCK_REF_DATE to control the date the mock timestamps hang off.
+ */
+export function seedMockData(
+  seed: number | undefined = Number(process.env.MARKETO_MOCK_SEED) || undefined,
+  refDate: string = process.env.MARKETO_MOCK_REF_DATE ?? DEFAULT_REF_DATE,
+): void {
+  if (seed === undefined) {
+    return
+  }
+
+  faker.seed(seed)
+  // Without a fixed reference date, relative helpers such as `faker.date.recent()`
+  // stay anchored to the current clock and drift between runs.
+  faker.setDefaultRefDate(refDate)
+}

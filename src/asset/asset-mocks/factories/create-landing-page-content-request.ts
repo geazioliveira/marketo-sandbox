@@ -1,0 +1,34 @@
+import { faker } from '@faker-js/faker'
+import type { CreateLandingPageContentRequest } from '../../asset-definitions/requests/create-landing-page-content-request'
+
+export function makeCreateLandingPageContentRequest(
+  overrides: Partial<CreateLandingPageContentRequest> = {},
+): CreateLandingPageContentRequest {
+  return {
+    backgroundColor: faker.lorem.word(),
+    borderColor: faker.lorem.word(),
+    borderStyle: faker.lorem.word(),
+    borderWidth: faker.lorem.word(),
+    contentId: faker.lorem.paragraph(),
+    height: faker.lorem.word(),
+    hideDesktop: faker.datatype.boolean(),
+    hideMobile: faker.datatype.boolean(),
+    imageOpenNewWindow: faker.lorem.word(),
+    left: faker.lorem.word(),
+    linkUrl: faker.internet.url(),
+    opacity: faker.lorem.word(),
+    top: faker.lorem.word(),
+    type: faker.helpers.arrayElement([
+      'Image',
+      'Form',
+      'Rectangle',
+      'Snippet',
+      'RichText',
+      'HTML',
+    ] as const),
+    value: faker.lorem.word(),
+    width: faker.lorem.word(),
+    zIndex: faker.lorem.word(),
+    ...overrides,
+  }
+}

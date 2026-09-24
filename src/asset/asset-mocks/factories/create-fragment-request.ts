@@ -1,0 +1,20 @@
+import { faker } from '@faker-js/faker'
+import type { CreateFragmentRequest } from '../../asset-definitions/requests/create-fragment-request'
+import { makeAppDataDTO } from './app-data-dto'
+import { makeDataDTO } from './data-dto'
+import { makeEditorContextDto } from './editor-context-dto'
+import { makeFragmentSettingsDTO } from './fragment-settings-dto'
+
+export function makeCreateFragmentRequest(
+  overrides: Partial<CreateFragmentRequest> = {},
+): CreateFragmentRequest {
+  return {
+    name: faker.lorem.words({ min: 2, max: 3 }),
+    description: faker.lorem.sentence(),
+    appData: makeAppDataDTO(),
+    data: makeDataDTO(),
+    editorContext: makeEditorContextDto(),
+    settings: makeFragmentSettingsDTO(),
+    ...overrides,
+  }
+}

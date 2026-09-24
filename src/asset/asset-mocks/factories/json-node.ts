@@ -1,0 +1,39 @@
+import { faker } from '@faker-js/faker'
+import type { JsonNode } from '../../asset-definitions/models/json-node'
+
+export function makeJsonNode(overrides: Partial<JsonNode> = {}): JsonNode {
+  return {
+    array: faker.datatype.boolean(),
+    bigDecimal: faker.datatype.boolean(),
+    bigInteger: faker.datatype.boolean(),
+    binary: faker.datatype.boolean(),
+    boolean: faker.datatype.boolean(),
+    containerNode: faker.datatype.boolean(),
+    double: faker.datatype.boolean(),
+    float: faker.datatype.boolean(),
+    floatingPointNumber: faker.datatype.boolean(),
+    int: faker.datatype.boolean(),
+    integralNumber: faker.datatype.boolean(),
+    long: faker.datatype.boolean(),
+    missingNode: faker.datatype.boolean(),
+    nodeType: faker.helpers.arrayElement([
+      'ARRAY',
+      'BINARY',
+      'BOOLEAN',
+      'MISSING',
+      'NULL',
+      'NUMBER',
+      'OBJECT',
+      'POJO',
+      'STRING',
+    ] as const),
+    null: faker.datatype.boolean(),
+    number: faker.datatype.boolean(),
+    object: faker.datatype.boolean(),
+    pojo: faker.datatype.boolean(),
+    short: faker.datatype.boolean(),
+    textual: faker.datatype.boolean(),
+    valueNode: faker.datatype.boolean(),
+    ...overrides,
+  }
+}

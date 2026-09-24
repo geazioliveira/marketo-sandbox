@@ -1,0 +1,21 @@
+import { faker } from '@faker-js/faker'
+import type { UpdateEmailRequest } from '../../asset-definitions/requests/update-email-request'
+import { makeDataDTO } from './data-dto'
+import { makeEditorContextDto } from './editor-context-dto'
+import { makeEmailSettingsDTO } from './email-settings-dto'
+import { makeUpdateEmailHeadersDTO } from './update-email-headers-dto'
+
+export function makeUpdateEmailRequest(
+  overrides: Partial<UpdateEmailRequest> = {},
+): UpdateEmailRequest {
+  return {
+    name: faker.lorem.words({ min: 2, max: 3 }),
+    description: faker.lorem.sentence(),
+    data: makeDataDTO(),
+    headers: makeUpdateEmailHeadersDTO(),
+    editorContext: makeEditorContextDto(),
+    settings: makeEmailSettingsDTO(),
+    templateId: faker.lorem.word(),
+    ...overrides,
+  }
+}

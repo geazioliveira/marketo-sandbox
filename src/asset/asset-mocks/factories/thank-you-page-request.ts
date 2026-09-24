@@ -1,0 +1,18 @@
+import { faker } from '@faker-js/faker'
+import type { ThankYouPageRequest } from '../../asset-definitions/requests/thank-you-page-request'
+
+export function makeThankYouPageRequest(
+  overrides: Partial<ThankYouPageRequest> = {},
+): ThankYouPageRequest {
+  return {
+    default: faker.datatype.boolean(),
+    followupType: faker.lorem.word(),
+    followupValue: faker.lorem.word(),
+    operator: faker.lorem.word(),
+    subjectField: faker.lorem.words({ min: 2, max: 5 }),
+    values: faker.helpers.multiple(() => faker.lorem.word(), {
+      count: { min: 1, max: 3 },
+    }),
+    ...overrides,
+  }
+}

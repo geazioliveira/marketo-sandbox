@@ -1,0 +1,45 @@
+import { faker } from '@faker-js/faker'
+import type { VisibilityRuleRequest } from '../../asset-definitions/requests/visibility-rule-request'
+import { makePickListDTO } from './pick-list-dto'
+
+export function makeVisibilityRuleRequest(
+  overrides: Partial<VisibilityRuleRequest> = {},
+): VisibilityRuleRequest {
+  return {
+    altLabel: faker.lorem.words({ min: 2, max: 5 }),
+    operator: faker.helpers.arrayElement([
+      'is',
+      'isNot',
+      'isEmpty',
+      'isNotEmpty',
+      'startsWith',
+      'notStartsWith',
+      'endsWith',
+      'notEndsWith',
+      'contains',
+      'notContains',
+      'greaterThan',
+      'lessThan',
+      'atLeast',
+      'atMost',
+      'between',
+      'notBetween',
+      'notInTimeFrame',
+      'inPast',
+      'notInPast',
+      'after',
+      'before',
+      'inTimeFrame',
+      'onOrAfter',
+      'onOrBefore',
+    ] as const),
+    pickListValues: faker.helpers.multiple(() => makePickListDTO(), {
+      count: { min: 1, max: 3 },
+    }),
+    subjectField: faker.lorem.words({ min: 2, max: 5 }),
+    values: faker.helpers.multiple(() => faker.lorem.word(), {
+      count: { min: 1, max: 3 },
+    }),
+    ...overrides,
+  }
+}

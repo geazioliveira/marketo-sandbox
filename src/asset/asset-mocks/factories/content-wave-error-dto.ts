@@ -1,0 +1,21 @@
+import { faker } from '@faker-js/faker'
+import type { ContentWaveErrorDTO } from '../../asset-definitions/models/content-wave-error-dto'
+
+export function makeContentWaveErrorDTO(
+  overrides: Partial<ContentWaveErrorDTO> = {},
+): ContentWaveErrorDTO {
+  return {
+    key: faker.lorem.word(),
+    message: faker.lorem.sentence(),
+    code: faker.string.numeric(4),
+    dynamicMessage: faker.lorem.sentence(),
+    type: faker.helpers.arrayElement(['info', 'warning', 'error'] as const),
+    source: faker.lorem.word(),
+    errorMessage: faker.lorem.sentence(),
+    errorPosition: {
+      line: faker.number.int({ min: 1, max: 1000 }),
+      column: faker.number.int({ min: 1, max: 1000 }),
+    },
+    ...overrides,
+  }
+}

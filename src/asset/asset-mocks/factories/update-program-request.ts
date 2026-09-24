@@ -1,0 +1,24 @@
+import { faker } from '@faker-js/faker'
+import type { UpdateProgramRequest } from '../../asset-definitions/requests/update-program-request'
+import { makeCostRequest } from './cost-request'
+import { makeTagRequest } from './tag-request'
+
+export function makeUpdateProgramRequest(
+  overrides: Partial<UpdateProgramRequest> = {},
+): UpdateProgramRequest {
+  return {
+    channel: faker.lorem.word(),
+    costs: faker.helpers.multiple(() => makeCostRequest(), {
+      count: { min: 1, max: 3 },
+    }),
+    costsDestructiveUpdate: faker.datatype.boolean(),
+    description: faker.lorem.sentence(),
+    endDate: faker.date.recent().toISOString(),
+    name: faker.lorem.words({ min: 2, max: 3 }),
+    startDate: faker.date.recent().toISOString(),
+    tags: faker.helpers.multiple(() => makeTagRequest(), {
+      count: { min: 1, max: 3 },
+    }),
+    ...overrides,
+  }
+}

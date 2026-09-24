@@ -1,0 +1,24 @@
+import { faker } from '@faker-js/faker'
+import type { CreateProgramRequest } from '../../asset-definitions/requests/create-program-request'
+import { makeCostRequest } from './cost-request'
+import { makeFolder } from './folder'
+import { makeTagRequest } from './tag-request'
+
+export function makeCreateProgramRequest(
+  overrides: Partial<CreateProgramRequest> = {},
+): CreateProgramRequest {
+  return {
+    channel: faker.lorem.word(),
+    costs: faker.helpers.multiple(() => makeCostRequest(), {
+      count: { min: 1, max: 3 },
+    }),
+    description: faker.lorem.sentence(),
+    folder: makeFolder(),
+    name: faker.lorem.words({ min: 2, max: 3 }),
+    tags: faker.helpers.multiple(() => makeTagRequest(), {
+      count: { min: 1, max: 3 },
+    }),
+    type: faker.lorem.word(),
+    ...overrides,
+  }
+}

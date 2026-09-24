@@ -1,0 +1,44 @@
+import { faker } from '@faker-js/faker'
+import type { ProgramResponse } from '../../asset-definitions/responses/program-response'
+import { makeCosts } from './costs'
+import { makeFolder } from './folder'
+import { makeTags } from './tags'
+
+export function makeProgramResponse(
+  overrides: Partial<ProgramResponse> = {},
+): ProgramResponse {
+  return {
+    channel: faker.lorem.word(),
+    costs: faker.helpers.multiple(() => makeCosts(), {
+      count: { min: 1, max: 3 },
+    }),
+    createdAt: faker.date.recent().toISOString(),
+    description: faker.lorem.sentence(),
+    endDate: faker.date.recent().toISOString(),
+    folder: makeFolder(),
+    id: faker.number.int({ min: 1, max: 99999 }),
+    name: faker.lorem.words({ min: 2, max: 3 }),
+    sfdcId: faker.lorem.word(),
+    sfdcName: faker.lorem.words({ min: 2, max: 3 }),
+    startDate: faker.date.recent().toISOString(),
+    status: faker.helpers.arrayElement([
+      'locked',
+      'unlocked',
+      'on',
+      'off',
+    ] as const),
+    tags: faker.helpers.multiple(() => makeTags(), {
+      count: { min: 1, max: 3 },
+    }),
+    type: faker.helpers.arrayElement([
+      'default',
+      'event',
+      'webinar',
+      'nurture',
+    ] as const),
+    updatedAt: faker.date.recent().toISOString(),
+    url: faker.internet.url(),
+    workspace: 'Default',
+    ...overrides,
+  }
+}

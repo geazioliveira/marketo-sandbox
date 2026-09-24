@@ -1,0 +1,15 @@
+import { faker } from '@faker-js/faker'
+import type { AutoSuggestValue } from '../../asset-definitions/models/auto-suggest-value'
+
+export function makeAutoSuggestValue(
+  overrides: Partial<AutoSuggestValue> = {},
+): AutoSuggestValue {
+  return {
+    id: faker.number.int({ min: 1, max: 99999 }),
+    displayName: faker.lorem.words({ min: 2, max: 3 }),
+    name: faker.lorem.words({ min: 2, max: 3 }),
+    workspace: 'Default',
+    workspaceId: faker.number.int({ min: 1, max: 99999 }),
+    ...overrides,
+  }
+}

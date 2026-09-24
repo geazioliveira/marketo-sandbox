@@ -1,0 +1,18 @@
+import { faker } from '@faker-js/faker'
+import type { FlowStepChoice } from '../../asset-definitions/models/flow-step-choice'
+import { makeFlowStepChoiceAttribute } from './flow-step-choice-attribute'
+import { makeFlowStepChoiceRule } from './flow-step-choice-rule'
+
+export function makeFlowStepChoice(
+  overrides: Partial<FlowStepChoice> = {},
+): FlowStepChoice {
+  return {
+    id: faker.number.int({ min: 1, max: 99999 }),
+    default: faker.datatype.boolean(),
+    attributes: faker.helpers.multiple(() => makeFlowStepChoiceAttribute(), {
+      count: { min: 1, max: 3 },
+    }),
+    rule: makeFlowStepChoiceRule(),
+    ...overrides,
+  }
+}

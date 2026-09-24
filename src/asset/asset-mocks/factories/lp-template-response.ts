@@ -1,0 +1,22 @@
+import { faker } from '@faker-js/faker'
+import type { LpTemplateResponse } from '../../asset-definitions/responses/lp-template-response'
+import { makeFolder } from './folder'
+
+export function makeLpTemplateResponse(
+  overrides: Partial<LpTemplateResponse> = {},
+): LpTemplateResponse {
+  return {
+    createdAt: faker.date.recent().toISOString(),
+    description: faker.lorem.sentence(),
+    enableMunchkin: faker.datatype.boolean(),
+    folder: makeFolder(),
+    id: faker.number.int({ min: 1, max: 99999 }),
+    name: faker.lorem.words({ min: 2, max: 3 }),
+    status: faker.helpers.arrayElement(['approved', 'draft'] as const),
+    templateType: faker.helpers.arrayElement(['guided', 'freeForm'] as const),
+    updatedAt: faker.date.recent().toISOString(),
+    url: faker.internet.url(),
+    workspace: 'Default',
+    ...overrides,
+  }
+}

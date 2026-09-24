@@ -1,0 +1,24 @@
+import { faker } from '@faker-js/faker'
+import type { CreateLandingPageRequest } from '../../asset-definitions/requests/create-landing-page-request'
+import { makeFolder } from './folder'
+
+export function makeCreateLandingPageRequest(
+  overrides: Partial<CreateLandingPageRequest> = {},
+): CreateLandingPageRequest {
+  return {
+    customHeadHTML: faker.lorem.paragraph(),
+    description: faker.lorem.sentence(),
+    facebookOgTags: faker.lorem.word(),
+    folder: makeFolder(),
+    keywords: faker.lorem.word(),
+    mobileEnabled: faker.datatype.boolean(),
+    name: faker.lorem.words({ min: 2, max: 3 }),
+    prefillForm: faker.datatype.boolean(),
+    robots: faker.lorem.word(),
+    template: faker.number.int({ min: 1, max: 1000 }),
+    title: faker.lorem.words({ min: 2, max: 5 }),
+    urlPageName: faker.internet.url(),
+    workspace: 'Default',
+    ...overrides,
+  }
+}

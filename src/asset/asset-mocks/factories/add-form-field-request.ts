@@ -1,0 +1,32 @@
+import { faker } from '@faker-js/faker'
+import type { AddFormFieldRequest } from '../../asset-definitions/requests/add-form-field-request'
+
+export function makeAddFormFieldRequest(
+  overrides: Partial<AddFormFieldRequest> = {},
+): AddFormFieldRequest {
+  return {
+    blankFields: faker.number.int({ min: 1, max: 1000 }),
+    defaultValue: faker.lorem.word(),
+    fieldId: faker.lorem.word(),
+    fieldType: faker.lorem.word(),
+    fieldWidth: faker.number.int({ min: 1, max: 1000 }),
+    formPrefill: faker.datatype.boolean(),
+    isSensitive: faker.datatype.boolean(),
+    hintText: faker.lorem.paragraph(),
+    initiallyChecked: faker.datatype.boolean(),
+    instructions: faker.lorem.word(),
+    label: faker.lorem.words({ min: 2, max: 5 }),
+    labelToRight: faker.datatype.boolean(),
+    labelWidth: faker.number.int({ min: 1, max: 1000 }),
+    maskInput: faker.lorem.word(),
+    maxLength: faker.number.int({ min: 1, max: 1000 }),
+    maxValue: faker.number.float({ min: 0, max: 1000, fractionDigits: 2 }),
+    minValue: faker.number.float({ min: 0, max: 1000, fractionDigits: 2 }),
+    multiSelect: faker.datatype.boolean(),
+    required: faker.datatype.boolean(),
+    validationMessage: faker.lorem.sentence(),
+    values: faker.lorem.word(),
+    visibleLines: faker.number.int({ min: 1, max: 1000 }),
+    ...overrides,
+  }
+}

@@ -1,0 +1,33 @@
+import { faker } from '@faker-js/faker'
+import type { Recurrence } from '../../asset-definitions/models/recurrence'
+
+export function makeRecurrence(
+  overrides: Partial<Recurrence> = {},
+): Recurrence {
+  return {
+    startAt: faker.date.recent().toISOString(),
+    endAt: faker.date.recent().toISOString(),
+    intervalType: faker.helpers.arrayElement([
+      'Daily',
+      'Weekly',
+      'Monthly',
+    ] as const),
+    interval: faker.number.int({ min: 1, max: 1000 }),
+    weekdayOnly: faker.datatype.boolean(),
+    weekdayMask: faker.helpers.multiple(() => faker.lorem.word(), {
+      count: { min: 1, max: 3 },
+    }),
+    dayOfMonth: faker.number.int({ min: 1, max: 1000 }),
+    dayOfWeek: faker.helpers.arrayElement([
+      'Monday',
+      'Tuesday',
+      'Wednesday',
+      'Thursday',
+      'Friday',
+      'Saturday',
+      'Sunday',
+    ] as const),
+    weekOfMonth: faker.number.int({ min: 1, max: 1000 }),
+    ...overrides,
+  }
+}

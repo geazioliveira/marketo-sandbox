@@ -1,0 +1,35 @@
+import { faker } from '@faker-js/faker'
+import type { UpdateLandingPageContentRequest } from '../../asset-definitions/requests/update-landing-page-content-request'
+
+export function makeUpdateLandingPageContentRequest(
+  overrides: Partial<UpdateLandingPageContentRequest> = {},
+): UpdateLandingPageContentRequest {
+  return {
+    backgroundColor: faker.lorem.word(),
+    borderColor: faker.lorem.word(),
+    borderStyle: faker.lorem.word(),
+    borderWidth: faker.lorem.word(),
+    height: faker.lorem.word(),
+    hideDesktop: faker.datatype.boolean(),
+    hideMobile: faker.datatype.boolean(),
+    imageOpenNewWindow: faker.lorem.word(),
+    index: faker.number.int({ min: 1, max: 1000 }),
+    left: faker.lorem.word(),
+    linkUrl: faker.internet.url(),
+    opacity: faker.lorem.word(),
+    top: faker.lorem.word(),
+    type: faker.helpers.arrayElement([
+      'Image',
+      'Form',
+      'Rectangle',
+      'Snippet',
+      'RichText',
+      'HTML',
+      'DynamicContent',
+    ] as const),
+    value: faker.lorem.word(),
+    width: faker.lorem.word(),
+    zIndex: faker.lorem.word(),
+    ...overrides,
+  }
+}
