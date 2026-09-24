@@ -44,6 +44,48 @@ $ npm run start:dev
 $ npm run start:prod
 ```
 
+## API documentation
+
+When the application is running, Swagger UI is available at
+[http://localhost:3000/api](http://localhost:3000/api). The generated OpenAPI
+document is available at
+[http://localhost:3000/api-json](http://localhost:3000/api-json).
+
+## Mock Marketo Asset API
+
+Every endpoint under `/rest/asset/**` mirrors the Marketo Asset REST API
+(`docs/marketo-swagger-asset.json`) and answers with faker-generated data, so no
+Marketo tenant is required.
+
+The TypeScript surface is fully generated from the Swagger document — never edit
+these folders by hand, regenerate them instead:
+
+| Folder                  | Contents                                                 | Generator                                 |
+| ----------------------- | -------------------------------------------------------- | ----------------------------------------- |
+| `src/asset/asset-definitions` | 255 models, requests and responses                       | `scripts/generate-marketo-definitions.py` |
+| `src/asset/resources`   | 23 Nest modules covering all 220 operations              | `scripts/generate-marketo-resources.py`   |
+| `src/asset/asset-mocks`       | 255 faker factories plus the seed and request-id helpers | `scripts/generate-marketo-factories.py`   |
+
+```bash
+# regenerate everything after changing the Swagger document
+npm run generate:all
+
+# fail if any generated file is out of date (use this in CI)
+npm run check:all
+```
+
+### Reproducible mock data
+
+Responses are random by default. Set `MARKETO_MOCK_SEED` to pin them so the same
+request returns the same payload across restarts:
+
+```bash
+MARKETO_MOCK_SEED=42 npm run start
+```
+
+Seeding also pins the reference date used by relative date helpers. Override it
+with `MARKETO_MOCK_REF_DATE` (defaults to `2024-01-01T00:00:00.000Z`).
+
 ## Run tests
 
 ```bash

@@ -12,6 +12,10 @@
     "check:definitions": "python3 scripts/generate-marketo-definitions.py --check",
     "generate:resources": "python3 scripts/generate-marketo-resources.py",
     "check:resources": "python3 scripts/generate-marketo-resources.py --check",
+    "generate:factories": "python3 scripts/generate-marketo-factories.py",
+    "check:factories": "python3 scripts/generate-marketo-factories.py --check",
+    "generate:all": "npm run generate:definitions && npm run generate:resources && npm run generate:factories",
+    "check:all": "npm run check:definitions && npm run check:resources && npm run check:factories",
     "start": "nest start",
     "start:dev": "nest start --watch",
     "start:debug": "nest start --debug --watch",
@@ -24,15 +28,16 @@
     "test:e2e": "vitest run --config ./vitest.config.e2e.ts"
   },
   "dependencies": {
+    "@faker-js/faker": "^10.6.0",
     "@nestjs/common": "^12.0.1",
     "@nestjs/core": "^12.0.1",
     "@nestjs/observe": "^0.3.0",
     "@nestjs/platform-express": "^12.0.1",
+    "@nestjs/swagger": "^12.0.2",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1"
   },
   "devDependencies": {
-    "@faker-js/faker": "^10.6.0",
     "@nestjs/cli": "^12.0.0",
     "@nestjs/mau": "^0.2.6",
     "@nestjs/schematics": "^12.0.0",
