@@ -1,14 +1,30 @@
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 import {
   approveHeading,
+  auditBaseline,
+  auditCommitCap,
+  auditCron,
+  auditIssueCap,
+  auditJudgeStep,
+  auditLinkRetries,
+  auditRetryDelayMs,
+  auditRunsRead,
+  auditTitlePrefix,
+  auditVerdictStep,
   branchCategory,
   branchPrefixes,
   bugSections,
   commentOpening,
   featureSections,
+  issueLinkEvent,
+  issueLinkWorkflowPath,
   planHeading,
+  refreshPollMs,
+  refreshWaitMs,
   requiredChecks,
+  skipCiTokens,
+  skipChecksTrailer,
   stepIds,
   withdrawHeading,
 } from '../../scripts/loop-sections.mjs'
@@ -28,6 +44,59 @@ const read = (file: string): string =>
 const lifecycle = 'context/knowledge/patterns/issue-branch-lifecycle.md'
 const loopGate = 'context/knowledge/patterns/loop-gate.md'
 const workflowGuide = 'docs/development/workflow.md'
+const adr0001 = 'context/decisions/0001-context-mesh-in-the-repository.md'
+const adr0002 = 'context/decisions/0002-soft-enforcement-on-github-free.md'
+const mainAudit = '.github/workflows/main-audit.yml'
+
+/** A doc's sentences: split after `.`, `;` or `:` followed by white space. */
+const sentencesOf = (text: string): string[] => text.split(/(?<=[.;:])\s+/)
+
+/**
+ * A doc without its Status block: a decision keeps every Atualizado line as
+ * the record of what was true then, so a value a later line changed may
+ * still stand there.
+ */
+const bodyOf = (text: string): string => text.split(/\n## Status\n/)[0]
+
+/** Every number a pattern's first group captures in a piece of text. */
+const numbersIn = (text: string, pattern: RegExp): number[] =>
+  [...text.matchAll(pattern)].map((match) => Number(match[1]))
+
+/**
+ * A top-level map of a workflow, `key:` then `  name: value` lines, read as
+ * text: the workflows are written in one plain shape (see forms-parity).
+ */
+function topMap(yaml: string, key: string): Record<string, string> {
+  const lines = yaml.split(/\r?\n/)
+  const start = lines.indexOf(`${key}:`)
+  if (start < 0) throw new Error(`chave ausente: ${key}`)
+  const map: Record<string, string> = {}
+  for (const line of lines.slice(start + 1)) {
+    const entry = /^ {2}([\w-]+):[ \t]*(\S+)[ \t]*$/.exec(line)
+    if (entry === null) break
+    map[entry[1]] = entry[2]
+  }
+  return map
+}
+
+/** GitHub's anchor for a heading: lower case, punctuation dropped, spaces to dashes. */
+const slugOf = (heading: string): string =>
+  heading
+    .replace(/`/g, '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^\p{L}\p{M}\p{N}\p{Pc} -]/gu, '')
+    .replace(/ /g, '-')
+
+/** The anchors the ATX headings of a markdown file generate. */
+const anchorsOf = (markdown: string): Set<string> =>
+  new Set(
+    markdown
+      .split(/\r?\n/)
+      .map((line) => /^ {0,3}#{1,6}[ \t]+(.*?)(?:[ \t]+#+)?[ \t]*$/.exec(line))
+      .filter((heading): heading is RegExpExecArray => heading !== null)
+      .map((heading) => slugOf(heading[1])),
+  )
 
 /** The inline code spans of a piece of markdown, in order. */
 const spansOf = (text: string): string[] =>
@@ -167,12 +236,314 @@ describe('docs against scripts/loop-sections.mjs', () => {
     expect(ids).toEqual([...stepIds])
   })
 
-  it.each([
-    workflowGuide,
-    'context/decisions/0002-soft-enforcement-on-github-free.md',
-  ])('%s names every required check by workflow and job', (file) => {
-    const text = read(file)
-    for (const { workflow, job } of requiredChecks)
-      expect(text).toContain(`${workflow} / ${job}`)
+  it.each([workflowGuide, adr0002])(
+    '%s names every required check by workflow and job',
+    (file) => {
+      const text = read(file)
+      for (const { workflow, job } of requiredChecks)
+        expect(text).toContain(`${workflow} / ${job}`)
+    },
+  )
+})
+
+describe('docs against the audit of main and the quality check', () => {
+  it.each([workflowGuide, adr0002, 'AGENTS.md'])(
+    '%s quotes the audit issue title as the audit writes it',
+    (file) => {
+      expect(read(file)).toContain(`\`${auditTitlePrefix}<sha7>\``)
+    },
+  )
+
+  it.each([workflowGuide, adr0002])(
+    '%s states the audit cap and the baseline the audit holds',
+    (file) => {
+      const text = read(file)
+      const baseline = auditBaseline.slice(0, 7)
+      expect(text).toContain(`mais de ${auditCommitCap} commits`)
+      // The SHA the doc gives the constant's name, and every "até `<sha>`"
+      // in a sentence about what is audited, is the baseline: a doc may still
+      // name fb4a804, but only as where the loop began.
+      const named = [...text.matchAll(/`([0-9a-f]{7,40})` \(`auditBaseline`/g)]
+      expect(named.length, file).toBeGreaterThan(0)
+      for (const [, sha] of named) expect(sha).toBe(baseline)
+      const bounds = text
+        .split(/(?<=[.;:])\s+/)
+        .filter((sentence) => /auditad|auditoria/i.test(sentence))
+        .flatMap((sentence) => [
+          ...sentence.matchAll(/até `([0-9a-f]{7,40})`/g),
+        ])
+      expect(bounds.length, file).toBeGreaterThan(0)
+      for (const [, sha] of bounds) expect(sha, file).toBe(baseline)
+    },
+  )
+
+  it('the Check section lists the chain npm run check runs, in order', () => {
+    const { scripts } = JSON.parse(read('package.json')) as {
+      scripts: Record<string, string>
+    }
+    const chain = scripts.check.split(' && ')
+    const line = sectionOf(read(workflowGuide), '## Check')
+      .split(/\r?\n/)
+      .find((text) => text.startsWith('- **`npm run check`**'))
+    expect(line).toBeDefined()
+    const stated = spansOf(line ?? '').filter(
+      (span) => /^npm (?:run |test$)/.test(span) && span !== 'npm run check',
+    )
+    expect(stated).toEqual(chain)
+  })
+
+  it.each([workflowGuide, adr0002])(
+    '%s points the e2e telemetry where check.yml does',
+    (file) => {
+      const endpoint = /^\s*OBSERVE_ENDPOINT:\s*(\S+)\s*$/m.exec(
+        read('.github/workflows/check.yml'),
+      )?.[1]
+      expect(endpoint).toBe('http://127.0.0.1:9')
+      expect(read(file)).toContain(`OBSERVE_ENDPOINT=${endpoint}`)
+    },
+  )
+
+  it('no doc says the audit reads a branch’s intent or Learn commits', () => {
+    // The audit reads main's first-parent line only: a merged PR is one
+    // commit there, and the branch's own commits are the gate's to judge.
+    const files = [
+      adr0001,
+      adr0002,
+      workflowGuide,
+      loopGate,
+      lifecycle,
+      'AGENTS.md',
+    ]
+    for (const file of files)
+      for (const sentence of read(file).split(/(?<=[.;:])\s+|\|/))
+        if (/auditoria/i.test(sentence))
+          expect(sentence, file).not.toMatch(/commits? de (?:intent|Learn)/i)
+  })
+
+  it('a folder or file the docs say is still to come does not exist yet', () => {
+    // "(chega com a #4)" beside a path that already holds files is stale.
+    for (const file of [workflowGuide, 'context/README.md'])
+      for (const line of read(file).split(/\r?\n/)) {
+        if (!/chega com a #\d+/i.test(line)) continue
+        for (const span of spansOf(line)) {
+          if (!/^[\w./-]+$/.test(span) || !span.includes('/')) continue
+          const candidates = [span, `context/${span}`]
+          for (const candidate of candidates)
+            expect(
+              existsSync(path.join(root, candidate)),
+              `${file}: ${line}`,
+            ).toBe(false)
+        }
+      }
+  })
+})
+
+describe('docs against the audit’s and the refresh’s contract values', () => {
+  const judge = `passo \`${auditJudgeStep}\``
+  const verdict = `passo \`${auditVerdictStep}\``
+
+  it('main-audit.yml runs the judging step, then the verdict step, by the names in loop-sections', () => {
+    const names = [...read(mainAudit).matchAll(/^ {6}- name: (.+?)[ \t]*$/gm)]
+      .map((match) => match[1])
+      .filter((name) => [auditJudgeStep, auditVerdictStep].includes(name))
+    expect(names).toEqual([auditJudgeStep, auditVerdictStep])
+  })
+
+  it.each([workflowGuide, adr0002])(
+    '%s names both steps and counts as audited only a run whose judging step finished',
+    (file) => {
+      const text = read(file)
+      expect(text).toContain(judge)
+      expect(text).toContain(verdict)
+      expect(text).toContain(
+        `só conta como auditada a run cujo ${judge} terminou`,
+      )
+    },
+  )
+
+  it('main-audit.yml runs on the schedule loop-sections gives, and the docs state it', () => {
+    const cron = /^\s*- cron: '([^']+)'\s*$/m.exec(read(mainAudit))?.[1]
+    expect(cron).toBe(auditCron)
+    for (const file of [workflowGuide, adr0002])
+      expect(read(file), file).toContain(`cron \`${auditCron}\``)
+  })
+
+  it('ADR 0002 lists exactly the permissions main-audit.yml grants', () => {
+    // Split at periods only: each permission holds a colon.
+    const sentence = read(adr0002)
+      .split(/(?<=\.)\s+/)
+      .find((text) => text.startsWith('As permissões são'))
+    expect(sentence).toBeDefined()
+    const stated = Object.fromEntries(
+      spansOf(sentence ?? '')
+        .map((span) => /^([\w-]+): (\w+)$/.exec(span))
+        .filter((entry): entry is RegExpExecArray => entry !== null)
+        .map(([, key, value]) => [key, value]),
+    )
+    expect(stated).toEqual(topMap(read(mainAudit), 'permissions'))
+  })
+
+  it.each([workflowGuide, adr0002])(
+    '%s states the link-lag retries, their wait, the issue cap and the runs read',
+    (file) => {
+      const text = bodyOf(read(file))
+      expect(text).toContain(`até ${auditLinkRetries} vezes`)
+      const tries = numbersIn(text, /depois das (\d+) tentativas/g)
+      expect(tries.length, file).toBeGreaterThan(0)
+      for (const count of tries) expect(count, file).toBe(auditLinkRetries)
+      const waits = numbersIn(
+        text,
+        /(\d+) s (?:por padrão|antes de cada tentativa|entre as tentativas)/g,
+      )
+      expect(waits.length, file).toBeGreaterThan(0)
+      for (const seconds of waits)
+        expect(seconds, file).toBe(auditRetryDelayMs / 1000)
+      const caps = numbersIn(text, /mais de (\d+) commits fora do loop/g)
+      expect(caps.length, file).toBeGreaterThan(0)
+      for (const cap of caps) expect(cap, file).toBe(auditIssueCap)
+      expect(text).toContain(
+        `as ${auditRunsRead} runs concluídas mais recentes`,
+      )
+    },
+  )
+
+  it.each([workflowGuide, adr0002, loopGate])(
+    '%s states how often and how long the refresh waits for a run in progress',
+    (file) => {
+      const text = bodyOf(read(file))
+      const polls = numbersIn(text, /a cada (\d+) s\b/g)
+      expect(polls.length, file).toBeGreaterThan(0)
+      for (const poll of polls) expect(poll, file).toBe(refreshPollMs / 1000)
+      const minutes = numbersIn(text, /até (\d+) minutos/g)
+      expect(minutes.length, file).toBeGreaterThan(0)
+      for (const wait of minutes)
+        expect(wait, file).toBe(refreshWaitMs / 60_000)
+    },
+  )
+
+  it.each([workflowGuide, adr0002])(
+    '%s accepts the issue-link only from its pull_request_target run of issue-link.yml',
+    (file) => {
+      const stated = sentencesOf(read(file)).filter(
+        (sentence) =>
+          sentence.includes('`issue-link` só conta') &&
+          sentence.includes(`\`${issueLinkEvent}\``) &&
+          sentence.includes(`\`${issueLinkWorkflowPath}\``),
+      )
+      expect(stated, file).not.toEqual([])
+    },
+  )
+
+  it.each([workflowGuide, adr0002, loopGate])(
+    '%s has the refresh re-run only the issue-link’s pull_request_target run',
+    (file) => {
+      const stated = sentencesOf(read(file)).filter(
+        (sentence) =>
+          /re-executa (?:a run mais recente do|o) `issue-link`/.test(
+            sentence,
+          ) && sentence.includes(`\`${issueLinkEvent}\``),
+      )
+      expect(stated, file).not.toEqual([])
+    },
+  )
+
+  it.each([workflowGuide, adr0002])(
+    '%s quotes the rewrite reason as the audit writes it',
+    (file) => {
+      const reason = 'histórico de main reescrito desde a última auditoria'
+      expect(read('scripts/audit-main.mjs')).toContain(`${reason} (`)
+      expect(read(file)).toContain(`\`${reason} (execução <id>, em <sha7>)\``)
+    },
+  )
+
+  it('the doc links in the audit’s and the refresh’s own text reach a heading that exists', () => {
+    // The audit issue body links to the workflow guide and to ADR 0002 on
+    // GitHub; a renamed heading would 404 in every issue it opens.
+    const links = ['scripts/audit-main.mjs', 'scripts/refresh-issue-link.mjs']
+      .flatMap((script) => [
+        ...read(script).matchAll(
+          /\b((?:docs|context)\/[\w./-]+\.md)(?:#([\p{L}\p{N}_-]+))?/gu,
+        ),
+      ])
+      .map(([, file, anchor]) => ({ file, anchor }))
+    expect(
+      links.filter(({ anchor }) => anchor !== undefined).length,
+    ).toBeGreaterThan(0)
+    for (const { file, anchor } of links) {
+      expect(existsSync(path.join(root, file)), file).toBe(true)
+      if (anchor !== undefined)
+        expect(anchorsOf(read(file)).has(anchor), `${file}#${anchor}`).toBe(
+          true,
+        )
+    }
+  })
+
+  it('the audit issue body links to the guide’s merge rules and to ADR 0002', () => {
+    const script = read('scripts/audit-main.mjs')
+    expect(script).toContain(
+      '/blob/main/docs/development/workflow.md#pull-requests-e-merge',
+    )
+    expect(script).toContain(`/blob/main/${adr0002}`)
+  })
+})
+
+describe('docs against the skip tokens', () => {
+  /** A span that reads like a token that skips a run: `[skip ci]`, `[no ci]` … */
+  const skipLike = /^\[(?:skip|ci|no|actions)\b[^\]]*\]$/i
+
+  it.each([workflowGuide, lifecycle, adr0002, 'AGENTS.md'])(
+    '%s lists exactly the skip tokens, in order, wherever it lists them',
+    (file) => {
+      const lists = read(file)
+        .split(/\r?\n/)
+        .filter((line) => line.includes(`\`${skipCiTokens[1]}\``))
+      expect(lists.length, file).toBeGreaterThan(0)
+      for (const line of lists)
+        expect(
+          spansOf(line).filter((span) => skipLike.test(span)),
+          line,
+        ).toEqual([...skipCiTokens])
+      for (const span of spansOf(read(file)).filter((text) =>
+        skipLike.test(text),
+      ))
+        expect(skipCiTokens, `${file}: ${span}`).toContain(span)
+    },
+  )
+
+  it.each([workflowGuide, lifecycle, adr0002, 'AGENTS.md'])(
+    '%s also forbids the skip-checks trailer',
+    (file) => {
+      expect(read(file)).toContain(`\`${skipChecksTrailer}\``)
+    },
+  )
+
+  it('the PR rules forbid the tokens in the title, the body and every commit message', () => {
+    const rule = sectionOf(read(workflowGuide), '## Pull requests e merge')
+      .split(/\r?\n/)
+      .find((line) => line.startsWith('- **Nenhum token de pular CI.**'))
+    expect(rule).toBeDefined()
+    expect(rule).toMatch(
+      /Nem o título da PR, nem o corpo da PR, nem mensagem de commit nenhuma/,
+    )
+    expect(rule).toContain('`PR_TITLE` e `PR_BODY`')
+  })
+
+  it('no doc promises a verdict to every commit of main', () => {
+    // Only a push that starts a run gets one; what a push without a run
+    // brought is left to the next audit.
+    for (const file of [
+      workflowGuide,
+      adr0002,
+      lifecycle,
+      loopGate,
+      'AGENTS.md',
+    ]) {
+      const text = read(file)
+      expect(text, file).not.toMatch(/todo commit de `main` ganha um veredito/)
+    }
+    for (const file of [workflowGuide, adr0002])
+      expect(read(file), file).toContain(
+        'todo push em `main` que dispara run ganha um veredito; o que um push sem run trouxe entra na auditoria seguinte',
+      )
   })
 })

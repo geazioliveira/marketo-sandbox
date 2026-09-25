@@ -43,14 +43,16 @@ Uma issue, uma branch, uma PR que fecha só essa issue, mergeada por merge commi
 
 - O Learn é commitado na mesma branch antes de a PR sair de draft: o intent ganha Resultados e o status final, o changelog ganha a entrada da issue, e decisões e patterns novos entram (passo `learn`).
 - A primeira linha do corpo da PR é `Closes #N.`, e a PR fecha só essa issue.
+- Nem o título da PR, nem o corpo dela, nem mensagem de commit nenhuma levam, escritos literalmente, `[skip ci]`, `[ci skip]`, `[no ci]`, `[skip actions]` ou `[actions skip]` (`skipCiTokens`), nem o trailer `skip-checks: true` (`skipChecksTrailer`). A mensagem do merge commit é o título e o corpo da PR, e com um desses tokens o push do merge não dispara nem o `Qualidade / check` nem a auditoria de `main`; na mensagem do commit da head, a PR fica sem o `Qualidade / check` ([fluxo](../../../docs/development/workflow.md#pull-requests-e-merge)).
 - PRs nunca são empilhadas. Trabalho que depende de outro espera o merge dele e corta a branch do `origin/main` que já o contém.
 
 ### Merge
 
-- Logo antes do merge, um veredito fresco: re-rode o `issue-link` da PR ou rode o gate em modo CI na head da PR, e exija saída 0. Os eventos da issue não rodam o `issue-link` de novo, então um verde pode estar velho ([fluxo](../../../docs/development/workflow.md#pull-requests-e-merge)).
+- Logo antes do merge, um veredito fresco: re-rode o `issue-link` da PR ou rode o gate em modo CI na head da PR, e exija saída 0. Os eventos da issue só re-executam o `issue-link` pelo refresh da #3, que ainda não foi provado ao vivo e não cobre todos os casos, então um verde pode estar velho ([fluxo](../../../docs/development/workflow.md#pull-requests-e-merge)).
 - Merge por merge commit (`gh pr merge --merge`). Squash e rebase estão desligados no repositório.
 - A branch remota é apagada no merge, por configuração do repositório. Apague também a branch local e o worktree.
 - A issue fecha sozinha pelo `Closes #N.`. Depois do merge, comente na issue: `Fechada pela PR #P no merge <sha>.`
+- Este é o único caminho para `main`. Um push direto, um commit pelo editor web, um force-push ou outra reescrita do histórico de `main`, o merge de uma PR que não fecha issue ou o de uma PR sem os checks exigidos verdes na head vira, depois do fato, uma issue `bug` + `needs-triage` da auditoria de `main`, e o dono decide registrar retroativamente ou reverter. A auditoria julga todo push em `main` que dispara run, e o que um push sem run trouxe entra na auditoria seguinte; o que ela não vê está no [fluxo](../../../docs/development/workflow.md#auditoria-de-main).
 
 ## Quando usar
 
@@ -70,4 +72,4 @@ Uma issue, uma branch, uma PR que fecha só essa issue, mergeada por merge commi
 
 - **Criado**: 2026-09-24 (Fase: Build), do plano aprovado na #2 e do pattern equivalente do lite-campaign (#2)
 - **Status**: Active
-- **Atualizado**: 2026-09-24 (Fase: Build), o que o `stacked` pega logo depois do corte e a exceção dos commits que citam `#N`, os merges que o `stacked` e o `intent-first` recusam, a label reaplicada depois de um novo Approve e o veredito fresco antes do merge, depois da verificação das correções (#2)
+- **Atualizado**: 2026-09-25 (Fase: Build), o merge passou a citar o refresh do `issue-link`, que ainda não dispensa o veredito fresco, e a auditoria de `main`, que registra o que chega por outro caminho, o merge sem os checks exigidos verdes e o histórico reescrito inclusive, com o que ela não vê; e a PR passou a proibir os tokens de pular CI no título, no corpo e nos commits (#3)

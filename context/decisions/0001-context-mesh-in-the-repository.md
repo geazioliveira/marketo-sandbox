@@ -33,7 +33,7 @@
 | `context/README.md` e `decisions/README.md` funcionam como índices | Quem navega pelo GitHub acha o layout e o status de cada decisão sem precisar de um agente |
 | `docs/` fica ao lado de `context/` | `context/` guarda o que o trabalho precisa obedecer ou perseguir. `docs/` guarda guias para pessoas (e o Swagger de entrada), que apontam para `context/` em vez de repetir o que está lá |
 | O [AGENTS.md](../../AGENTS.md) declara `context/` como a raiz do Context Mesh, acima da regra global do vault | A regra da máquina do dono manda os arquivos para um vault externo, e um agente que lê as duas precisa saber qual vale aqui. A regra global ganhou uma exceção para este projeto (#1) |
-| Ainda não existem `context/agents/` nem `evolution/history/` | Nenhum agente de execução reutilizável foi definido e não há registro arquivado. Cada pasta chega com o primeiro arquivo dela |
+| Ainda não existem `context/agents/` nem `evolution/history/` | Nenhum agente de execução reutilizável foi definido e não há registro arquivado. Cada pasta chega com o primeiro arquivo dela, e o `check:context` já conhece as duas: `agents/agent-<nome>.md` com o título `# Agent: <nome>` e o bloco Status, e `evolution/history/` e `evolution/learning-<slug>.md` sem tipo, como os índices |
 
 ## Racional
 
@@ -41,7 +41,7 @@
 - **Plano e Approve na issue.** Registrar os dois na issue deixa um rastro durável, que o dono lê no GitHub e que o gate consegue conferir. Um plano aceito numa conversa some com a conversa.
 - **Uma PR, uma issue.** É a forma literal do pedido do dono. Fechar exatamente uma issue mantém issue, intent, changelog e PR numa relação de um para um, e a partir de uma linha de `main` dá para chegar ao merge, à PR, à issue, ao plano e ao Approve.
 - **Sem lane `batch/`.** No lite-campaign, a lane era o único caminho sem issue, e por isso o único que o gate não tinha como conferir (brunohab/lite-campaign#111). Aqui o dono pediu que toda PR tenha issue.
-- **Merge commit.** Os commits da branch chegam a `main` como foram feitos. O commit de intent, que vem primeiro, e o commit de Learn continuam visíveis para o gate e, quando ela chegar com a #3, para a auditoria de `main`, e o merge commit carrega o `Closes #N.` no histórico.
+- **Merge commit.** Os commits da branch chegam a `main` como foram feitos. O commit de intent, que vem primeiro, e o commit de Learn continuam visíveis para o gate, e o merge commit carrega o `Closes #N.` no histórico. A auditoria de `main` (#3) lê só a linha do primeiro pai de `main`, onde cada PR mergeada é um merge commit: por ele ela chega à PR, e confere que a PR fecha uma issue deste repositório e que os checks exigidos estavam verdes na head dela. Os commits da branch, que o gate já julgou na PR, ela não julga de novo.
 
 ## Alternativas consideradas
 
@@ -50,7 +50,7 @@
 | Manter o Context Mesh no vault externo | CI, revisão e outros clones não enxergam o vault, então o contexto não seria revisado junto com o código que descreve |
 | Guardar planos em `~/.claude/plans` | Ficam numa máquina só, fora do alcance do dono no GitHub e do gate. É exatamente o plano fora das issues que o dono vetou |
 | Uma lane `batch/` para mudanças pequenas, como no lite-campaign | É um caminho sem issue, portanto sem plano nem Approve para conferir, e o dono pediu que toda PR tenha issue |
-| Squash merge | Junta a branch num commit só. Perde o commit de intent que vem primeiro e o commit de Learn, que o gate e a auditoria de `main` leem |
+| Squash merge | Junta a branch num commit só. Perde o commit de intent que vem primeiro e o commit de Learn, que o gate lê na branch e que ficariam fora do histórico de `main` |
 | Rebase merge | Mantém os commits, mas perde o merge commit, que carrega o `Closes #N.` e marca onde a branch começa e termina |
 | Prosa em inglês | O dono escolheu pt-BR para os artefatos (#1) |
 
@@ -74,3 +74,4 @@
 - **Status**: Accepted
 - **Atualizado**: 2026-09-24 (Fase: Build), a gramática do Approve ficou exata depois das revisões adversariais: linhas exatas, heading ambíguo que cancela, label depois do Approve, edições e comentários apagados que revogam, e a branch dentro da seção Plano; a auditoria de `main` passou a ser dita como futura (#2)
 - **Atualizado**: 2026-09-24 (Fase: Build), depois da verificação das correções: todo título que o GitHub mostra e que menciona approve cancela o Approve, uma frase comum não, e editar qualquer comentário depois do Approve, não só um anterior a ele, o revoga (#2)
+- **Atualizado**: 2026-09-25 (Fase: Build), o Racional e as Alternativas passaram a dizer o que a auditoria de `main` lê de fato, os commits do primeiro pai de `main`, e não a branch: pelo merge commit ela chega à PR e confere a issue fechada e os checks exigidos verdes; e a linha sobre `context/agents/` e `evolution/history/` passou a dizer que o `check:context` já aceita as duas pastas (#3)

@@ -117,13 +117,13 @@ Toda issue aberta tem exatamente uma label de categoria (`bug` ou `enhancement`)
 
 | Label | Significado | Quem aplica |
 | --- | --- | --- |
-| `needs-triage` | O dono precisa avaliar esta issue | O agente, só no `gh issue create` de um relato sem plano. Depois, só o dono |
+| `needs-triage` | O dono precisa avaliar esta issue | O agente, só no `gh issue create` de um relato sem plano, e a [auditoria de main](#auditoria-de-main), na issue que ela abre. Depois, só o dono |
 | `needs-info` | Esperando mais informação de quem abriu | Só o dono |
 | `ready-for-human` | Precisa de decisão humana, incluindo um Approve ainda não registrado | O form de issue, ou o agente só no `gh issue create` com o plano no corpo. Depois, só o dono |
 | `ready-for-agent` | Especificada e aprovada pelo dono: o agente pode construir | Só o dono, depois do Approve, e de novo depois de cada novo Approve |
 | `wontfix` | Não será feita (decisão do dono) | Só o dono |
 
-A label de categoria é aplicada pelo form de issue ou pelo agente no `gh issue create`. Trocá-la depois é do dono.
+A label de categoria é aplicada pelo form de issue, pelo agente no `gh issue create` ou pela auditoria de `main` (sempre `bug`). Trocá-la depois é do dono.
 
 ## Issue tracker
 
@@ -157,12 +157,22 @@ gh pr create --repo geazioliveira/marketo-sandbox --base main --head <branch> --
 # Acompanhar os checks
 gh pr checks <p> --repo geazioliveira/marketo-sandbox
 
-# Veredito fresco logo antes do merge: re-rodar o issue-link da PR (o id do run está no link do check)
-gh pr checks <p> --repo geazioliveira/marketo-sandbox --json name,workflow,link
+# Veredito fresco logo antes do merge: re-rodar o issue-link da PR, o de evento pull_request_target (o id do run está no link do check)
+gh pr checks <p> --repo geazioliveira/marketo-sandbox --json name,workflow,event,link
 gh run rerun <run-id> --repo geazioliveira/marketo-sandbox
 gh run watch <run-id> --repo geazioliveira/marketo-sandbox --exit-status
 # ou, num checkout da head da PR com origin/main buscado, o gate em modo CI (exige saída 0)
 node scripts/gate.mjs --pr <p> --branch <branch>
+
+# As últimas runs do refresh do issue-link e da auditoria de main
+gh run list --repo geazioliveira/marketo-sandbox --workflow issue-link-refresh.yml --limit 5
+gh run list --repo geazioliveira/marketo-sandbox --workflow main-audit.yml --limit 5
+
+# Auditar main agora, sem esperar o próximo push nem a execução diária
+gh workflow run main-audit.yml --repo geazioliveira/marketo-sandbox --ref main
+
+# As issues abertas pela auditoria de main
+gh issue list --repo geazioliveira/marketo-sandbox --state all --search '"Mudança em main fora do loop" in:title'
 
 # Mergear
 gh pr merge <p> --repo geazioliveira/marketo-sandbox --merge
@@ -180,25 +190,57 @@ gh issue comment <n> --repo geazioliveira/marketo-sandbox --body "Fechada pela P
 
 - **A primeira linha do corpo é `Closes #N.`**, com o número da issue da branch, e a PR fecha só essa issue: nenhuma outra palavra-chave de fechamento no corpo.
 - **O template de PR** (`.github/pull_request_template.md`) tem as seções Risco, O que mudou, Verificação, Desvios do plano aprovado, Follow-ups e o checklist do Context Mesh.
-- **Os checks exigidos são `Qualidade / check` e `Vínculo com issue / issue-link`**, nomeados por workflow e job. Um job chamado `check` ou `issue-link` que venha de outro workflow não conta: uma PR consegue acrescentar um. No plano Free, o GitHub não consegue torná-los obrigatórios ([ADR 0002](../../context/decisions/0002-soft-enforcement-on-github-free.md)), então a regra é esta: nenhuma PR é mergeada com um check exigido vermelho, e um check ausente conta como vermelho.
-- **Veredito fresco antes do merge.** Os eventos da issue (o Approve retirado, um `# Plano` novo, a label movida, uma reabertura) não rodam o `issue-link` de novo, então um verde pode estar velho. Logo antes de mergear, re-rode o job `issue-link` da PR (`gh run rerun`) e espere o resultado, ou rode `node scripts/gate.mjs --pr <p> --branch <branch>` num checkout da head da PR. Só mergeie com o job verde de novo, ou com o gate saindo com 0. O refresh automático chega com a #3.
+- **Os checks exigidos são `Qualidade / check` e `Vínculo com issue / issue-link`**, nomeados por workflow e job. Um job chamado `check` ou `issue-link` que venha de outro workflow não conta: uma PR consegue acrescentar um. E o `issue-link` que conta é o do evento `pull_request_target`, que roda o `.github/workflows/issue-link.yml` de `main` (`gh pr checks --json` mostra o `event`): uma PR consegue acrescentar um workflow de mesmo nome que roda em `pull_request`. No plano Free, o GitHub não consegue torná-los obrigatórios ([ADR 0002](../../context/decisions/0002-soft-enforcement-on-github-free.md)), então a regra é esta: nenhuma PR é mergeada com um check exigido vermelho, e um check ausente conta como vermelho.
+- **Veredito fresco antes do merge.** O `issue-link` só roda com eventos da PR. Os eventos da issue (o Approve retirado, um `# Plano` novo, a label movida, uma reabertura) dependem do refresh (abaixo), então um verde pode estar velho. Logo antes de mergear, re-rode o job `issue-link` da PR (`gh run rerun`) e espere o resultado, ou rode `node scripts/gate.mjs --pr <p> --branch <branch>` num checkout da head da PR. Só mergeie com o job verde de novo, ou com o gate saindo com 0.
+- **O refresh não dispensa o veredito fresco.** Desde a #3, o workflow `Atualiza vínculo com issue` (`.github/workflows/issue-link-refresh.yml`) re-executa o `issue-link` das PRs abertas que fecham a issue, a run do evento `pull_request_target`, a cada label, comentário, edição, fechamento ou reabertura nela. Ele ainda não foi provado ao vivo: se o `GITHUB_TOKEN` consegue pedir o rerun só se mede no primeiro evento de issue depois do merge da #3. E ele não cobre tudo: uma run do `issue-link` ainda na fila ou em andamento é consultada a cada 15 s e esperada por até 4 minutos e, se não termina, o refresh fica vermelho sem re-executá-la; o GitHub re-executa uma run no máximo 50 vezes, e só por 30 dias; e vincular a issue pela barra lateral da PR não dispara nada. Por isso a regra acima fica, pelo menos até o refresh ser provado ao vivo e a [ADR 0002](../../context/decisions/0002-soft-enforcement-on-github-free.md) registrar a medição.
+- **Nenhum token de pular CI.** Nem o título da PR, nem o corpo da PR, nem mensagem de commit nenhuma levam, escritos literalmente, `[skip ci]`, `[ci skip]`, `[no ci]`, `[skip actions]` ou `[actions skip]` (a lista é `skipCiTokens`, em `scripts/loop-sections.mjs`), nem um último parágrafo com o trailer `skip-checks: true` (`skipChecksTrailer`), que o GitHub também obedece. A mensagem do merge commit é o título mais o corpo da PR (`PR_TITLE` e `PR_BODY`), então um desses tokens ali faz o push do merge em `main` não disparar nem o `Qualidade / check` nem a auditoria de `main`, que só o julga na execução seguinte. Na mensagem do commit da head, ele deixa a PR sem o `Qualidade / check`, e a auditoria registra o merge (`PR #P mergeada sem Qualidade / check verde`). Para citar um token, descreva-o sem os colchetes.
 - **Exceção de bootstrap, só na #2.** A PR da #2 cria o `issue-link`, e por isso não tem esse check no servidor: o workflow ainda não está em `main` ([ADR 0002](../../context/decisions/0002-soft-enforcement-on-github-free.md)). Só nela, a saída do gate em modo CI rodado localmente, colada em "Verificação", faz as vezes do `issue-link`, e o veredito fresco é essa execução refeita logo antes do merge, com saída 0. Da PR da #3 em diante, o `issue-link` do servidor é exigido.
-- **PR que mexe em workflow é HIGH.** Uma PR que toca `.github/workflows/**` é revisada como risco HIGH, seja qual for o risco do plano. O `check.yml` roda em `pull_request`, com o YAML da própria PR, então a PR consegue afrouxar o próprio `check`. Só o `issue-link`, que vem de `main`, não pode ser afrouxado pela PR.
+- **PR que mexe em workflow é HIGH.** Uma PR que toca `.github/workflows/**` é revisada como risco HIGH, seja qual for o risco do plano. O `check.yml` roda em `pull_request`, com o YAML e o `package.json` da própria PR, então a PR consegue afrouxar o próprio `check`. Só o `issue-link`, que vem de `main`, não pode ser afrouxado pela PR.
 - **Merge só por merge commit** (`gh pr merge --merge`). Squash e rebase estão desligados no repositório, e o título e o corpo do merge commit vêm da PR, então o `Closes #N.` chega ao histórico de `main`.
 - **Quem mergeia.** O dono deu ao agente uma autorização permanente para mergear, na #2, em 2026-09-24, na resposta à pergunta 3: "Pode mergiar, se já está tudo ok e validado, não vejo problema." Ela vale quando as três condições se cumprem: os checks exigidos estão verdes, o veredito fresco saiu com 0 e a revisão está feita. Faltando uma, o agente não mergeia. O dono revoga a autorização com um comentário, e a partir dele o agente para de mergear.
 - **Depois do merge**, comente na issue o número da PR e o SHA do merge. A issue fecha sozinha pelo `Closes #N.`, e a branch remota é apagada pelo repositório.
 
 ## Check
 
-Hoje, antes da PR:
+Antes da PR, o mesmo que o CI roda, e o gate:
 
 ```sh
-npm run lint && npx tsc --noEmit && npm test && npm run gate
+npm run check && OBSERVE_ENDPOINT=http://127.0.0.1:9 npm run test:e2e && npm run gate
 ```
 
-- No CI, o job `check` roda `npm ci`, `npm run lint` e `npm test`, e confere que a árvore ficou limpa.
-- A #3 vai acrescentar ao `check` o typecheck, o `check:context`, o build e o e2e.
-- O `npm run check:all`, que confere se o código gerado é o que os geradores emitem, é uma falha conhecida, acompanhada na #7. Ele fica fora do CI até lá.
+- **`npm run check`** roda, nessa ordem e parando no primeiro erro: `npm run lint` (oxlint em `src/`, `test/` e `scripts/`), `npm run typecheck` (`tsc --noEmit`, que cobre `src/` e `test/`), `npm test` (vitest), `npm run check:context` e `npm run build` (nest build, que escreve em `dist/`, ignorado pelo git).
+- **`npm run check:context`** (`scripts/check-context.mjs`) lê `context/`, `docs/`, `AGENTS.md` e `CLAUDE.md`, e os links do template de PR. Cada problema sai com `arquivo:linha`, e os formatos estão no [guia do Context Mesh](../../context/README.md). Ele recusa:
+  - link relativo ou âncora quebrados, a âncora do próprio arquivo (`#…`) inclusive;
+  - arquivo fora do layout. As pastas e os nomes de `context/` estão no [Layout do guia](../../context/README.md#layout), e um arquivo fora destas pastas faz o check:context recusar a árvore; uma pasta nova entra antes em `scripts/loop-sections.mjs` e no Layout. Só um arquivo oculto que não é markdown (`.DS_Store`, `.obsidian/`) fica de fora;
+  - arquivo de contexto sem o título `# <Tipo>: <assunto>`, ou sem um único bloco Status como última seção (nem um título sublinhado depois dele), com um status válido e nenhum status declarado fora dele (numa lista, numa citação ou em negrito solto);
+  - decisão fora do [índice de decisões](../../context/decisions/README.md) ou com status diferente do arquivo;
+  - título de entrada do changelog fora do formato;
+  - caminho absoluto de máquina (`/Users/`, `/Volumes/`, `/home/<x>/`, `/private/tmp/`, `/private/var/`, `/var/folders/`, `/tmp/<x>/`);
+  - no template de PR, qualquer link relativo. O template vira o corpo da PR, onde um link relativo resolve a partir da página da PR e dá 404. Lá o link aponta para `https://github.com/geazioliveira/marketo-sandbox/blob/main/<caminho>`, que o check confere como um link relativo, ou não há link.
+- **O e2e** (`npm run test:e2e`) sobe o app inteiro, e com ele o `ObserveModule`, que manda telemetria por padrão. `OBSERVE_ENDPOINT` aponta essa telemetria para uma porta fechada de loopback, para que nada saia da máquina. Deixar o Observe opt-in é a #9.
+- **No CI**, o job `check` (`Qualidade / check`) roda em toda PR, em todo push em `main` e à mão. Os passos são `npm ci`, `npm run check`, o passo `e2e` (`npm run test:e2e` com o mesmo `OBSERVE_ENDPOINT`) e a conferência de que a árvore ficou limpa. Numa PR, um push novo cancela a run velha. Em `main`, nenhuma run é cancelada nem substituída: cada commit tem o seu grupo de concorrência, e todo push em `main` que dispara run ganha um veredito; o que um push sem run trouxe entra na auditoria seguinte ([Auditoria de main](#auditoria-de-main)).
+- **Se o e2e falhar num runner limpo**, ele sai do `check` como falha conhecida, com a causa registrada, e o conserto vai para a #9 (resposta 1 do dono na #3).
+- O `npm run check:all`, que confere se o código gerado é o que os geradores emitem, é uma falha conhecida, acompanhada na #7. Ele fica fora do `check` até lá.
+
+## Auditoria de main
+
+O workflow `Auditoria de main` (`.github/workflows/main-audit.yml`, com as regras em `scripts/audit-main.mjs`) confere, depois do fato, que cada commit que chegou a `main` veio de uma PR mergeada que fecha uma issue e que tinha os checks exigidos verdes. No plano Free nada impede um desvio antes ([ADR 0002](../../context/decisions/0002-soft-enforcement-on-github-free.md)); a auditoria faz dele uma issue.
+
+- **Quando ela roda.** A cada push em `main`, uma vez por dia (cron `17 6 * * *`) e à mão (`gh workflow run`, no cookbook acima).
+- **Os dois passos.** O passo `Julgar` julga o intervalo, abre ou comenta as issues e grava quantos commits ficaram fora do loop; ele só termina com `success` quando julgou o intervalo inteiro, e falha quando o `gh` ou o git o interrompem. O passo `Veredito` deixa a run vermelha quando esse número é maior que zero, ou quando o `Julgar` não o gravou. Assim uma run vermelha que julgou tudo se distingue de uma que parou no meio.
+- **O que ela lê.** A linha do primeiro pai de `main`, do último commit auditado até o topo (o `after` do push, ou o `HEAD` de `main` no agendamento e à mão). O último commit auditado é o topo da run mais recente do `main-audit.yml` em `main`, com id menor que o da run atual, cujo passo `Julgar` terminou com `success`, entre as 20 runs concluídas mais recentes: só conta como auditada a run cujo passo `Julgar` terminou. Uma run interrompida, cancelada ou pulada não conta, e o intervalo dela fica para a auditoria seguinte; um re-run mantém o id, então começa da run anterior a ela. Se o topo dessa run não é ancestral do topo atual, `main` foi reescrito: o topo atual fica fora do loop e o intervalo começa no ancestral comum dos dois (pelo `git merge-base` ou, quando um force-push tirou o topo do clone, pelo compare do GitHub). Se existem runs anteriores e nenhuma das 20 mais recentes terminou o `Julgar`, a auditoria recomeça da linha de base em qualquer evento. Só quando não há run anterior nenhuma, ou o GitHub também não conhece mais o topo dela, vale o `before` do push, ou a linha de base no agendamento e à mão. A saída diz sempre de onde o intervalo começou. Por isso um push que não disparou run nenhuma (um `[skip ci]` na mensagem, um push feito com o `GITHUB_TOKEN`, uma run cancelada ou que saiu da fila) entra na auditoria seguinte, e a execução diária garante que ela venha.
+- **O que ela não relê.** O merge de uma PR é um commit só na linha do primeiro pai, e os commits da branch já foram julgados na PR. Os commits até `8d4662f` (`auditBaseline`), o merge da #2 (PR #10), nunca são auditados: até `fb4a804` não havia loop, e o merge da #2 é a exceção de bootstrap, porque o `issue-link` do servidor chegou com ele.
+- **O que está no loop.** O merge commit de uma PR mergeada em `main` que fecha pelo menos uma issue deste repositório (pelas referências de fechamento do GitHub ou, na falta delas, pela primeira linha `Closes #N.`, desde que #N seja uma issue e não uma PR) e cuja head estava com `Vínculo com issue / issue-link` e `Qualidade / check` verdes na hora do merge. O `issue-link` só conta vindo de uma run do evento `pull_request_target` do `.github/workflows/issue-link.yml`; o `Qualidade / check` é achado pelo nome, porque roda o YAML da própria PR. Se o GitHub ainda não ligou o merge à PR, a auditoria pergunta de novo até 3 vezes, com 10 s antes de cada tentativa.
+- **O que fica fora do loop.** Um commit direto em `main` (push direto ou commit pelo editor web), o merge de uma PR que não fecha issue deste repositório, o merge de uma PR sem um check exigido verde (`PR #P mergeada sem <workflow / job> verde`), um force-push, um histórico de `main` reescrito desde a última auditoria (`histórico de main reescrito desde a última auditoria (execução <id>, em <sha7>)`), e um intervalo com mais de 200 commits pelo primeiro pai. Nos três últimos casos, o registro cai no topo de `main`.
+- **O que ela faz.** Para cada commit fora do loop, abre sozinha uma issue `bug` + `needs-triage` com o título `Mudança em main fora do loop: <sha7>`, e a run fica vermelha. Com mais de 10 commits fora do loop numa auditoria, abre uma issue só, no topo, que lista todos. Se uma issue com o mesmo título já existe, aberta ou fechada, comenta nela a ocorrência nova em vez de abrir outra (um force-push que volta `main` a um SHA antigo, por exemplo), e a run fica vermelha do mesmo jeito. Se o `gh` ou o git falham, o passo `Julgar` para, e a run fica vermelha com o motivo e o pedido de re-rodá-la (`gh run rerun <id>`); sem o re-run, a auditoria seguinte julga o mesmo intervalo, porque uma run interrompida não conta como auditada.
+- **O que ela não vê.** Um push direto que muda ou apaga o `main-audit.yml` é julgado pela cópia que ele deixou, e as auditorias seguintes, a diária inclusive, rodam essa mesma cópia até alguém restaurá-la pelo loop. E um force-push cujo topo antigo nem o GitHub conhece mais (404 no compare) não é nomeado como reescrita: a auditoria seguinte começa do `before` do push, ou da linha de base no agendamento e à mão ([ADR 0002](../../context/decisions/0002-soft-enforcement-on-github-free.md)).
+
+Uma issue da auditoria é um relato, não um plano: o commit já está em `main`. O dono a tria e escolhe um de dois caminhos:
+
+- **Registrar retroativamente.** Ligar a mudança a uma issue que explique o porquê, citar o commit nela e fechar a issue da auditoria com o link.
+- **Reverter.** Fazer a reversão pelo loop, numa issue com plano e Approve, e fechar a issue da auditoria com o link da PR.
+
+Se a issue chama de "commit direto em main, sem PR" o merge de uma PR que fecha issue, é um falso positivo: mesmo depois das 3 tentativas, o GitHub ainda não tinha ligado o merge à PR. O dono fecha essa issue citando a PR. Mover a label de estado de uma issue da auditoria é do dono, como em qualquer issue.
 
 ## Saída de emergência do dono
 
@@ -212,7 +254,8 @@ Quando os hooks do Claude Code chegarem (#5), o dono pode desligá-los na própr
 | O que o mock precisa fazer, com critérios de aceite | `context/intent/` |
 | Uma escolha relevante e os motivos | `context/decisions/` |
 | Uma regra que a revisão confere | `context/knowledge/patterns/` |
-| Um erro a não repetir | `context/knowledge/anti-patterns/` (chega com a #4) |
+| Um erro a não repetir | `context/knowledge/anti-patterns/` (o primeiro chegou com a #2; a #4 traz os do histórico) |
+| Uma tarefa repetível para um agente de IA | `context/agents/agent-<nome>.md` (a pasta chega com o primeiro agente) |
 | Uma definição | `context/knowledge/glossary.md` (chega com a #4) |
 | O que mudou e o que ensinou | O [changelog](../../context/evolution/changelog.md), no passo Learn |
 | Como rodar, mudar ou operar algo | `docs/` |

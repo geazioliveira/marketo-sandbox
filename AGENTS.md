@@ -13,9 +13,11 @@ O trabalho segue Intent, Build e Learn, com Plan, Approve e Execute dentro do Bu
 
 - Nenhum plano nasce fora de uma issue, e toda PR fecha uma issue. Não existe lane sem issue.
 - Rode `npm run gate` antes de começar e de novo antes da PR. Se ele bloquear, pare e resolva o que ele aponta.
+- Antes da PR, rode também `npm run check` e o e2e, como diz [a seção Check do fluxo](docs/development/workflow.md#check). É o que o check `Qualidade / check` roda.
 - O dono move a label e escreve o Approve. O agente nunca faz nenhum dos dois.
 - Um plano aceito no plan mode do Claude Code só autoriza postá-lo na issue. Aprovação no chat não é Approve, e o agente nunca a transcreve para a issue.
 - Um plano revisado é um comentário cuja primeira linha é exatamente `# Plano`. Nunca abra um comentário com um título que mencione "approve" (heading de qualquer nível, linha sublinhada, linha em negrito, citação): depois de um Approve, isso o cancela. Depois do Approve, não edite o corpo da issue nem comentário nenhum: isso também o revoga.
+- Nunca escreva `[skip ci]`, `[ci skip]`, `[no ci]`, `[skip actions]` ou `[actions skip]`, nem o trailer `skip-checks: true`, no título ou no corpo de uma PR, nem numa mensagem de commit: a mensagem do merge é o título e o corpo da PR, e o push do merge ficaria sem o `Qualidade / check` e sem a auditoria de `main` ([o fluxo](docs/development/workflow.md#pull-requests-e-merge)).
 - Antes de mergear, renove o veredito do gate (re-rode o `issue-link` ou rode o gate em modo CI) e só mergeie com os checks exigidos verdes e a revisão feita, como diz [o fluxo](docs/development/workflow.md#pull-requests-e-merge).
 - Trabalhe só no seu worktree. O checkout principal pode guardar trabalho do dono sem commit.
 
@@ -29,6 +31,9 @@ O trabalho segue Intent, Build e Learn, com Plan, Approve e Execute dentro do Bu
 | Uma decisão, e se ela está Accepted ou Proposed | [O índice de decisões](context/decisions/README.md) |
 | Se o trabalho pode começar e quais passos do loop estão feitos | `npm run gate` e [o gate do loop](context/knowledge/patterns/loop-gate.md) |
 | O loop, os comandos `gh`, as labels e as regras da PR | [O fluxo de desenvolvimento](docs/development/workflow.md) |
+| O que o CI roda e como rodar o mesmo antes da PR (`npm run check`, o e2e) | [A seção Check do fluxo](docs/development/workflow.md#check) |
+| Um problema apontado pelo `npm run check:context` | Os formatos e o layout de `context/` no [guia do Context Mesh](context/README.md). Cada problema sai com `arquivo:linha`, e um arquivo fora do layout é recusado |
+| Uma issue `Mudança em main fora do loop: <sha7>` | [A auditoria de main](docs/development/workflow.md#auditoria-de-main). É um relato para o dono: um commit de `main` que não veio de uma PR mergeada que fecha issue com os checks exigidos verdes na head, ou um histórico de `main` reescrito. O dono registra retroativamente ou reverte |
 | Como uma branch nasce, anda e é mergeada | [O ciclo de vida de issue e branch](context/knowledge/patterns/issue-branch-lifecycle.md) |
 | O que mudou e o que cada mudança ensinou | [O changelog](context/evolution/changelog.md) |
 | O que está em andamento e o que vem depois | As issues abertas em `geazioliveira/marketo-sandbox`, a começar pela de acompanhamento #1, e o `git log` |
