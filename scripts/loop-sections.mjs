@@ -11,7 +11,7 @@
 
 /** Printed on every gate run, passing ones included. */
 export const ownerRule =
-  'O dono move a label e escreve o Approve. O agente nunca faz nenhum dos dois.'
+  'Ao publicar um plano, o agente move needs-triage para ready-for-human. Só o dono escreve o Approve e move ready-for-agent.'
 
 // ---------------------------------------------------------------------------
 // Branches
