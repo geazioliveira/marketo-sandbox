@@ -175,6 +175,70 @@ export declare const requiredChecks: readonly RequiredCheck[]
 export declare function changelogHeadingFor(issue: number): RegExp
 export declare const changelogHeading: RegExp
 
+// The Copilot review and the review threads
+
+export interface CopilotReviewer {
+  typename: 'Bot'
+  databaseId: number
+  login: string
+}
+
+/** A review's author as GraphQL gives it; databaseId only on a Bot. */
+export interface ReviewAuthor {
+  __typename?: string
+  login?: string
+  databaseId?: number | null
+}
+
+export interface PullRequestReview {
+  state?: string | null
+  submittedAt?: string | null
+  commit?: { oid?: string | null } | null
+  author?: ReviewAuthor | null
+  /** GraphQL's `body`; a review without it reads as failed (copilotFailedReview). */
+  body?: string | null
+}
+
+/** A review request as GraphQL gives it; the reviewer's databaseId only on a Bot. */
+export interface ReviewRequest {
+  requestedReviewer?: ReviewAuthor | null
+}
+
+export interface ReviewThread {
+  isResolved?: boolean | null
+  isOutdated?: boolean | null
+  path?: string | null
+  line?: number | null
+  comments?: {
+    nodes?: readonly ({
+      url?: string | null
+      author?: { login?: string } | null
+    } | null)[]
+  } | null
+}
+
+export declare const copilotReviewer: CopilotReviewer
+export declare const copilotRequestLogin: string
+export declare const copilotHandle: string
+export declare function shellWord(word: number | string): string
+export declare function copilotRequestCommand(pr: number | string): string
+export declare const copilotReviewStates: readonly string[]
+export declare const reviewRuleSince: string
+export declare const copilotFailedReview: RegExp
+export declare function isCopilotReviewer(
+  author: ReviewAuthor | null | undefined,
+): boolean
+export declare function copilotReviewOn<R extends PullRequestReview>(input: {
+  reviews?: readonly (R | null)[] | null
+  headRefOid: string | null | undefined
+}): { ok: boolean; review: R | null; latest: R | null; failed: boolean }
+export declare function copilotRequested(
+  requests: readonly (ReviewRequest | null)[] | null | undefined,
+): boolean
+export declare function openThreads<T extends ReviewThread | null>(
+  threads: readonly T[] | null | undefined,
+): T[]
+
 // Context files
 
 export type ContextKind =
@@ -286,3 +350,15 @@ export declare const refreshPollMs: number
 export declare const refreshWaitMs: number
 export declare const skipCiTokens: readonly string[]
 export declare const skipChecksTrailer: string
+
+// The review signal, the PR refresh and the audit's review pages
+
+export declare const reviewSignalWorkflow: string
+export declare const reviewSignalWorkflowFile: string
+export declare const issueLinkRefreshWorkflowFile: string
+export declare function refreshPrCommand(pr: number | string): string
+export declare function gateCiCommand(
+  pr: number | string,
+  branch: string,
+): string
+export declare const auditReviewPage: number

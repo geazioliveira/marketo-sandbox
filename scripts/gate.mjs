@@ -17,7 +17,9 @@
 // - CI (`--pr <n> --branch <headRef>`): fail-closed. issue-link.yml runs the
 //   copy of this file from main against a checkout of the PR head, so nothing
 //   here may assume it lives in the repository it judges, and the PR's files
-//   are read through git (`git show <sha>:<path>`), never through fs.
+//   are read through git (`git show <sha>:<path>`), never through fs. Only
+//   this mode reads the PR, and with it the two conditions of a merge (#13):
+//   a Copilot review of the PR's head, and no review thread left open.
 //
 // What it cannot see: the agent posts from the owner's account, so it cannot
 // tell who typed an Approve. ownerRule states that convention on every run.
@@ -33,13 +35,19 @@ import {
   changelogHeadingFor,
   checkSections,
   closesLine,
+  copilotRequestCommand,
+  copilotRequested,
+  copilotReviewOn,
+  copilotReviewStates,
   countCriteria,
   criteriaSection,
   currentPlan,
+  gateCiCommand,
   gateCacheFile,
   gateCacheSchema,
   headAndRest,
   kindOf,
+  openThreads,
   ownerRule,
   parseBranch,
   planCitesBranch,
@@ -60,7 +68,16 @@ const page = 100
 
 const issueQuery = `query($owner: String!, $name: String!, $number: Int!) { repository(owner: $owner, name: $name) { owner { login } issue(number: $number) { number state body lastEditedAt labels(first: ${page}) { totalCount nodes { name } } comments(last: ${page}) { totalCount nodes { body createdAt lastEditedAt author { __typename login } } } timelineItems(last: ${page}, itemTypes: [LABELED_EVENT, REOPENED_EVENT, COMMENT_DELETED_EVENT]) { totalCount nodes { __typename ... on LabeledEvent { createdAt actor { __typename login } label { name } } ... on ReopenedEvent { createdAt } ... on CommentDeletedEvent { createdAt } } } } } }`
 
-const prQuery = `query($owner: String!, $name: String!, $number: Int!) { repository(owner: $owner, name: $name) { pullRequest(number: $number) { baseRefName headRefName headRefOid isDraft body closingIssuesReferences(first: 10) { totalCount nodes { number repository { nameWithOwner } } } } } }`
+// The reviews come newest last, so the last page holds the newest; a Copilot
+// review is told apart by its author's type and database id, which only a Bot
+// carries, and a failed one by its body (copilotFailedReview). The review
+// requests say whether a Copilot review is still on its way, its reviewer
+// told apart the same way (copilotRequested). The threads are read first to
+// last, each with its first comment, for the link a message gives.
+const prQuery = `query($owner: String!, $name: String!, $number: Int!) { repository(owner: $owner, name: $name) { pullRequest(number: $number) { baseRefName headRefName headRefOid isDraft body closingIssuesReferences(first: 10) { totalCount nodes { number repository { nameWithOwner } } } reviews(last: ${page}) { totalCount nodes { state submittedAt commit { oid } author { __typename login ... on Bot { databaseId } } body } } reviewRequests(first: ${page}) { totalCount nodes { requestedReviewer { __typename ... on Bot { databaseId } } } } reviewThreads(first: ${page}) { totalCount nodes { isResolved isOutdated path line comments(first: 1) { nodes { url author { login } } } } } } } }`
+
+/** How many open threads the review-threads step names; the rest are counted. */
+const threadsShown = 10
 
 const usage = [
   'Uso:',
@@ -277,6 +294,43 @@ function realpathOrSelf(target) {
 const short = (sha) => String(sha ?? '').slice(0, 7)
 const quoted = (items) => items.map((item) => `"${item}"`).join(', ')
 
+/** The commit a review covers, short, or a note when GitHub gave none. */
+const reviewedSha = (review) =>
+  review.commit?.oid
+    ? short(review.commit.oid)
+    : 'um commit que o GitHub não informou'
+
+/** What a failed review said (copilotFailedReview), for the message: its first line, quoted. */
+const failure = (review) =>
+  typeof review.body !== 'string'
+    ? ' (o GitHub não deu o corpo dela)'
+    : review.body.trim() === ''
+      ? ' (o corpo dela veio vazio)'
+      : ` ("${firstLine(review.body).slice(0, 200)}")`
+
+/** An open thread as a message names it: `path:line`, its opener and its link. */
+function describeThread(thread) {
+  const line = Number.isInteger(thread?.line) ? `:${thread.line}` : ''
+  const outdated = thread?.isOutdated === true ? ' (desatualizada)' : ''
+  const first = thread?.comments?.nodes?.[0]
+  const by = first?.author?.login ? ` de ${first.author.login}` : ''
+  return `${thread?.path ?? 'arquivo desconhecido'}${line}${outdated}${by} ${first?.url ?? '(sem link)'}`
+}
+
+/**
+ * Why a connection was not judged: it holds more nodes than the gate read, or
+ * GitHub did not say how many it holds.
+ */
+const partialPage = (total, read, what, judged) =>
+  Number.isInteger(total)
+    ? `a PR tem ${total} ${what} e o gate leu ${read}; o gate não julga ${judged} sem ler todas`
+    : `o GitHub não disse quantas ${what} a PR tem, e o gate não julga ${judged} sem saber se leu todas (leu ${read})`
+
+/** Whether a connection was read whole: its totalCount is known and no larger than its nodes. */
+const readWhole = (connection) =>
+  Number.isInteger(connection?.totalCount) &&
+  connection.totalCount <= (connection?.nodes ?? []).length
+
 // ---------------------------------------------------------------------------
 // The run
 
@@ -378,7 +432,7 @@ function main() {
       process.stderr.write(human)
     } else process.stdout.write(human)
 
-    // Only the local gate writes the cache the hooks (#5) read; a CI verdict
+    // Only the local gate writes the cache the hooks (#5) are to read; a CI verdict
     // describes a PR head, not the worktree someone is building in.
     if (!ci && options.cache) {
       const gitDir = facts.gitDir
@@ -761,7 +815,14 @@ function main() {
   // 4. The pull request (CI only).
   let pr = null
   if (ci) {
-    const prIds = ['pr-base', 'pr-closes', 'pr-closes-only', 'pr-first-line']
+    const prIds = [
+      'pr-base',
+      'pr-closes',
+      'pr-closes-only',
+      'pr-first-line',
+      'copilot-review',
+      'review-threads',
+    ]
     const prFetched = canQuery
       ? graphql(prQuery, {
           owner: identity.owner,
@@ -839,6 +900,119 @@ function main() {
             : `a primeira linha é "${first}"; deve ser exatamente "Closes #${number}."`,
         { blocks: true },
       )
+
+      // A merge waits for a Copilot review of the head and for every review
+      // thread, whoever opened it, to be resolved. A draft cannot be merged,
+      // so there both are only reported, as intent-first and learn are. A
+      // finding only in the review's summary has no thread and is not read:
+      // its format is not documented, and the agent handles it in the PR.
+      // Every refusal ends with how to renew the verdict once it is fixed:
+      // resolving a thread triggers no workflow, and a re-request only brings
+      // a review later.
+      const reviewBlocks = pr.isDraft !== true
+      const request = copilotRequestCommand(options.pr)
+      const renew = `depois, renove o veredito na cabeça da PR com ${gateCiCommand(options.pr, options.branch)}`
+      const reviews = pr.reviews?.nodes ?? []
+      const { review, latest, failed } = copilotReviewOn({
+        reviews,
+        headRefOid: pr.headRefOid,
+      })
+      // A Copilot review requested and still to come (copilotRequested) holds
+      // the merge even over a review of the head: its threads are not there
+      // yet, and a merge before a review lands is how #10 and #11 went. With
+      // the requests not all read and Copilot's not among them, one might be
+      // pending among the unread, and a review of the head is not judged.
+      const requests = pr.reviewRequests?.nodes ?? []
+      const requested = copilotRequested(requests)
+      const coming = (which) =>
+        `${which} revisão do Copilot foi pedida e ainda não chegou (leva uns 6 min): espere-a e trate as threads dela; se ela não chegar em uns 10 min, peça de novo com ${request}`
+      // The page is the newest reviews, so a review that counts among them is
+      // enough: the older ones left unread cannot undo it. With none among
+      // them, an unread one might count, and the step is not judged. A page
+      // GitHub did not count is not trusted either way.
+      if (
+        !readWhole(pr.reviews) &&
+        !(review !== null && Number.isInteger(pr.reviews?.totalCount))
+      )
+        set(
+          'copilot-review',
+          'unchecked',
+          Number.isInteger(pr.reviews?.totalCount)
+            ? `a PR tem ${pr.reviews.totalCount} revisões, o gate leu as ${reviews.length} mais recentes e nenhuma delas é uma revisão do Copilot que conta na cabeça ${short(pr.headRefOid)}; as mais antigas ficam sem julgar; ${requested ? coming('uma') : `peça de novo com ${request}`}; ${renew}`
+            : `${partialPage(
+                pr.reviews?.totalCount,
+                reviews.length,
+                'revisões',
+                'a revisão do Copilot',
+              )}; ${renew}`,
+          { blocks: reviewBlocks },
+        )
+      else if (review !== null) {
+        const reviewed = `revisão do Copilot na cabeça ${short(pr.headRefOid)} (${review.state} em ${review.submittedAt})${readWhole(pr.reviews) ? '' : `, entre as ${reviews.length} mais recentes de ${pr.reviews.totalCount} revisões`}`
+        if (!requested && !readWhole(pr.reviewRequests))
+          set(
+            'copilot-review',
+            'unchecked',
+            Number.isInteger(pr.reviewRequests?.totalCount)
+              ? `${reviewed}, mas a PR tem ${pr.reviewRequests.totalCount} pedidos de revisão e o gate leu ${requests.length}; sem ler todos, o gate não sabe se outra revisão do Copilot está a caminho; ${renew}`
+              : `${reviewed}, mas o GitHub não disse quantos pedidos de revisão a PR tem (o gate leu ${requests.length}), e sem ler todos o gate não sabe se outra revisão do Copilot está a caminho; ${renew}`,
+            { blocks: reviewBlocks },
+          )
+        else
+          set(
+            'copilot-review',
+            requested ? 'no' : 'ok',
+            requested
+              ? `há uma ${reviewed}, mas ${coming('outra')}; ${renew}`
+              : reviewed,
+            { blocks: reviewBlocks },
+          )
+      } else {
+        const next = requested ? coming('uma') : `peça de novo com ${request}`
+        set(
+          'copilot-review',
+          'no',
+          latest === null
+            ? requested
+              ? `nenhuma revisão do Copilot nesta PR ainda; ${coming('uma')}; ${renew}`
+              : `nenhuma revisão do Copilot nesta PR; ela é pedida automaticamente quando a PR sai de draft e leva uns 6 min, ou peça com ${request}; ${renew}`
+            : failed
+              ? latest.commit?.oid === pr.headRefOid
+                ? `a revisão do Copilot na cabeça ${short(pr.headRefOid)} falhou${failure(latest)}, e uma revisão que falhou não conta; ${next}; ${renew}`
+                : `a última revisão do Copilot, de ${reviewedSha(latest)}, falhou${failure(latest)}; nenhuma cobre a cabeça ${short(pr.headRefOid)}; ${next}; ${renew}`
+              : !copilotReviewStates.includes(latest.state)
+                ? `a última revisão do Copilot, de ${reviewedSha(latest)}, está ${latest.state} e não conta (contam ${copilotReviewStates.join(' e ')}); nenhuma cobre a cabeça ${short(pr.headRefOid)}; ${next}; ${renew}`
+                : `a última revisão do Copilot é de ${reviewedSha(latest)}, não da cabeça ${short(pr.headRefOid)}; ${next}; ${renew}`,
+          { blocks: reviewBlocks },
+        )
+      }
+
+      if (!readWhole(pr.reviewThreads))
+        set(
+          'review-threads',
+          'unchecked',
+          `${partialPage(
+            pr.reviewThreads?.totalCount,
+            (pr.reviewThreads?.nodes ?? []).length,
+            'threads de revisão',
+            'as threads',
+          )}; ${renew}`,
+          { blocks: reviewBlocks },
+        )
+      else {
+        const total = pr.reviewThreads.totalCount
+        const open = openThreads(pr.reviewThreads.nodes)
+        const named = open.slice(0, threadsShown).map(describeThread)
+        const more = open.length - named.length
+        set(
+          'review-threads',
+          open.length === 0 ? 'ok' : 'no',
+          open.length === 0
+            ? `nenhuma thread de revisão aberta (${total} no total)`
+            : `${open.length} de ${total} thread(s) de revisão aberta(s): ${named.join('; ')}${more > 0 ? `; e mais ${more}` : ''}; responda em cada uma e só então a resolva; ${renew}`,
+          { blocks: reviewBlocks },
+        )
+      }
     }
   } else
     for (const id of [
@@ -846,6 +1020,8 @@ function main() {
       'pr-closes',
       'pr-closes-only',
       'pr-first-line',
+      'copilot-review',
+      'review-threads',
     ])
       set(id, 'skip', 'só no modo CI')
 

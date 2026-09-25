@@ -201,6 +201,84 @@ const closing = (number: number, nameWithOwner = `${OWNER}/${NAME}`) => ({
   repository: { nameWithOwner },
 })
 
+// Copilot as GitHub's GraphQL gives a review's author, written out here rather
+// than read from the contract, so a change to the contract fails these cases.
+const COPILOT = {
+  __typename: 'Bot',
+  login: 'copilot-pull-request-reviewer',
+  databaseId: 175728472,
+}
+/** The command every copilot-review refusal gives, for PR 7. */
+const REQUEST = `gh pr edit ${PR} --add-reviewer @copilot`
+/** How every refusal of a review step ends: the gate in CI mode, for PR 7. */
+const RENEW = `depois, renove o veredito na cabeça da PR com node scripts/gate.mjs --pr ${PR} --branch ${BRANCH}`
+/** A commit the PR held before its head. */
+const OLD = `abcdef1${'0'.repeat(33)}`
+
+interface Review {
+  state: string
+  submittedAt: string | null
+  commit: { oid: string } | null
+  author: Record<string, unknown> | null
+  body?: string | null
+}
+
+/** A review body as Copilot writes one when it reviewed. */
+const REVIEWED =
+  '## Pull request overview\n\nCopilot reviewed 2 out of 2 changed files in this pull request and generated 1 comment.'
+
+// The bodies of two failed Copilot reviews, as GitHub gives them
+// (keycloak/keycloak#52793 and Azure/azure-powershell#30106).
+const ERRORED =
+  'Copilot encountered an error and was unable to review this pull request. You can try again by re-requesting a review.'
+const NO_FILES =
+  "Copilot wasn't able to review any files in this pull request.\n\n\n\n"
+
+/** A Copilot review of `oid`, COMMENTED, unless the case says otherwise. */
+const review = (oid: string, extra: Partial<Review> = {}): Review => ({
+  state: 'COMMENTED',
+  submittedAt: at('13:00'),
+  commit: { oid },
+  author: COPILOT,
+  body: REVIEWED,
+  ...extra,
+})
+
+interface Thread {
+  isResolved: boolean
+  isOutdated: boolean
+  path: string
+  line: number | null
+  comments: { nodes: { url: string; author: { login: string } }[] }
+}
+
+const threadUrl = (n: number) =>
+  `https://github.com/${OWNER}/${NAME}/pull/${PR}#discussion_r${1000 + n}`
+
+/** Review thread n, open, on line n of its own file, opened by Copilot. */
+const thread = (
+  n: number,
+  extra: Partial<Thread> = {},
+  login = COPILOT.login,
+): Thread => ({
+  isResolved: false,
+  isOutdated: false,
+  path: `src/file-${n}.ts`,
+  line: n,
+  comments: { nodes: [{ url: threadUrl(n), author: { login } }] },
+  ...extra,
+})
+
+const connection = <T>(nodes: T[], totalCount: number = nodes.length) => ({
+  totalCount,
+  nodes,
+})
+
+/**
+ * The PR as GitHub's GraphQL returns it. By default it is ready for a merge:
+ * Copilot reviewed its head, no review is requested, and it has no review
+ * thread.
+ */
 function prAnswer(
   headRefOid: string,
   overrides: Record<string, unknown> = {},
@@ -217,6 +295,9 @@ function prAnswer(
           isDraft: false,
           body: `Closes #${ISSUE}.\n\n## Risco\n\nNORMAL.`,
           closingIssuesReferences: { totalCount: 1, nodes: [closing(ISSUE)] },
+          reviews: connection([review(headRefOid)]),
+          reviewRequests: connection([]),
+          reviewThreads: connection([]),
           ...overrides,
         },
       },
@@ -378,8 +459,18 @@ const step = (result: GateResult, id: string) => {
 const statuses = (result: GateResult) =>
   Object.fromEntries(result.steps.map((entry) => [entry.id, entry.status]))
 
+/** The steps only CI mode judges: the ones that read the PR. */
+const ciOnly = new Set([
+  'pr-base',
+  'pr-closes',
+  'pr-closes-only',
+  'pr-first-line',
+  'copilot-review',
+  'review-threads',
+])
+
 const localPass = Object.fromEntries(
-  stepIds.map((id) => [id, id.startsWith('pr-') ? 'skip' : 'ok']),
+  stepIds.map((id) => [id, ciOnly.has(id) ? 'skip' : 'ok']),
 )
 
 const readCache = async (repo: TempRepo) =>
@@ -2654,6 +2745,699 @@ describe.concurrent('scripts/gate.mjs', () => {
   })
 
   // ---------------------------------------------------------------------------
+  // The Copilot review and the review threads (#13)
+
+  describe.concurrent('the Copilot review and the review threads', () => {
+    /** The standard work branch in CI mode, with this PR over its head. */
+    const ciWith = (
+      fresh: Fresh,
+      pr: (head: string) => Record<string, unknown>,
+    ) =>
+      ci(fresh, (head) => ({
+        issue: issueAnswer(),
+        pr: prAnswer(head, pr(head)),
+      }))
+
+    test('reports both steps only in CI mode, and reads no PR locally', async ({
+      expect,
+      fresh,
+    }) => {
+      const { status, result, calls } = await local(fresh)
+      expect(status).toBe(0)
+      for (const id of ['copilot-review', 'review-threads'])
+        expect(step(result, id)).toEqual({
+          id,
+          status: 'skip',
+          blocks: false,
+          detail: 'só no modo CI',
+        })
+      expect(calls.map(({ kind }) => kind)).toEqual(['issue'])
+    })
+
+    test('passes a Copilot review of the head and resolved threads of any kind', async ({
+      expect,
+      fresh,
+    }) => {
+      const { status, result, head } = await ciWith(fresh, (head) => ({
+        reviews: connection([
+          review(OLD, { submittedAt: at('12:30') }),
+          review(head, {
+            author: { __typename: 'User', login: OWNER },
+            submittedAt: at('12:40'),
+          }),
+          review(head),
+        ]),
+        reviewThreads: connection([
+          thread(1, { isResolved: true }),
+          thread(2, { isResolved: true, isOutdated: true, line: null }),
+          thread(3, { isResolved: true }, OWNER),
+        ]),
+      }))
+      expect(status).toBe(0)
+      expect(step(result, 'copilot-review')).toEqual({
+        id: 'copilot-review',
+        status: 'ok',
+        blocks: true,
+        detail: `revisão do Copilot na cabeça ${head.slice(0, 7)} (COMMENTED em ${at('13:00')})`,
+      })
+      expect(step(result, 'review-threads')).toEqual({
+        id: 'review-threads',
+        status: 'ok',
+        blocks: true,
+        detail: 'nenhuma thread de revisão aberta (3 no total)',
+      })
+      expect(result.blocked).toEqual([])
+    })
+
+    test('passes an APPROVED Copilot review of the head', async ({
+      expect,
+      fresh,
+    }) => {
+      const { status, result } = await ciWith(fresh, (head) => ({
+        reviews: connection([review(head, { state: 'APPROVED' })]),
+      }))
+      expect(status).toBe(0)
+      expect(step(result, 'copilot-review').status).toBe('ok')
+    })
+
+    // Each refusal of copilot-review, on a PR ready for a merge (blocks) and
+    // on a draft (only reported).
+    const noReview: [
+      string,
+      (head: string) => Review[],
+      (head: string) => string[],
+    ][] = [
+      [
+        'no review at all',
+        () => [],
+        () => [
+          'nenhuma revisão do Copilot nesta PR',
+          'quando a PR sai de draft',
+          'uns 6 min',
+          REQUEST,
+        ],
+      ],
+      [
+        'a review of an older commit only',
+        () => [review(OLD)],
+        (head) => [
+          `a última revisão do Copilot é de ${OLD.slice(0, 7)}, não da cabeça ${head.slice(0, 7)}`,
+          REQUEST,
+        ],
+      ],
+      [
+        'a review of the head by a User named like Copilot',
+        (head) => [
+          review(head, {
+            author: {
+              __typename: 'User',
+              login: COPILOT.login,
+              databaseId: COPILOT.databaseId,
+            },
+          }),
+        ],
+        () => ['nenhuma revisão do Copilot nesta PR', REQUEST],
+      ],
+      [
+        'a review of the head by an Organization named like Copilot',
+        (head) => [
+          review(head, {
+            author: {
+              __typename: 'Organization',
+              login: COPILOT.login,
+              databaseId: COPILOT.databaseId,
+            },
+          }),
+        ],
+        () => ['nenhuma revisão do Copilot nesta PR', REQUEST],
+      ],
+      [
+        'a review of the head by another bot with Copilot’s login',
+        (head) => [review(head, { author: { ...COPILOT, databaseId: 1 } })],
+        () => ['nenhuma revisão do Copilot nesta PR', REQUEST],
+      ],
+      [
+        'a dismissed review of the head',
+        (head) => [review(head, { state: 'DISMISSED' })],
+        (head) => [
+          `de ${head.slice(0, 7)}, está DISMISSED e não conta (contam COMMENTED e APPROVED)`,
+          REQUEST,
+        ],
+      ],
+      [
+        'a review of the head that requests changes',
+        (head) => [review(head, { state: 'CHANGES_REQUESTED' })],
+        () => ['está CHANGES_REQUESTED e não conta', REQUEST],
+      ],
+      [
+        'a pending review of the head',
+        (head) => [review(head, { state: 'PENDING', submittedAt: null })],
+        () => ['está PENDING e não conta', REQUEST],
+      ],
+      [
+        'a review of the head, dismissed, then one of an older commit',
+        (head) => [
+          review(head, { state: 'DISMISSED', submittedAt: at('12:30') }),
+          review(OLD),
+        ],
+        (head) => [
+          `a última revisão do Copilot é de ${OLD.slice(0, 7)}, não da cabeça ${head.slice(0, 7)}`,
+        ],
+      ],
+      [
+        'a review of the head that failed with an error',
+        (head) => [review(head, { body: ERRORED })],
+        (head) => [
+          `a revisão do Copilot na cabeça ${head.slice(0, 7)} falhou ("Copilot encountered an error and was unable to review this pull request. You can try again by re-requesting a review."), e uma revisão que falhou não conta`,
+          REQUEST,
+        ],
+      ],
+      [
+        'a review of the head that could not review any file',
+        (head) => [review(head, { body: NO_FILES })],
+        (head) => [
+          `a revisão do Copilot na cabeça ${head.slice(0, 7)} falhou ("Copilot wasn't able to review any files in this pull request.")`,
+          REQUEST,
+        ],
+      ],
+      [
+        'a review of the head without a body',
+        (head) => [review(head, { body: null })],
+        () => ['falhou (o GitHub não deu o corpo dela)', REQUEST],
+      ],
+      [
+        'a review of the head with a blank body',
+        (head) => [review(head, { body: ' \n\t ' })],
+        () => ['falhou (o corpo dela veio vazio)', REQUEST],
+      ],
+      [
+        'a good review of an older commit, then a failed one of the head',
+        (head) => [
+          review(OLD, { submittedAt: at('12:30') }),
+          review(head, { body: ERRORED }),
+        ],
+        (head) => [`a revisão do Copilot na cabeça ${head.slice(0, 7)} falhou`],
+      ],
+      [
+        'a failed review of an older commit only',
+        () => [review(OLD, { body: NO_FILES })],
+        (head) => [
+          `a última revisão do Copilot, de ${OLD.slice(0, 7)}, falhou ("Copilot wasn't able to review any files in this pull request."); nenhuma cobre a cabeça ${head.slice(0, 7)}`,
+          REQUEST,
+        ],
+      ],
+    ]
+
+    test.for(noReview)(
+      'blocks a ready PR with %s',
+      async ([, reviews, words], { expect, fresh }) => {
+        const { status, result, head } = await ciWith(fresh, (head) => ({
+          reviews: connection(reviews(head)),
+        }))
+        expect(step(result, 'copilot-review')).toMatchObject({
+          status: 'no',
+          blocks: true,
+        })
+        for (const word of words(head))
+          expect(step(result, 'copilot-review').detail).toContain(word)
+        expect(
+          step(result, 'copilot-review').detail.endsWith(`; ${RENEW}`),
+        ).toBe(true)
+        expect(result.blocked).toEqual(['copilot-review'])
+        expect(status).toBe(1)
+      },
+    )
+
+    test('passes a good review of the head even when a later one of it failed', async ({
+      expect,
+      fresh,
+    }) => {
+      const { status, result, head } = await ciWith(fresh, (head) => ({
+        reviews: connection([
+          review(head, { submittedAt: at('12:30') }),
+          review(head, { body: ERRORED }),
+        ]),
+      }))
+      expect(step(result, 'copilot-review')).toMatchObject({
+        status: 'ok',
+        detail: `revisão do Copilot na cabeça ${head.slice(0, 7)} (COMMENTED em ${at('12:30')})`,
+      })
+      expect(status).toBe(0)
+    })
+
+    test.for(noReview)(
+      'only reports %s on a draft PR',
+      async ([, reviews], { expect, fresh }) => {
+        const { status, result } = await ciWith(fresh, (head) => ({
+          isDraft: true,
+          reviews: connection(reviews(head)),
+        }))
+        expect(step(result, 'copilot-review')).toMatchObject({
+          status: 'no',
+          blocks: false,
+        })
+        expect(result.blocked).toEqual([])
+        expect(status).toBe(0)
+      },
+    )
+
+    /** A review request for `reviewer`, as GitHub's GraphQL gives one. */
+    const requestOf = (reviewer: Record<string, unknown> | null) => ({
+      requestedReviewer: reviewer,
+    })
+    /** What a refusal says while a Copilot review is on its way. */
+    const coming = (which: string) =>
+      `${which} revisão do Copilot foi pedida e ainda não chegou (leva uns 6 min): espere-a e trate as threads dela; se ela não chegar em uns 10 min, peça de novo com ${REQUEST}`
+
+    test('blocks a ready PR whose head Copilot reviewed while another Copilot review is on its way', async ({
+      expect,
+      fresh,
+    }) => {
+      const { status, result, head } = await ciWith(fresh, () => ({
+        reviewRequests: connection([
+          requestOf({ __typename: 'User', login: OWNER }),
+          requestOf(COPILOT),
+        ]),
+      }))
+      expect(step(result, 'copilot-review')).toEqual({
+        id: 'copilot-review',
+        status: 'no',
+        blocks: true,
+        detail: `há uma revisão do Copilot na cabeça ${head.slice(0, 7)} (COMMENTED em ${at('13:00')}), mas ${coming('outra')}; ${RENEW}`,
+      })
+      expect(result.blocked).toEqual(['copilot-review'])
+      expect(status).toBe(1)
+    })
+
+    test('only reports a Copilot review on its way on a draft PR', async ({
+      expect,
+      fresh,
+    }) => {
+      const { status, result } = await ciWith(fresh, () => ({
+        isDraft: true,
+        reviewRequests: connection([requestOf(COPILOT)]),
+      }))
+      expect(step(result, 'copilot-review')).toMatchObject({
+        status: 'no',
+        blocks: false,
+      })
+      expect(result.blocked).toEqual([])
+      expect(status).toBe(0)
+    })
+
+    // While a Copilot review is on its way, a refusal says to wait for it
+    // before requesting one more.
+    const onItsWay: [
+      string,
+      (head: string) => Review[],
+      (head: string) => string,
+    ][] = [
+      [
+        'no review yet',
+        () => [],
+        () =>
+          `nenhuma revisão do Copilot nesta PR ainda; ${coming('uma')}; ${RENEW}`,
+      ],
+      [
+        'a failed review of the head',
+        (head) => [review(head, { body: ERRORED })],
+        (head) =>
+          `a revisão do Copilot na cabeça ${head.slice(0, 7)} falhou ("${ERRORED}"), e uma revisão que falhou não conta; ${coming('uma')}; ${RENEW}`,
+      ],
+      [
+        'a failed review of an older commit',
+        () => [review(OLD, { body: NO_FILES })],
+        (head) =>
+          `a última revisão do Copilot, de ${OLD.slice(0, 7)}, falhou ("Copilot wasn't able to review any files in this pull request."); nenhuma cobre a cabeça ${head.slice(0, 7)}; ${coming('uma')}; ${RENEW}`,
+      ],
+      [
+        'a dismissed review of the head',
+        (head) => [review(head, { state: 'DISMISSED' })],
+        (head) =>
+          `a última revisão do Copilot, de ${head.slice(0, 7)}, está DISMISSED e não conta (contam COMMENTED e APPROVED); nenhuma cobre a cabeça ${head.slice(0, 7)}; ${coming('uma')}; ${RENEW}`,
+      ],
+      [
+        'a review of an older commit',
+        () => [review(OLD)],
+        (head) =>
+          `a última revisão do Copilot é de ${OLD.slice(0, 7)}, não da cabeça ${head.slice(0, 7)}; ${coming('uma')}; ${RENEW}`,
+      ],
+    ]
+
+    test.for(onItsWay)(
+      'says to wait for the Copilot review on its way, with %s',
+      async ([, reviews, detail], { expect, fresh }) => {
+        const { status, result, head } = await ciWith(fresh, (head) => ({
+          reviews: connection(reviews(head)),
+          reviewRequests: connection([requestOf(COPILOT)]),
+        }))
+        expect(step(result, 'copilot-review')).toEqual({
+          id: 'copilot-review',
+          status: 'no',
+          blocks: true,
+          detail: detail(head),
+        })
+        expect(status).toBe(1)
+      },
+    )
+
+    test('says to request a review, not to wait, when none is on its way', async ({
+      expect,
+      fresh,
+    }) => {
+      const { result, head } = await ciWith(fresh, () => ({
+        reviews: connection([review(OLD)]),
+        reviewRequests: connection([requestOf(null)]),
+      }))
+      expect(step(result, 'copilot-review').detail).toBe(
+        `a última revisão do Copilot é de ${OLD.slice(0, 7)}, não da cabeça ${head.slice(0, 7)}; peça de novo com ${REQUEST}; ${RENEW}`,
+      )
+    })
+
+    // A review requested of anyone but the Copilot bot leaves a review of the
+    // head standing: Copilot is matched by type and database id, never login.
+    const notCopilot: [string, Record<string, unknown> | null][] = [
+      ['a person', { __typename: 'User', login: OWNER }],
+      [
+        'a person whose login is Copilot’s',
+        { __typename: 'User', login: COPILOT.login },
+      ],
+      ['a team', { __typename: 'Team' }],
+      ['another bot', { __typename: 'Bot', databaseId: 1 }],
+      ['a Bot without its database id', { __typename: 'Bot' }],
+      ['a reviewer GitHub did not give', null],
+    ]
+
+    test.for(notCopilot)(
+      'passes a review of the head while a review is requested of %s',
+      async ([, reviewer], { expect, fresh }) => {
+        const { status, result } = await ciWith(fresh, () => ({
+          reviewRequests: connection([requestOf(reviewer)]),
+        }))
+        expect(step(result, 'copilot-review').status).toBe('ok')
+        expect(status).toBe(0)
+      },
+    )
+
+    test('holds a review of the head when Copilot’s request is among a partial page of requests', async ({
+      expect,
+      fresh,
+    }) => {
+      const { status, result, head } = await ciWith(fresh, () => ({
+        reviewRequests: connection(
+          [
+            requestOf(COPILOT),
+            ...Array.from({ length: 100 }, () =>
+              requestOf({ __typename: 'User', login: OWNER }),
+            ),
+          ],
+          101,
+        ),
+      }))
+      expect(step(result, 'copilot-review')).toEqual({
+        id: 'copilot-review',
+        status: 'no',
+        blocks: true,
+        detail: `há uma revisão do Copilot na cabeça ${head.slice(0, 7)} (COMMENTED em ${at('13:00')}), mas ${coming('outra')}; ${RENEW}`,
+      })
+      expect(status).toBe(1)
+    })
+
+    test('says to wait when reviews past one page leave the head unreviewed and a Copilot review is on its way', async ({
+      expect,
+      fresh,
+    }) => {
+      const { result } = await ciWith(fresh, () => ({
+        reviews: connection(
+          Array.from({ length: 101 }, (_, i) =>
+            review(OLD, {
+              submittedAt: at(`12:${String(i % 60).padStart(2, '0')}`),
+            }),
+          ),
+        ),
+        reviewRequests: connection([requestOf(COPILOT)]),
+      }))
+      expect(step(result, 'copilot-review')).toMatchObject({
+        status: 'unchecked',
+        blocks: true,
+      })
+      expect(step(result, 'copilot-review').detail).toContain(
+        `; as mais antigas ficam sem julgar; ${coming('uma')}; ${RENEW}`,
+      )
+    })
+
+    // Each refusal of review-threads, ready and draft.
+    const openCases: [string, Thread, string][] = [
+      [
+        'an open thread',
+        thread(1),
+        `src/file-1.ts:1 de copilot-pull-request-reviewer ${threadUrl(1)}`,
+      ],
+      [
+        'an open outdated thread',
+        thread(1, { isOutdated: true, line: null }),
+        `src/file-1.ts (desatualizada) de copilot-pull-request-reviewer ${threadUrl(1)}`,
+      ],
+      [
+        'an open thread a person opened',
+        thread(1, {}, OWNER),
+        `src/file-1.ts:1 de ${OWNER} ${threadUrl(1)}`,
+      ],
+    ]
+
+    test.for(openCases)(
+      'blocks a ready PR with %s',
+      async ([, open, named], { expect, fresh }) => {
+        const { status, result } = await ciWith(fresh, () => ({
+          reviewThreads: connection([thread(2, { isResolved: true }), open]),
+        }))
+        expect(step(result, 'review-threads')).toEqual({
+          id: 'review-threads',
+          status: 'no',
+          blocks: true,
+          detail: `1 de 2 thread(s) de revisão aberta(s): ${named}; responda em cada uma e só então a resolva; ${RENEW}`,
+        })
+        expect(result.blocked).toEqual(['review-threads'])
+        expect(status).toBe(1)
+      },
+    )
+
+    test.for(openCases)(
+      'only reports %s on a draft PR',
+      async ([, open], { expect, fresh }) => {
+        const { status, result } = await ciWith(fresh, () => ({
+          isDraft: true,
+          reviewThreads: connection([open]),
+        }))
+        expect(step(result, 'review-threads')).toMatchObject({
+          status: 'no',
+          blocks: false,
+        })
+        expect(result.blocked).toEqual([])
+        expect(status).toBe(0)
+      },
+    )
+
+    test('names ten open threads and counts the rest', async ({
+      expect,
+      fresh,
+    }) => {
+      const open = Array.from({ length: 12 }, (_, i) => thread(i + 1))
+      const { result } = await ciWith(fresh, () => ({
+        reviewThreads: connection([...open, thread(13, { isResolved: true })]),
+      }))
+      const { detail } = step(result, 'review-threads')
+      expect(detail).toContain('12 de 13 thread(s) de revisão aberta(s): ')
+      for (let n = 1; n <= 10; n += 1)
+        expect(detail).toContain(`src/file-${n}.ts:${n} `)
+      expect(detail).not.toContain('src/file-11.ts')
+      expect(detail).not.toContain('src/file-12.ts')
+      expect(detail).toContain(`${threadUrl(10)}; e mais 2; responda`)
+    })
+
+    // Pages are read whole or not judged: a page the gate read only in part
+    // leaves the step unchecked, which blocks in CI outside a draft.
+    const partial: [
+      string,
+      string,
+      (head: string) => Record<string, unknown>,
+      string,
+    ][] = [
+      [
+        'more reviews than one page and none on the head among the newest',
+        'copilot-review',
+        () => ({
+          reviews: connection(
+            Array.from({ length: 101 }, (_, i) =>
+              review(OLD, {
+                submittedAt: at(`12:${String(i % 60).padStart(2, '0')}`),
+              }),
+            ),
+          ),
+        }),
+        'a PR tem 101 revisões, o gate leu as 100 mais recentes e nenhuma delas é uma revisão do Copilot que conta na cabeça',
+      ],
+      [
+        'more reviews than one page, the head’s only among the unread',
+        'copilot-review',
+        (head) => ({
+          // The page is the newest 100 of 101: the oldest, the only review of
+          // the head, is past it.
+          reviews: connection([
+            review(head, { submittedAt: at('11:00') }),
+            ...Array.from({ length: 100 }, () =>
+              review(head, {
+                author: { __typename: 'User', login: OWNER },
+                submittedAt: at('12:00'),
+              }),
+            ),
+          ]),
+        }),
+        'a PR tem 101 revisões, o gate leu as 100 mais recentes',
+      ],
+      [
+        'reviews without a count',
+        'copilot-review',
+        (head) => ({ reviews: { nodes: [review(head)] } }),
+        'o GitHub não disse quantas revisões a PR tem',
+      ],
+      [
+        'more review requests than one page, none of them Copilot’s, over a review of the head',
+        'copilot-review',
+        () => ({
+          reviewRequests: connection(
+            Array.from({ length: 101 }, () => ({
+              requestedReviewer: { __typename: 'User', login: OWNER },
+            })),
+          ),
+        }),
+        'mas a PR tem 101 pedidos de revisão e o gate leu 100; sem ler todos, o gate não sabe se outra revisão do Copilot está a caminho',
+      ],
+      [
+        'review requests without a count, over a review of the head',
+        'copilot-review',
+        () => ({ reviewRequests: { nodes: [] } }),
+        'mas o GitHub não disse quantos pedidos de revisão a PR tem (o gate leu 0)',
+      ],
+      [
+        'no review requests from GitHub, over a review of the head',
+        'copilot-review',
+        () => ({ reviewRequests: null }),
+        'mas o GitHub não disse quantos pedidos de revisão a PR tem (o gate leu 0)',
+      ],
+      [
+        'more threads than one page',
+        'review-threads',
+        () => ({
+          reviewThreads: connection(
+            Array.from({ length: 101 }, (_, i) =>
+              thread(i + 1, { isResolved: true }),
+            ),
+          ),
+        }),
+        'a PR tem 101 threads de revisão e o gate leu 100',
+      ],
+      [
+        'threads without a count',
+        'review-threads',
+        () => ({ reviewThreads: { nodes: [] } }),
+        'o GitHub não disse quantas threads de revisão a PR tem',
+      ],
+    ]
+
+    test.for(partial)(
+      'leaves the step unchecked and blocking with %s',
+      async ([, id, pr, words], { expect, fresh }) => {
+        const { status, result } = await ciWith(fresh, pr)
+        expect(step(result, id)).toMatchObject({
+          status: 'unchecked',
+          blocks: true,
+        })
+        expect(step(result, id).detail).toContain(words)
+        // Every refusal says how to renew the verdict once it is fixed.
+        expect(step(result, id).detail).toContain('renove o veredito')
+        expect(result.blocked).toEqual([id])
+        expect(status).toBe(1)
+      },
+    )
+
+    test('passes a review of the head among the newest of more reviews than one page', async ({
+      expect,
+      fresh,
+    }) => {
+      // Every reply in a thread is a review too: a long PR passes 100.
+      const { status, result, head } = await ciWith(fresh, (head) => ({
+        reviews: connection([
+          ...Array.from({ length: 100 }, () =>
+            review(head, {
+              author: { __typename: 'User', login: OWNER },
+              submittedAt: at('12:00'),
+            }),
+          ),
+          review(head),
+        ]),
+      }))
+      expect(step(result, 'copilot-review')).toEqual({
+        id: 'copilot-review',
+        status: 'ok',
+        blocks: true,
+        detail: `revisão do Copilot na cabeça ${head.slice(0, 7)} (COMMENTED em ${at('13:00')}), entre as 100 mais recentes de 101 revisões`,
+      })
+      expect(result.blocked).toEqual([])
+      expect(status).toBe(0)
+    })
+
+    test.for(partial)(
+      'only reports %s on a draft PR',
+      async ([, id, pr], { expect, fresh }) => {
+        const { status, result } = await ciWith(fresh, (head) => ({
+          isDraft: true,
+          ...pr(head),
+        }))
+        expect(step(result, id)).toMatchObject({
+          status: 'unchecked',
+          blocks: false,
+        })
+        expect(status).toBe(0)
+      },
+    )
+
+    test.for([
+      ['missing', 'no', `a PR #${PR} não existe`],
+      ['unreachable', 'unchecked', 'PR não lida'],
+    ] as const)(
+      'blocks both steps when the PR is %s',
+      async ([mode, status, words], { expect, fresh }) => {
+        const run = await ci(fresh, () => ({
+          issue: issueAnswer(),
+          pr: failing(mode, PR),
+        }))
+        for (const id of ['copilot-review', 'review-threads']) {
+          expect(step(run.result, id)).toMatchObject({ status, blocks: true })
+          expect(step(run.result, id).detail).toContain(words)
+          expect(run.result.blocked).toContain(id)
+        }
+        expect(run.status).toBe(1)
+      },
+    )
+
+    test('prints both steps in the report a person reads', async ({
+      expect,
+      fresh,
+    }) => {
+      const { out } = await ciWith(fresh, () => ({
+        reviews: connection([]),
+        reviewThreads: connection([thread(1)]),
+      }))
+      expect(out).toMatch(
+        /^ {2}\[ \] copilot-review: nenhuma revisão do Copilot/m,
+      )
+      expect(out).toMatch(/^ {2}\[ \] review-threads: 1 de 1 thread/m)
+      expect(out).toContain(`Build BLOQUEADO na #${ISSUE}:`)
+    })
+  })
+
+  // ---------------------------------------------------------------------------
   // The cache and the command line
 
   describe.concurrent('cache', () => {
@@ -2992,6 +3776,114 @@ describe.concurrent('scripts/gate.mjs', () => {
         ' isDraft body',
         ' body',
         'repository.pullRequest.isDraft',
+      ],
+      [
+        'the reviews',
+        ' reviews(last: ${page}) { totalCount nodes { state submittedAt commit { oid } author { __typename login ... on Bot { databaseId } } body } }',
+        '',
+        'repository.pullRequest.reviews',
+      ],
+      [
+        'the review body',
+        '{ databaseId } } body } }',
+        '{ databaseId } } } }',
+        'reviews.nodes.body',
+      ],
+      [
+        'the review count',
+        'reviews(last: ${page}) { totalCount nodes',
+        'reviews(last: ${page}) { nodes',
+        'repository.pullRequest.reviews.totalCount',
+      ],
+      [
+        'the review state',
+        'nodes { state submittedAt',
+        'nodes { submittedAt',
+        'reviews.nodes.state',
+      ],
+      [
+        'the review time',
+        'state submittedAt commit',
+        'state commit',
+        'reviews.nodes.submittedAt',
+      ],
+      [
+        'the reviewed commit',
+        'submittedAt commit { oid } author',
+        'submittedAt author',
+        'reviews.nodes.commit',
+      ],
+      [
+        'the reviewer’s type',
+        'author { __typename login ... on Bot',
+        'author { login ... on Bot',
+        'reviews.nodes.author.__typename',
+      ],
+      [
+        'the reviewer’s database id',
+        ' ... on Bot { databaseId }',
+        '',
+        'reviews.nodes.author.... on Bot',
+      ],
+      [
+        'the review threads',
+        ' reviewThreads(first: ${page}) { totalCount nodes { isResolved isOutdated path line comments(first: 1) { nodes { url author { login } } } } }',
+        '',
+        'repository.pullRequest.reviewThreads',
+      ],
+      [
+        'the thread count',
+        'reviewThreads(first: ${page}) { totalCount nodes',
+        'reviewThreads(first: ${page}) { nodes',
+        'repository.pullRequest.reviewThreads.totalCount',
+      ],
+      [
+        'the thread resolution',
+        'nodes { isResolved isOutdated',
+        'nodes { isOutdated',
+        'reviewThreads.nodes.isResolved',
+      ],
+      [
+        'the outdated flag',
+        'isResolved isOutdated path',
+        'isResolved path',
+        'reviewThreads.nodes.isOutdated',
+      ],
+      [
+        'the thread path',
+        'isOutdated path line',
+        'isOutdated line',
+        'reviewThreads.nodes.path',
+      ],
+      [
+        'the thread line',
+        'path line comments',
+        'path comments',
+        'reviewThreads.nodes.line',
+      ],
+      [
+        'the thread link',
+        'nodes { url author { login } }',
+        'nodes { author { login } }',
+        'reviewThreads.nodes.comments.nodes.url',
+      ],
+      [
+        'the thread opener',
+        'nodes { url author { login } }',
+        'nodes { url }',
+        'reviewThreads.nodes.comments.nodes.author',
+      ],
+      [
+        'a thread page size',
+        'reviewThreads(first: ${page})',
+        'reviewThreads',
+        'repository.pullRequest.reviewThreads deve pedir first ou last',
+      ],
+      [
+        'a review page size',
+        'reviews(last: ${page})',
+        'reviews',
+        'repository.pullRequest.reviews deve pedir first ou last',
       ],
     ] as const)(
       'refuses the PR query without %s',

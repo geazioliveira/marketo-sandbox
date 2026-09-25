@@ -1,12 +1,30 @@
-# Keeps the issue-link check fresh (#3): when an issue changes, re-run the
-# issue-link of every open PR that closes it. scripts/refresh-issue-link.mjs
-# does the work.
+# Keeps the issue-link check fresh (#3, #13): when an issue changes, re-run the
+# issue-link of every open PR that closes it; when a review lands on a PR, or
+# on demand, re-run that PR's. scripts/refresh-issue-link.mjs does the work.
 #
 # Why: issue-link.yml runs on pull_request_target, and events on the issue do
 # not trigger it. A withdrawn Approve, a new `# Plano`, a moved label, a
 # closing or a reopening used to leave a green check with a stale verdict.
-# Issue events always run the workflow from the default branch, so this file
-# and the script come from main, as the gate does.
+# Issue events and workflow_run always run the workflow from the default
+# branch, so this file and the script come from main, as the gate does. A
+# workflow_dispatch runs the copy of the ref it was dispatched on: the command
+# the docs give dispatches on main (`--ref main`, refreshPrCommand), and the
+# job below skips a dispatch on any other ref.
+#
+# Reviews (#13): the gate judges the Copilot review on the PR's head and the
+# open review threads, and a review is no pull_request_target event. The
+# review event runs the PR's own YAML, so it is split in two:
+# review-signal.yml ("Sinal de revisão") runs on pull_request_review with no
+# permissions and only signals; this file answers its completed run on
+# workflow_run, from main, and only when that run succeeded. The PR comes
+# from the run's pull_requests or, when GitHub leaves that empty, from the
+# open PR of its head branch in this repository; the script re-reads it and
+# skips one that is no longer open (Copilot's late reviews of merged PRs).
+# A dispatch with `-f pr=<n>` does the same for one PR: resolving a thread
+# triggers no workflow, so after resolving, bring the PR's check up to date
+# with `gh workflow run issue-link-refresh.yml --ref main -f pr=<n>`. That
+# command returns before the refresh runs, and a failed refresh shows nothing
+# on the PR: alone, it is no fresh verdict.
 #
 # Only a pull_request_target run is re-run: that is the one that takes
 # issue-link.yml from main, not from the PR. A run still in progress cannot be
@@ -16,8 +34,9 @@
 # The only write is actions: write, for the re-run. Whether a re-run asked for
 # with GITHUB_TOKEN goes through is unverified until the first live event;
 # until it is measured, and after it too, the rule stands: right before a
-# merge, renew the verdict (re-run issue-link or run the gate in CI mode) and
-# merge only on green (docs/development/workflow.md#pull-requests-e-merge).
+# merge, renew the verdict (re-run issue-link and watch it to its end, or run
+# the gate in CI mode at the PR's head) and merge only on green
+# (docs/development/workflow.md#pull-requests-e-merge).
 name: Atualiza vínculo com issue
 
 on:
@@ -25,6 +44,15 @@ on:
     types: [labeled, unlabeled, edited, closed, reopened]
   issue_comment:
     types: [created, edited, deleted]
+  workflow_run:
+    workflows: ['Sinal de revisão']
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: Número da PR cujo issue-link é re-rodado
+        required: true
+        type: number
 
 permissions:
   actions: write
@@ -32,11 +60,14 @@ permissions:
   pull-requests: read
   contents: read
 
-# One refresh per issue at a time. A newer event waits and replaces an older
-# waiting one, which is right here: the last state of the issue is what the
-# re-run must read.
+# One refresh per issue, and one per PR, at a time. A newer event waits and
+# replaces an older waiting one, which is right here: the last state of the
+# issue or the PR is what the re-run must read. Issues and PRs share their
+# numbers, so the two kinds are kept apart: a comment on PR #N is an
+# issue_comment event of #N, skipped below, and in the same group it would
+# replace a waiting refresh of PR #N.
 concurrency:
-  group: issue-link-refresh-${{ github.event.issue.number }}
+  group: issue-link-refresh-${{ github.event.issue && 'issue' || 'pr' }}-${{ github.event.issue.number || github.event.workflow_run.pull_requests[0].number || inputs.pr || github.event.workflow_run.head_branch }}
   cancel-in-progress: false
 
 jobs:
@@ -44,8 +75,16 @@ jobs:
     name: refresh
     # A comment on a pull request is an issue_comment event too, and nothing
     # on a PR's conversation changes the gate's verdict: skip it here, so it
-    # costs no runner minutes. The script refuses it again (IS_PR).
-    if: ${{ !github.event.issue.pull_request }}
+    # costs no runner minutes. The script refuses it again (IS_PR). A signal
+    # run that did not succeed points at nothing to trust. Copilot's own
+    # review is such a case: its signal run ends action_required (GitHub asks
+    # approval for a bot-triggered run, measured on PR #15), or no run starts
+    # at all, so after Copilot's review the verdict is renewed by hand (the
+    # gate in CI mode, or gh run rerun watched to its end), never by trusting
+    # this re-trigger (ADR 0003). A dispatch runs
+    # only from main: this catches accidents only, since the dispatched ref's
+    # own copy of this file can drop the guard.
+    if: ${{ !github.event.issue.pull_request && (github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success') && (github.event_name != 'workflow_dispatch' || github.ref == 'refs/heads/main') }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -61,10 +100,17 @@ jobs:
           node-version-file: .nvmrc
           package-manager-cache: false
       # Event data reaches the script only through env, never interpolated
-      # into the shell.
+      # into the shell. The script picks its mode by GITHUB_EVENT_NAME, which
+      # the runner sets: an issue event reads ISSUE_NUMBER and IS_PR, a
+      # workflow_run or a dispatch reads PR_NUMBER (and HEAD_BRANCH with
+      # HEAD_REPO when a workflow_run names no PR: the branch is looked up
+      # only when it came from this repository).
       - name: Re-roda o issue-link das PRs abertas
         env:
           GH_TOKEN: ${{ github.token }}
           ISSUE_NUMBER: ${{ github.event.issue.number }}
           IS_PR: ${{ github.event.issue.pull_request != null }}
+          PR_NUMBER: ${{ github.event.workflow_run.pull_requests[0].number || inputs.pr }}
+          HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          HEAD_REPO: ${{ github.event.workflow_run.head_repository.full_name }}
         run: node scripts/refresh-issue-link.mjs

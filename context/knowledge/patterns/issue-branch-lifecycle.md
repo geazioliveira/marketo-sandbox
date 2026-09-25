@@ -41,18 +41,20 @@ Uma issue, uma branch, uma PR que fecha só essa issue, mergeada por merge commi
 
 ### Learn e PR
 
-- O Learn é commitado na mesma branch antes de a PR sair de draft: o intent ganha Resultados e o status final, o changelog ganha a entrada da issue, e decisões e patterns novos entram (passo `learn`).
+- A PR abre em draft (`gh pr create --draft`), e logo depois o agente liga nela o monitor de CI do app, com auto-fix e comentários.
+- O Learn é commitado na mesma branch antes de a PR sair de draft: o intent ganha Resultados e o status final, o changelog ganha a entrada da issue, e decisões e patterns novos entram (passo `learn`). Só então a PR sai de draft (`gh pr ready`), o que pede a revisão do Copilot.
 - A primeira linha do corpo da PR é `Closes #N.`, e a PR fecha só essa issue.
 - Nem o título da PR, nem o corpo dela, nem mensagem de commit nenhuma levam, escritos literalmente, `[skip ci]`, `[ci skip]`, `[no ci]`, `[skip actions]` ou `[actions skip]` (`skipCiTokens`), nem o trailer `skip-checks: true` (`skipChecksTrailer`). A mensagem do merge commit é o título e o corpo da PR, e com um desses tokens o push do merge não dispara nem o `Qualidade / check` nem a auditoria de `main`; na mensagem do commit da head, a PR fica sem o `Qualidade / check` ([fluxo](../../../docs/development/workflow.md#pull-requests-e-merge)).
 - PRs nunca são empilhadas. Trabalho que depende de outro espera o merge dele e corta a branch do `origin/main` que já o contém.
 
 ### Merge
 
-- Logo antes do merge, um veredito fresco: re-rode o `issue-link` da PR ou rode o gate em modo CI na head da PR, e exija saída 0. Os eventos da issue só re-executam o `issue-link` pelo refresh da #3, que ainda não foi provado ao vivo e não cobre todos os casos, então um verde pode estar velho ([fluxo](../../../docs/development/workflow.md#pull-requests-e-merge)).
+- Só com uma revisão do Copilot na cabeça da PR e nenhuma thread de revisão aberta, de qualquer autor, inclusive as desatualizadas ([ADR 0003](../../decisions/0003-copilot-review-and-no-open-threads-before-merge.md)). Um push depois da revisão pede outra: depois de cada push, se a timeline da PR (`gh api repos/geazioliveira/marketo-sandbox/issues/<n>/timeline`) não mostra um `review_requested` do Copilot depois da hora do push e nenhuma revisão dele chega na cabeça nova em uns 10 min, o agente pede de novo com `gh pr edit <n> --add-reviewer @copilot`. Uma revisão do Copilot que falhou não conta. Cada thread é respondida (o SHA da correção, uma issue `#N` ou a evidência) antes de ser resolvida, e, como resolver não dispara nada, o check é atualizado depois com `gh workflow run issue-link-refresh.yml --ref main -f pr=<n>`, que sozinho não é veredito fresco ([fluxo](../../../docs/development/workflow.md#a-revisão-do-copilot-e-as-threads)).
+- Logo antes do merge, um veredito fresco, de um destes dois jeitos: o gate em modo CI na head da PR (`node scripts/gate.mjs --pr <n> --branch <branch>`), com saída 0, ou o `issue-link` da PR re-rodado (`gh run rerun <run-id>`) e acompanhado até o fim (`gh run watch <run-id> --exit-status`), também com saída 0. Os eventos da issue e as revisões só re-executam o `issue-link` pelo refresh, que ainda não foi provado ao vivo e não cobre todos os casos, e resolver uma thread não dispara nada, então um verde pode estar velho. Um disparo do refresh sozinho não é veredito fresco: o comando volta antes de o refresh rodar ([fluxo](../../../docs/development/workflow.md#pull-requests-e-merge)).
 - Merge por merge commit (`gh pr merge --merge`). Squash e rebase estão desligados no repositório.
 - A branch remota é apagada no merge, por configuração do repositório. Apague também a branch local e o worktree.
 - A issue fecha sozinha pelo `Closes #N.`. Depois do merge, comente na issue: `Fechada pela PR #P no merge <sha>.`
-- Este é o único caminho para `main`. Um push direto, um commit pelo editor web, um force-push ou outra reescrita do histórico de `main`, o merge de uma PR que não fecha issue ou o de uma PR sem os checks exigidos verdes na head vira, depois do fato, uma issue `bug` + `needs-triage` da auditoria de `main`, e o dono decide registrar retroativamente ou reverter. A auditoria julga todo push em `main` que dispara run, e o que um push sem run trouxe entra na auditoria seguinte; o que ela não vê está no [fluxo](../../../docs/development/workflow.md#auditoria-de-main).
+- Este é o único caminho para `main`. Um push direto, um commit pelo editor web, um force-push ou outra reescrita do histórico de `main`, o merge de uma PR que não fecha issue, o de uma PR sem os checks exigidos verdes na head ou, desde `reviewRuleSince`, o de uma PR sem a revisão do Copilot na cabeça ou com thread aberta vira, depois do fato, uma issue `bug` + `needs-triage` da auditoria de `main`, e o dono decide registrar retroativamente ou reverter. A auditoria julga todo push em `main` que dispara run, e o que um push sem run trouxe entra na auditoria seguinte; o que ela não vê está no [fluxo](../../../docs/development/workflow.md#auditoria-de-main).
 
 ## Quando usar
 
@@ -67,9 +69,10 @@ Uma issue, uma branch, uma PR que fecha só essa issue, mergeada por merge commi
 
 - [0001: Context Mesh no repositório e loop issue-first](../../decisions/0001-context-mesh-in-the-repository.md)
 - [0002: Enforcement soft do loop no GitHub Free](../../decisions/0002-soft-enforcement-on-github-free.md)
+- [0003: Revisão do Copilot na cabeça e nenhuma thread aberta antes do merge](../../decisions/0003-copilot-review-and-no-open-threads-before-merge.md)
 
 ## Status
 
 - **Criado**: 2026-09-24 (Fase: Build), do plano aprovado na #2 e do pattern equivalente do lite-campaign (#2)
 - **Status**: Active
-- **Atualizado**: 2026-09-25 (Fase: Build), o corte passou a dizer que outra branch da mesma issue sempre bloqueia o `stacked`, que só a própria branch e a cópia dela em `origin` ficam de fora, e qual remédio vale em cada direção (`git branch -d` para a outra branch que o HEAD já contém; juntar o trabalho numa branch só quando ela tem commits próprios) (#12)
+- **Atualizado**: 2026-09-25 (Fase: Build), a PR passou a abrir em draft, com o monitor de CI do app ligado, e a sair de draft só com o Learn commitado; o merge passou a exigir uma revisão do Copilot na cabeça, que não falhou, e nenhuma thread de revisão aberta, com cada thread respondida antes de resolvida; a revisão passou a ser pedida de novo quando a timeline da PR não mostra o pedido depois de um push; e o veredito fresco passou a ser só o gate em modo CI na head da PR ou o rerun do `issue-link` acompanhado até o fim, nunca um disparo do refresh sozinho (#13)

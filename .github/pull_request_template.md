@@ -17,7 +17,7 @@ A PR fica em draft até o commit de Learn (intent com Resultados e entrada no ch
 
 ## Verificação
 
-<!-- Os checks realmente rodados, cada um com a saída. Nunca relate um check que não rodou; um check pulado aparece como não rodado. -->
+<!-- Os checks realmente rodados, cada um com a saída. Nunca relate um check que não rodou; um check pulado aparece como não rodado. Antes do merge, diga também a revisão do Copilot na cabeça (o SHA dela) e que há zero threads de revisão abertas, cada uma respondida antes de resolvida. -->
 
 ## Desvios do plano aprovado
 
@@ -34,3 +34,4 @@ A PR fica em draft até o commit de Learn (intent com Resultados e entrada no ch
 - [ ] Decisões registradas em `context/decisions/`
 - [ ] Patterns e anti-patterns extraídos em `context/knowledge/`
 - [ ] Comentário de progresso na issue mãe (quando houver)
+- [ ] Revisão do Copilot na cabeça e zero threads abertas (cada uma respondida antes de resolvida)

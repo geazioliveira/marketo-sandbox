@@ -4,6 +4,50 @@ Uma entrada por mudança mergeada, da mais nova para a mais antiga, escrita no p
 
 ---
 
+## 2026-09-25: Revisão do Copilot na cabeça e nenhuma thread aberta antes do merge (#13)
+
+**Fase**: Learn
+**Tipo**: Feature
+
+### O que foi construído / corrigido
+
+- **Gate, dois passos novos em modo CI** (`copilot-review` e `review-threads`). Eles bloqueiam fora de draft.
+  - `copilot-review` exige uma revisão do Copilot no commit que é a cabeça da PR. A identidade é o `Bot` com `databaseId` 175728472, nunca só o login, porque existe uma organização com esse nome. Os estados aceitos são `COMMENTED` e `APPROVED`, e uma revisão que falhou não conta. Outra revisão do Copilot pedida e ainda a caminho (`reviewRequests`) também bloqueia, mesmo com uma revisão na cabeça.
+  - `review-threads` exige zero threads abertas, de qualquer autor, inclusive as desatualizadas.
+  - As mensagens dizem como pedir a revisão de novo e como renovar o veredito. Os comandos delas põem entre aspas simples, para o shell, um valor que ele leria como sintaxe (`shellWord`).
+- **Re-disparo em duas etapas:**
+  - o `Sinal de revisão` (`review-signal.yml`) roda o YAML da PR, não tem permissão nenhuma e só avisa;
+  - o refresh roda de `main` via `workflow_run` e `workflow_dispatch` (com `--ref main`) e re-executa o `issue-link` da cabeça.
+- **Auditoria de `main`:** a partir de 25/09 às 12:00 UTC, um merge sem revisão do Copilot na cabeça antes do merge, ou com thread aberta até o merge, fica fora do loop.
+- **Decisão e docs:** a nova [ADR 0003](../decisions/0003-copilot-review-and-no-open-threads-before-merge.md); o fluxo da PR em `workflow.md` e no `AGENTS.md` (draft, monitor de CI ligado, sair de draft só com o Learn, esperar o Copilot, responder e só então resolver, renovar o veredito); e o template de PR pedindo essa evidência.
+
+### Números medidos
+
+- `npm run check`: 1.320 testes em 8 arquivos verdes; `check:context` sem problemas; build OK.
+- 160 regras revertidas uma a uma numa cópia fora do worktree nas rodadas de construção, e mais 57 na de correção. Cada reversão fez algum teste falhar.
+- O gate novo, rodado sobre os dados reais: a PR #14 fica verde (revisão na cabeça `2f02ce0`, 0 de 3 threads abertas), e as PRs #10 e #11 ficariam bloqueadas.
+
+### Decisões tomadas
+
+- [0003: Revisão do Copilot na cabeça e nenhuma thread aberta antes do merge](../decisions/0003-copilot-review-and-no-open-threads-before-merge.md) (Accepted).
+- [0002: Enforcement soft do loop no GitHub Free](../decisions/0002-soft-enforcement-on-github-free.md): as camadas e os limites novos (resolver uma thread não dispara evento; o sinal pode ser removido por uma PR; cada resposta numa thread é uma revisão).
+
+### Patterns aplicados ou criados
+
+- [O gate do loop](../knowledge/patterns/loop-gate.md) e [Ciclo de vida de issue e branch](../knowledge/patterns/issue-branch-lifecycle.md) (atualizados)
+
+### Aprendizados / surpresas
+
+- **Um revisor que falha continua "revisando".** O Copilot posta uma revisão `COMMENTED` na cabeça quando dá erro, quando a cota acaba ou quando não consegue ler os arquivos. Só o texto diz que nada foi revisado, e isso só apareceu procurando revisões reais em outros repositórios.
+- **Responder numa thread também é uma revisão.** Isso conta no limite de página e dispara o sinal.
+- **"Pedir o refresh" não é "ter o veredito".** Um comando assíncrono retorna antes do resultado. Em regra de merge, só vale o que se espera terminar.
+- **Todo push depois da revisão exige outra revisão.** O Learn tem de estar commitado antes de a PR sair de draft.
+- **O REST não mostra o pedido de revisão ao Copilot.** Com a revisão pedida e pendente na PR #15, o `requested_reviewers` do REST veio vazio. Só o `reviewRequests` do GraphQL o mostra, como `Bot` com o `databaseId` 175728472.
+- **O Copilot resolve sozinho uma thread que um push deixou desatualizada.** Na PR #15, a thread do corpo vazio foi resolvida pelo Copilot, sem resposta, logo depois do push que a corrigia. O gate a vê resolvida; a resposta com o SHA continua sendo do agente.
+- **Num `run:` de uma linha só, o YAML corta o comando no ` #`.** A primeira execução do `Sinal de revisão`, na PR #15, recebeu `echo "Revisão na PR` e falhou. O teste de paridade lia a linha crua e não viu. Agora o passo usa um bloco literal, e um teste recusa ` #` em qualquer `run:` de uma linha só.
+
+---
+
 ## 2026-09-25: Os comentários abertos do Copilot nas PRs #10 e #11 (#12)
 
 **Fase**: Learn

@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs'
+import { readdirSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 import {
   agentCreateStateLabels,
@@ -12,6 +12,7 @@ import {
   emptyFormAnswer,
   featureSections,
   foldHeading,
+  issueLinkRefreshWorkflowFile,
   kindOf,
   optionalSections,
   parseBranch,
@@ -20,6 +21,8 @@ import {
   planHeading,
   readyLabel,
   requiredChecks,
+  reviewSignalWorkflow,
+  reviewSignalWorkflowFile,
   stateLabels,
 } from '../../scripts/loop-sections.mjs'
 
@@ -478,7 +481,23 @@ describe('.github/pull_request_template.md', () => {
       'Follow-ups',
       'Context Mesh',
     ])
-    expect(countCriteria(sections.at(-1)?.content ?? '')).toBe(5)
+    expect(countCriteria(sections.at(-1)?.content ?? '')).toBe(6)
+  })
+
+  it('asks for the Copilot review on the head and zero open threads (#13)', () => {
+    const sections = parseSections(text).filter(
+      (section) => section.level === 2,
+    )
+    const verification = sections.find(
+      (section) => section.title === 'Verificação',
+    )
+    expect(verification?.content).toContain('revisão do Copilot na cabeça')
+    expect(verification?.content).toContain(
+      'zero threads de revisão abertas, cada uma respondida antes de resolvida',
+    )
+    expect(sections.at(-1)?.content).toContain(
+      '- [ ] Revisão do Copilot na cabeça e zero threads abertas (cada uma respondida antes de resolvida)',
+    )
   })
 
   it('closes no issue of its own', () => {
@@ -667,5 +686,146 @@ describe(workflows.check, () => {
         "check-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}",
       'cancel-in-progress': "${{ github.ref != 'refs/heads/main' }}",
     })
+  })
+})
+
+// ---------------------------------------------------------------------------
+// The refresh after a review (#13): an untrusted signal, a trusted refresh
+
+const reviewSignal = `.github/workflows/${reviewSignalWorkflowFile}`
+const refresh = `.github/workflows/${issueLinkRefreshWorkflowFile}`
+
+describe('every workflow file', () => {
+  const dir = path.join(root, '.github', 'workflows')
+  const files = readdirSync(dir).filter((file) => /\.ya?ml$/.test(file))
+
+  it('includes the review signal and the refresh', () => {
+    expect(files).toContain(reviewSignalWorkflowFile)
+    expect(files).toContain(issueLinkRefreshWorkflowFile)
+  })
+
+  // A plain `run:` scalar ends at " #": YAML reads the rest as a comment, and
+  // the shell gets a cut command (the signal's first run on PR #15 failed so).
+  it('never writes " #" in a one-line run value, where YAML would cut it', () => {
+    for (const file of files)
+      for (const line of read(`.github/workflows/${file}`).split(/\r?\n/)) {
+        const one = /^\s*(?:-\s+)?run:\s*(?![|>])(.*)$/.exec(line)
+        if (one !== null) expect(one[1], `${file}: ${line}`).not.toMatch(/\s#/)
+      }
+  })
+
+  it('never interpolates an expression inside a run script', () => {
+    for (const file of files)
+      for (const script of runBlocks(read(`.github/workflows/${file}`)))
+        expect(script, file).not.toContain('${{')
+  })
+})
+
+describe(reviewSignal, () => {
+  const text = read(reviewSignal)
+  const steps = stepsOf(text)
+
+  it('is named as the contract names it, in pt-BR', () => {
+    expect(reviewSignalWorkflow).toBe('Sinal de revisão')
+    expect(topScalar(text, 'name')).toBe(reviewSignalWorkflow)
+  })
+
+  it('runs on a review submitted or dismissed, and on nothing else', () => {
+    expect(text).toContain(
+      '\non:\n  pull_request_review:\n    types: [submitted, dismissed]\n\n',
+    )
+    expect(text).not.toMatch(/^ {2}(?:pull_request_target|workflow_run):/m)
+  })
+
+  it('holds no permission at all: it runs the pull request own YAML', () => {
+    // pull_request_review takes this file from the PR's merge ref: whatever
+    // it declared would be the PR's to widen, so it declares nothing.
+    expect(text).toMatch(/^permissions: \{\}$/m)
+    expect(text.match(/permissions:/g)).toHaveLength(1)
+    expect(text).not.toMatch(/:\s*(?:write|read)\b/)
+    expect(text).not.toContain('secrets.')
+    expect(text).not.toContain('github.token')
+  })
+
+  it('runs one short job that checks out nothing, uses no action and runs nothing of the repository', () => {
+    expect(jobsOf(text)).toEqual([{ id: 'signal', name: 'signal' }])
+    expect(text).toMatch(/^ {4}runs-on: ubuntu-latest$/m)
+    expect(text).toMatch(/^ {4}timeout-minutes: 2$/m)
+    expect(steps).toHaveLength(1)
+    expect(stepField(steps[0], 'uses')).toBeUndefined()
+    const scripts = runBlocks(text)
+    expect(scripts).toHaveLength(1)
+    expect(scripts[0]).toMatch(/^echo "[^"`$]*\$PR_NUMBER[^"`$]*"$/)
+  })
+
+  it('hands the PR number to the shell through env only', () => {
+    expect(stepField(steps[0], 'PR_NUMBER')).toBe(
+      '${{ github.event.pull_request.number }}',
+    )
+    for (const script of runBlocks(text)) expect(script).not.toContain('${{')
+  })
+
+  it('is no required check', () => {
+    expect(requiredChecks.map((check) => check.workflow)).not.toContain(
+      reviewSignalWorkflow,
+    )
+  })
+
+  it('names, in its header, the trusted refresh that answers it', () => {
+    const header = text.slice(0, text.indexOf('\nname: '))
+    expect(header).toContain('issue-link-refresh.yml')
+    expect(header).toContain('workflow_run')
+    expect(header).toContain('no permissions')
+  })
+})
+
+describe(`${refresh}, answering ${reviewSignal}`, () => {
+  const text = read(refresh)
+
+  it("answers only the signal's completed runs, by the signal's name", () => {
+    // workflow_run matches by name: a rename on either side would silently
+    // stop the refresh after a review.
+    expect(text).toContain(
+      `\n  workflow_run:\n    workflows: ['${reviewSignalWorkflow}']\n    types: [completed]\n`,
+    )
+    expect(topScalar(read(reviewSignal), 'name')).toBe(reviewSignalWorkflow)
+  })
+
+  it('trusts a signal run only when it succeeded', () => {
+    expect(text).toContain(
+      "(github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success')",
+    )
+  })
+
+  it('takes a dispatch for one PR, a required number', () => {
+    expect(text).toMatch(
+      /^ {2}workflow_dispatch:\n {4}inputs:\n {6}pr:\n {8}description: .+\n {8}required: true\n {8}type: number\n/m,
+    )
+  })
+
+  it('keeps the same permissions: re-run workflows and read, nothing more', () => {
+    expect(topMap(text, 'permissions')).toEqual({
+      actions: 'write',
+      issues: 'read',
+      'pull-requests': 'read',
+      contents: 'read',
+    })
+    expect(text).not.toMatch(/^[ \t]+permissions:/m)
+  })
+
+  it('checks out the ref it runs from, main by its guard, and nothing of the pull request', () => {
+    // Issue events and workflow_run run from the default branch; a
+    // workflow_dispatch runs from the ref it was dispatched on, so the job
+    // skips a dispatch off main (which only catches accidents).
+    expect(text).toContain(
+      "(github.event_name != 'workflow_dispatch' || github.ref == 'refs/heads/main')",
+    )
+    const checkouts = stepsOf(text).filter((step) =>
+      stepField(step, 'uses')?.startsWith('actions/checkout@'),
+    )
+    expect(checkouts).toHaveLength(1)
+    expect(stepField(checkouts[0], 'ref')).toBeUndefined()
+    expect(stepField(checkouts[0], 'persist-credentials')).toBe('false')
+    expect(text).not.toContain('head_sha }}')
   })
 })
