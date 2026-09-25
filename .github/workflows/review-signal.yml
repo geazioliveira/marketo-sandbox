@@ -37,8 +37,10 @@ jobs:
     timeout-minutes: 2
     steps:
       # Event data reaches the shell only through env, never interpolated
-      # into the script.
+      # into the script. A block scalar, because in a plain one YAML reads
+      # " #" as the start of a comment and would cut the command there.
       - name: Sinaliza a revisão
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
-        run: echo "Revisão na PR #$PR_NUMBER. O issue-link-refresh.yml, de main, re-roda o issue-link dela."
+        run: |
+          echo "Revisão na PR #$PR_NUMBER. O issue-link-refresh.yml, de main, re-roda o issue-link dela."

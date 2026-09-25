@@ -704,6 +704,16 @@ describe('every workflow file', () => {
     expect(files).toContain(issueLinkRefreshWorkflowFile)
   })
 
+  // A plain `run:` scalar ends at " #": YAML reads the rest as a comment, and
+  // the shell gets a cut command (the signal's first run on PR #15 failed so).
+  it('never writes " #" in a one-line run value, where YAML would cut it', () => {
+    for (const file of files)
+      for (const line of read(`.github/workflows/${file}`).split(/\r?\n/)) {
+        const one = /^\s*(?:-\s+)?run:\s*(?![|>])(.*)$/.exec(line)
+        if (one !== null) expect(one[1], `${file}: ${line}`).not.toMatch(/\s#/)
+      }
+  })
+
   it('never interpolates an expression inside a run script', () => {
     for (const file of files)
       for (const script of runBlocks(read(`.github/workflows/${file}`)))
