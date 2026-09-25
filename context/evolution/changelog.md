@@ -42,6 +42,7 @@ Uma entrada por mudança mergeada, da mais nova para a mais antiga, escrita no p
 - **Responder numa thread também é uma revisão.** Isso conta no limite de página e dispara o sinal.
 - **"Pedir o refresh" não é "ter o veredito".** Um comando assíncrono retorna antes do resultado. Em regra de merge, só vale o que se espera terminar.
 - **Todo push depois da revisão exige outra revisão.** O Learn tem de estar commitado antes de a PR sair de draft.
+- **O Copilot resolve sozinho uma thread que um push deixou desatualizada.** Na PR #15, a thread do corpo vazio foi resolvida pelo Copilot, sem resposta, logo depois do push que a corrigia. O gate a vê resolvida; a resposta com o SHA continua sendo do agente.
 - **Num `run:` de uma linha só, o YAML corta o comando no ` #`.** A primeira execução do `Sinal de revisão`, na PR #15, recebeu `echo "Revisão na PR` e falhou. O teste de paridade lia a linha crua e não viu. Agora o passo usa um bloco literal, e um teste recusa ` #` em qualquer `run:` de uma linha só.
 
 ---
