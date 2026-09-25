@@ -45,6 +45,15 @@ const required = {
   pr: `{ repository { pullRequest {
     baseRefName headRefName headRefOid isDraft body
     closingIssuesReferences { totalCount nodes { number repository { nameWithOwner } } }
+    reviews { totalCount nodes {
+      state submittedAt commit { oid }
+      author { __typename login ... on Bot { databaseId } }
+      body
+    } }
+    reviewThreads { totalCount nodes {
+      isResolved isOutdated path line
+      comments { nodes { url author { login } } }
+    } }
   } } }`,
 }
 

@@ -13,6 +13,13 @@ import {
   changelogHeadingFor,
   checkSections,
   commentOpening,
+  copilotFailedReview,
+  copilotHandle,
+  copilotRequestCommand,
+  copilotRequestLogin,
+  copilotReviewer,
+  copilotReviewOn,
+  copilotReviewStates,
   countCriteria,
   criteriaSection,
   currentPlan,
@@ -20,20 +27,27 @@ import {
   findSection,
   foldHeading,
   gateCacheSchema,
+  gateCiCommand,
   gateStatus,
   gateTtlHours,
   hasContent,
   headAndRest,
+  isCopilotReviewer,
   issueFromBranch,
   kindOf,
   matchesHeading,
+  openThreads,
   parseBranch,
   parseSections,
   planCitesBranch,
+  refreshPrCommand,
+  reviewRuleSince,
   sectionsFor,
   stepIds,
   type GateCache,
   type IssueComment,
+  type PullRequestReview,
+  type ReviewThread,
   type TimelineEvent,
 } from '../../scripts/loop-sections.mjs'
 
@@ -1427,6 +1441,403 @@ describe('gateStatus', () => {
   })
 })
 
+describe('the Copilot reviewer and its request', () => {
+  it('names Copilot by type and database id, with a readable login', () => {
+    // Measured on PRs #10, #11 and #14: GraphQL gives this author on every
+    // Copilot review and thread comment.
+    expect(copilotReviewer).toEqual({
+      typename: 'Bot',
+      databaseId: 175728472,
+      login: 'copilot-pull-request-reviewer',
+    })
+    expect(copilotRequestLogin).toBe('copilot-pull-request-reviewer[bot]')
+    expect(copilotHandle).toBe('@copilot')
+    expect(copilotRequestCommand(14)).toBe(
+      'gh pr edit 14 --add-reviewer @copilot',
+    )
+  })
+
+  it('counts only COMMENTED and APPROVED reviews', () => {
+    expect(copilotReviewStates).toEqual(['COMMENTED', 'APPROVED'])
+  })
+
+  it('holds the audit to the rule only for merges after #10, #11 and #12', () => {
+    expect(reviewRuleSince).toBe('2026-09-25T12:00:00Z')
+    expect(new Date(reviewRuleSince).toISOString()).toBe(
+      '2026-09-25T12:00:00.000Z',
+    )
+    // #10 and #11 were merged before it (their threads went to #12).
+    for (const mergedAt of ['2026-09-25T00:46:02Z', '2026-09-25T04:43:52Z'])
+      expect(mergedAt < reviewRuleSince).toBe(true)
+  })
+
+  it.each([
+    [
+      'the Copilot bot',
+      { __typename: 'Bot', login: 'x', databaseId: 175728472 },
+      true,
+    ],
+    [
+      'a User named like Copilot',
+      {
+        __typename: 'User',
+        login: 'copilot-pull-request-reviewer',
+        databaseId: 175728472,
+      },
+      false,
+    ],
+    [
+      'an Organization named like Copilot',
+      {
+        __typename: 'Organization',
+        login: 'copilot-pull-request-reviewer',
+        databaseId: 175728472,
+      },
+      false,
+    ],
+    [
+      'another bot with Copilot’s login',
+      {
+        __typename: 'Bot',
+        login: 'copilot-pull-request-reviewer',
+        databaseId: 1,
+      },
+      false,
+    ],
+    [
+      'Copilot without its database id',
+      { __typename: 'Bot', login: 'copilot-pull-request-reviewer' },
+      false,
+    ],
+    [
+      'the database id as text',
+      { __typename: 'Bot', databaseId: '175728472' as unknown as number },
+      false,
+    ],
+    ['no author', null, false],
+  ])('isCopilotReviewer: %s is %s', (_, author, expected) => {
+    expect(isCopilotReviewer(author)).toBe(expected)
+  })
+})
+
+describe('copilotReviewOn', () => {
+  const HEAD = 'b'.repeat(40)
+  const OLDER = 'a'.repeat(40)
+  const copilot = {
+    __typename: 'Bot',
+    login: 'copilot-pull-request-reviewer',
+    databaseId: 175728472,
+  }
+  const review = (
+    extra: Partial<PullRequestReview> = {},
+  ): PullRequestReview => ({
+    state: 'COMMENTED',
+    submittedAt: '2026-09-25T13:00:00Z',
+    commit: { oid: HEAD },
+    author: copilot,
+    body: '## Pull request overview\n\nCopilot reviewed 3 out of 3 changed files in this pull request and generated 2 comments.',
+    ...extra,
+  })
+
+  it('accepts a COMMENTED Copilot review of the head', () => {
+    const only = review()
+    expect(copilotReviewOn({ reviews: [only], headRefOid: HEAD })).toEqual({
+      ok: true,
+      review: only,
+      latest: only,
+      failed: false,
+    })
+  })
+
+  it('accepts an APPROVED one', () => {
+    expect(
+      copilotReviewOn({
+        reviews: [review({ state: 'APPROVED' })],
+        headRefOid: HEAD,
+      }).ok,
+    ).toBe(true)
+  })
+
+  it.each(['DISMISSED', 'PENDING', 'CHANGES_REQUESTED', undefined, null])(
+    'refuses a Copilot review of the head in state %s, and reports it as the latest',
+    (state) => {
+      const only = review({ state })
+      expect(copilotReviewOn({ reviews: [only], headRefOid: HEAD })).toEqual({
+        ok: false,
+        review: null,
+        latest: only,
+        failed: false,
+      })
+    },
+  )
+
+  it.each([
+    [
+      'a User',
+      {
+        __typename: 'User',
+        login: 'copilot-pull-request-reviewer',
+        databaseId: 175728472,
+      },
+    ],
+    [
+      'an Organization',
+      {
+        __typename: 'Organization',
+        login: 'copilot-pull-request-reviewer',
+        databaseId: 175728472,
+      },
+    ],
+    ['another Bot', { ...copilot, databaseId: 2 }],
+    ['nobody', null],
+  ])(
+    'does not take a review by %s for Copilot’s, nor report it',
+    (_, author) => {
+      expect(
+        copilotReviewOn({ reviews: [review({ author })], headRefOid: HEAD }),
+      ).toEqual({ ok: false, review: null, latest: null, failed: false })
+    },
+  )
+
+  it('refuses a review of an older commit, and reports it as the latest', () => {
+    const older = review({ commit: { oid: OLDER } })
+    expect(copilotReviewOn({ reviews: [older], headRefOid: HEAD })).toEqual({
+      ok: false,
+      review: null,
+      latest: older,
+      failed: false,
+    })
+  })
+
+  it.each([
+    ['no commit', { commit: null }],
+    ['a commit without an oid', { commit: {} }],
+  ])('refuses a review with %s', (_, extra) => {
+    expect(
+      copilotReviewOn({ reviews: [review(extra)], headRefOid: HEAD }).ok,
+    ).toBe(false)
+  })
+
+  it.each([undefined, null, ''])(
+    'refuses everything when the head is %j',
+    (headRefOid) => {
+      expect(
+        copilotReviewOn({ reviews: [review({ commit: null })], headRefOid }).ok,
+      ).toBe(false)
+      expect(
+        copilotReviewOn({
+          reviews: [review({ commit: { oid: '' } })],
+          headRefOid,
+        }).ok,
+      ).toBe(false)
+    },
+  )
+
+  it('has nothing to report without reviews', () => {
+    for (const reviews of [[], null, undefined])
+      expect(copilotReviewOn({ reviews, headRefOid: HEAD })).toEqual({
+        ok: false,
+        review: null,
+        latest: null,
+        failed: false,
+      })
+  })
+
+  it('picks the newest counting review of the head and the newest review overall', () => {
+    const first = review({ submittedAt: '2026-09-25T13:00:00Z' })
+    const second = review({ submittedAt: '2026-09-25T13:10:00Z' })
+    const dismissed = review({
+      state: 'DISMISSED',
+      submittedAt: '2026-09-25T13:20:00Z',
+    })
+    const human = review({
+      author: { __typename: 'User', login: 'geazioliveira' },
+      submittedAt: '2026-09-25T13:30:00Z',
+    })
+    // Given out of order: the answer does not depend on it.
+    expect(
+      copilotReviewOn({
+        reviews: [dismissed, second, human, first],
+        headRefOid: HEAD,
+      }),
+    ).toEqual({ ok: true, review: second, latest: dismissed, failed: false })
+  })
+
+  it('reports the newest Copilot review when only an older commit was reviewed after the head', () => {
+    const onHead = review({
+      state: 'DISMISSED',
+      submittedAt: '2026-09-25T13:00:00Z',
+    })
+    const later = review({
+      commit: { oid: OLDER },
+      submittedAt: '2026-09-25T13:10:00Z',
+    })
+    expect(
+      copilotReviewOn({ reviews: [later, onHead], headRefOid: HEAD }),
+    ).toEqual({ ok: false, review: null, latest: later, failed: false })
+  })
+
+  it('skips a null review node', () => {
+    const only = review()
+    expect(
+      copilotReviewOn({ reviews: [null, only], headRefOid: HEAD }),
+    ).toEqual({ ok: true, review: only, latest: only, failed: false })
+  })
+
+  // Measured on GitHub: a failed review is a COMMENTED review by the bot, on
+  // the head, with one of these bodies (keycloak/keycloak#52793,
+  // Azure/azure-powershell#30106, bsv-blockchain/teranode#1697 and
+  // onnx/onnx#8217, microsoft/lisa#4700).
+  const failures = [
+    'Copilot encountered an error and was unable to review this pull request. You can try again by re-requesting a review.',
+    "Copilot wasn't able to review any files in this pull request.\n\n\n\n",
+    'Copilot was unable to review this pull request because the user who requested the review has reached their quota limit.',
+    'Copilot was unable to review this pull request because there is no eligible user to bill for this review.',
+    'Copilot was unable to review this pull request because the user who requested the review is ineligible.',
+    'Copilot encountered an error: Your billing is not configured.',
+  ]
+
+  it.each(failures)(
+    'refuses a failed review of the head, and reports it as the latest, failed: %j',
+    (body) => {
+      const failed = review({ body })
+      expect(copilotReviewOn({ reviews: [failed], headRefOid: HEAD })).toEqual({
+        ok: false,
+        review: null,
+        latest: failed,
+        failed: true,
+      })
+    },
+  )
+
+  it.each([
+    ['no body', undefined],
+    ['a null body', null],
+  ])(
+    'refuses a review of the head with %s, as a failure it cannot tell apart',
+    (_, body) => {
+      const unknown = review({ body })
+      expect(copilotReviewOn({ reviews: [unknown], headRefOid: HEAD })).toEqual(
+        { ok: false, review: null, latest: unknown, failed: true },
+      )
+    },
+  )
+
+  it('keeps an earlier good review of the head when a later one failed', () => {
+    const good = review({ submittedAt: '2026-09-25T13:00:00Z' })
+    const failed = review({
+      body: failures[0],
+      submittedAt: '2026-09-25T13:10:00Z',
+    })
+    expect(
+      copilotReviewOn({ reviews: [failed, good], headRefOid: HEAD }),
+    ).toEqual({ ok: true, review: good, latest: failed, failed: true })
+  })
+
+  it('reports a failed review of an older commit as failed', () => {
+    const failed = review({ body: failures[1], commit: { oid: OLDER } })
+    expect(copilotReviewOn({ reviews: [failed], headRefOid: HEAD })).toEqual({
+      ok: false,
+      review: null,
+      latest: failed,
+      failed: true,
+    })
+  })
+})
+
+describe('copilotFailedReview', () => {
+  it.each([
+    'Copilot encountered an error and was unable to review this pull request.',
+    "Copilot wasn't able to review any files in this pull request.",
+    'Copilot wasn’t able to review any files in this pull request.',
+    'Copilot wasn‘t able to review',
+    'Copilot wasnʼt able to review',
+    'Copilot wasn`t able to review',
+    'Copilot was not able to review any files in this pull request.',
+    'COPILOT ENCOUNTERED AN ERROR',
+    'copilot was not able to review',
+    '\nCopilot encountered an error',
+  ])('matches the start of a failed review: %j', (body) => {
+    expect(copilotFailedReview.test(body)).toBe(true)
+  })
+
+  it.each([
+    '## Pull request overview\n\nCopilot reviewed 3 out of 3 changed files in this pull request and generated 2 comments.',
+    'Copilot reviewed 1 out of 1 changed files in this pull request and generated no comments.',
+    '',
+    'Note: Copilot encountered an error once, then reviewed this.',
+    'Copilot wasnt able to review',
+    'Copilot was able to review',
+  ])(
+    'does not match a review that reviewed, or text past its start: %j',
+    (body) => {
+      expect(copilotFailedReview.test(body)).toBe(false)
+    },
+  )
+})
+
+describe('the commands a message and the docs give', () => {
+  it('dispatches the refresh on main, never on the ref it is run from', () => {
+    // A workflow_dispatch runs the copy of the ref it names.
+    expect(refreshPrCommand(14)).toBe(
+      'gh workflow run issue-link-refresh.yml --ref main -f pr=14',
+    )
+  })
+
+  it('renews the verdict with the gate in CI mode', () => {
+    expect(gateCiCommand(14, 'feature/13-review-gate')).toBe(
+      'node scripts/gate.mjs --pr 14 --branch feature/13-review-gate',
+    )
+  })
+})
+
+describe('openThreads', () => {
+  const thread = (extra: Partial<ReviewThread> = {}): ReviewThread => ({
+    isResolved: false,
+    isOutdated: false,
+    path: 'scripts/gate.mjs',
+    line: 1,
+    comments: {
+      nodes: [
+        {
+          url: 'https://github.com/o/r/pull/1#discussion_r1',
+          author: { login: 'copilot-pull-request-reviewer' },
+        },
+      ],
+    },
+    ...extra,
+  })
+
+  it('keeps an unresolved thread, outdated or not, whoever opened it', () => {
+    const open = thread()
+    const outdated = thread({ isOutdated: true, line: null })
+    const human = thread({
+      comments: { nodes: [{ url: 'u', author: { login: 'geazioliveira' } }] },
+    })
+    const resolved = thread({ isResolved: true })
+    const resolvedOutdated = thread({ isResolved: true, isOutdated: true })
+    expect(
+      openThreads([open, resolved, outdated, resolvedOutdated, human]),
+    ).toEqual([open, outdated, human])
+  })
+
+  it.each([
+    ['without isResolved', thread({ isResolved: undefined })],
+    ['with isResolved null', thread({ isResolved: null })],
+  ])('counts a thread %s as open', (_, unsure) => {
+    expect(openThreads([unsure])).toEqual([unsure])
+  })
+
+  it('counts a null thread node as open', () => {
+    expect(openThreads([null])).toEqual([null])
+  })
+
+  it('finds none in no threads', () => {
+    for (const threads of [[], null, undefined])
+      expect(openThreads(threads)).toEqual([])
+  })
+})
+
 describe('the step ids and the declarations', () => {
   it('pins the gate’s step ids and their order', () => {
     // A step removed or renamed here is a change to every hook and CI reader.
@@ -1436,6 +1847,8 @@ describe('the step ids and the declarations', () => {
       'pr-closes',
       'pr-closes-only',
       'pr-first-line',
+      'copilot-review',
+      'review-threads',
       'issue-open',
       'kind',
       'state-label',

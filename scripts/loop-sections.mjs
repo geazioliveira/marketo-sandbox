@@ -2,7 +2,8 @@
 //
 // The gate (scripts/gate.mjs), the CI check (.github/workflows/issue-link.yml
 // runs the gate), the issue forms (.github/ISSUE_TEMPLATE/*.yml, held equal by a
-// parity test), the Claude Code hooks (#5) and the tests all import from here.
+// parity test) and the tests all import from here, and so will the Claude Code
+// hooks (#5), which do not exist yet.
 // A rule restated in a second place drifts: lite-campaign's gate once refused a
 // `fix/` branch its own lifecycle pattern permitted, because each held a copy
 // (brunohab/lite-campaign#111). User-facing text is pt-BR; identifiers and
@@ -635,7 +636,7 @@ const quoteLine = (line) =>
  * What it cannot see:
  * - the agent posts from the owner's account, so an Approve the agent wrote
  *   in the owner's name looks identical. `ownerRule` states the convention
- *   that covers that gap, and the Claude Code hooks (#5) enforce it;
+ *   that covers that gap, and the Claude Code hooks (#5) are to enforce it;
  * - the Approve's time is its `createdAt`, and its edits are exempt, so a
  *   comment posted before the label and edited into `# Owner Approve` after
  *   it reads as an old Approve followed by the label. Telling them apart
@@ -818,6 +819,142 @@ export const changelogHeading =
   /^## \d{4}-\d{2}-\d{2}: .+ \(#[1-9]\d*(?:, PR #[1-9]\d*)?\)$/
 
 // ---------------------------------------------------------------------------
+// The Copilot review and the review threads (#13)
+//
+// Two conditions of a merge: a Copilot review of the commit that is the PR's
+// head, and no review thread left unresolved, whoever opened it. The gate's CI
+// mode (copilot-review, review-threads), the audit of main and the tests read
+// them from here, and so will the hooks of #5 once they exist; until then,
+// replying before resolving is a written rule.
+
+/**
+ * Who Copilot is, as GraphQL gives a review's author. It is matched by type and
+ * database id, never by the login alone: `users/copilot-pull-request-reviewer`
+ * on GitHub is an Organization, so a login is only a label for messages.
+ */
+export const copilotReviewer = {
+  typename: 'Bot',
+  databaseId: 175728472,
+  login: 'copilot-pull-request-reviewer',
+}
+
+/**
+ * The login that requests a Copilot review over REST (`requested_reviewers`)
+ * and GraphQL (`requestReviewsByLogin`, `botLogins`). REST spells the same bot
+ * `copilot-pull-request-reviewer[bot]` in a review and `Copilot` in a comment,
+ * which is one more reason never to match on a login.
+ */
+export const copilotRequestLogin = 'copilot-pull-request-reviewer[bot]'
+
+/** The handle gh takes for Copilot: `gh pr edit <n> --add-reviewer @copilot`. */
+export const copilotHandle = '@copilot'
+
+/** The command that requests a Copilot review (again) on PR `pr`. */
+export function copilotRequestCommand(pr) {
+  return `gh pr edit ${pr} --add-reviewer ${copilotHandle}`
+}
+
+/**
+ * The review states that count as Copilot having reviewed. By default Copilot
+ * only leaves COMMENTED reviews; APPROVED is a preview option. DISMISSED,
+ * PENDING and CHANGES_REQUESTED do not count.
+ */
+export const copilotReviewStates = ['COMMENTED', 'APPROVED']
+
+/**
+ * From when the audit of main holds a merge to the review rule: PRs merged at
+ * or after this instant. #10 and #11 were merged before it, and their threads
+ * were handled in #12; #14 already met the rule.
+ */
+export const reviewRuleSince = '2026-09-25T12:00:00Z'
+
+/** Whether a review's author, as GraphQL gives it, is the Copilot bot (copilotReviewer). */
+export function isCopilotReviewer(author) {
+  return (
+    author != null &&
+    author.__typename === copilotReviewer.typename &&
+    author.databaseId === copilotReviewer.databaseId
+  )
+}
+
+/**
+ * The start of the body Copilot leaves when a review failed: a COMMENTED
+ * review by the Copilot bot, on the head, that reviewed nothing. Measured on
+ * GitHub: "Copilot encountered an error and was unable to review this pull
+ * request. You can try again by re-requesting a review." (keycloak/keycloak
+ * #52793) and "Copilot wasn't able to review any files in this pull request."
+ * (Azure/azure-powershell#30106); and, when the requester's quota, billing or
+ * eligibility fails, "Copilot was unable to review this pull request because
+ * ..." (bsv-blockchain/teranode#1697, onnx/onnx#8217). "was not able" and any apostrophe in
+ * "wasn't" read the same, in any case, after any leading white space; the
+ * words anywhere later in a body are no failure. Such a review never counts,
+ * "any files" included: there is no bypass (ADR 0003), so a PR Copilot
+ * cannot review waits, and the audit takes a merge after one as unreviewed.
+ */
+export const copilotFailedReview =
+  /^\s*Copilot (?:encountered an error|was unable to review|(?:was not|wasn['\u2018\u2019\u02BC`\u00B4\u2032\uFF07]t) able to review)/i
+
+/**
+ * Whether a review is one of Copilot's failures (copilotFailedReview). A
+ * review whose body GitHub did not give as text cannot be told from one, so
+ * it reads as failed: a misread lands on the side that blocks.
+ */
+const failedReview = (review) =>
+  typeof review?.body !== 'string' || copilotFailedReview.test(review.body)
+
+const bySubmittedAt = (a, b) =>
+  String(a.submittedAt ?? '').localeCompare(String(b.submittedAt ?? ''))
+
+/**
+ * Whether Copilot reviewed the PR's head, from its reviews as GraphQL gives
+ * them. A review counts when its author is the Copilot bot (isCopilotReviewer),
+ * its state is one of copilotReviewStates, its `commit.oid` is headRefOid and
+ * its body is no failure (copilotFailedReview). `review` is the newest review
+ * that counts; `latest` is Copilot's newest review of any state, commit and
+ * body, for the message that says what is missing (a review of an older
+ * commit, one dismissed, or one that failed), and `failed` says whether
+ * `latest` is a failure.
+ * @param {{ reviews?: object[] | null, headRefOid: string | null | undefined }} input
+ * @returns {{ ok: boolean, review: object | null, latest: object | null, failed: boolean }}
+ */
+export function copilotReviewOn({ reviews, headRefOid }) {
+  const copilot = [...(reviews ?? [])]
+    .filter((review) => review != null && isCopilotReviewer(review.author))
+    .sort(bySubmittedAt)
+  const review =
+    copilot
+      .filter(
+        (candidate) =>
+          copilotReviewStates.includes(candidate.state) &&
+          typeof headRefOid === 'string' &&
+          headRefOid !== '' &&
+          candidate.commit?.oid === headRefOid &&
+          !failedReview(candidate),
+      )
+      .at(-1) ?? null
+  const latest = copilot.at(-1) ?? null
+  return {
+    ok: review !== null,
+    review,
+    latest,
+    failed: latest !== null && failedReview(latest),
+  }
+}
+
+/**
+ * The review threads still open: every thread not resolved, whoever opened
+ * it, outdated ones included. A thread that does not say it is resolved is
+ * open, so a misread lands on the side that blocks.
+ * @param {object[] | null | undefined} threads
+ * @returns {object[]}
+ */
+export function openThreads(threads) {
+  return (threads ?? []).filter(
+    (thread) => thread == null || thread.isResolved !== true,
+  )
+}
+
+// ---------------------------------------------------------------------------
 // Context files, for the context checker (#3)
 //
 // context/README.md states these for people ("Layout", "Vocabulário de
@@ -976,6 +1113,8 @@ export const stepIds = [
   'pr-closes',
   'pr-closes-only',
   'pr-first-line',
+  'copilot-review',
+  'review-threads',
   'issue-open',
   'kind',
   'state-label',
@@ -1011,7 +1150,7 @@ export const loopSteps = [
 export const gateCacheFile = 'loop-gate.json'
 export const gateCacheSchema = 1
 export const gateTtlHours = 8
-/** Written by the plan-to-issue hook (#5) when a plan is accepted in Claude Code and not yet posted. */
+/** Will be written by the plan-to-issue hook (#5) when a plan is accepted in Claude Code and not yet posted. */
 export const planPendingPrefix = 'loop-plan-pending-'
 
 /**
@@ -1164,7 +1303,8 @@ export const refreshWaitMs = 240_000
  * commit whose message holds one. A merge commit's message is the PR's title
  * and body, so none may appear there nor in any commit message: a merge
  * carrying one gets neither its audit run nor its Qualidade run, and a PR
- * head carrying one gets no Qualidade check. The hooks of #5 refuse them.
+ * head carrying one gets no Qualidade check. The hooks of #5 are to refuse
+ * them; until then, the written rule does.
  */
 export const skipCiTokens = [
   '[skip ci]',
@@ -1180,3 +1320,49 @@ export const skipCiTokens = [
  * and commit messages for the same reason as skipCiTokens.
  */
 export const skipChecksTrailer = 'skip-checks: true'
+
+// ---------------------------------------------------------------------------
+// The review signal, the PR refresh and the audit's review pages (#13)
+
+/**
+ * The name of .github/workflows/review-signal.yml (reviewSignalWorkflowFile),
+ * which issue-link-refresh.yml's workflow_run trigger names: workflow_run
+ * matches a workflow by this name, so a rename on either side silently stops
+ * the refresh after a review.
+ */
+export const reviewSignalWorkflow = 'Sinal de revisão'
+export const reviewSignalWorkflowFile = 'review-signal.yml'
+
+/** The workflow that re-runs the issue-link check from main (#3, #13). */
+export const issueLinkRefreshWorkflowFile = 'issue-link-refresh.yml'
+
+/**
+ * The command that asks the refresh to re-run one PR's issue-link, through
+ * its workflow_dispatch input `pr`. A dispatch runs the YAML and the script of
+ * the ref it names, not of main, hence `--ref main`. It returns before the
+ * refresh runs, and a failed refresh shows nothing on the PR, so it only
+ * brings the PR's check up to date: it is no fresh verdict before a merge
+ * (gateCiCommand, or a re-run of the issue-link watched to its end, is).
+ */
+export function refreshPrCommand(pr) {
+  return `gh workflow run ${issueLinkRefreshWorkflowFile} --ref main -f pr=${pr}`
+}
+
+/**
+ * The gate in CI mode for PR `pr` over branch `branch`, run in a checkout of
+ * the PR's head with origin/main fetched: one of the two fresh verdicts
+ * before a merge, when it exits 0. The other is `gh run rerun <id>` of the
+ * PR's issue-link run followed by `gh run watch <id> --exit-status`.
+ */
+export function gateCiCommand(pr, branch) {
+  return `node scripts/gate.mjs --pr ${pr} --branch ${branch}`
+}
+
+/**
+ * The page the audit reads a merged PR's reviews (the newest) and its review
+ * threads with, GraphQL's largest. A Copilot review on the head among the
+ * reviews read is enough, as the unread cannot undo it; with none among them,
+ * or with more threads than the page, the merge is out of the loop for that
+ * reason alone, as a re-run would read the same page.
+ */
+export const auditReviewPage = 100
