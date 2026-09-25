@@ -27,3 +27,14 @@
 !.vscode/tasks.json
 !.vscode/launch.json
 !.vscode/extensions.json
+
+# Claude Code: local state (never versioned).
+# .claude/settings.json and .claude/hooks/ ARE versioned (#5).
+/.claude/worktrees/
+/.claude/settings.local.json
+/.claude/scheduled_tasks.lock
+
+# codegen and tooling output
+/.codegen-tmp/
+/scripts/__pycache__/
+/coverage/
