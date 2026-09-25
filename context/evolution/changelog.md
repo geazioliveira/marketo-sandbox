@@ -4,6 +4,53 @@ Uma entrada por mudança mergeada, da mais nova para a mais antiga, escrita no p
 
 ---
 
+## 2026-09-25: Os comentários abertos do Copilot nas PRs #10 e #11 (#12)
+
+**Fase**: Learn
+**Tipo**: Bug Fix
+
+### O que foi construído / corrigido
+
+Cada uma das 7 threads do Copilot deixadas abertas nas PRs #10 e #11 foi verificada contra o `main`, reproduzindo o cenário quando dava. Duas procediam, três procediam em parte e duas não procediam.
+
+- **Labels no gate.** O gate lê até 100 labels, com `totalCount`. Quando há mais do que foi lido, `kind` e `state-label` falham fechado. O `gh` falso das specs exige `totalCount` e corta as conexões por `first`/`last`.
+- **Outra branch da mesma issue.** Só a própria branch e a cópia dela em `origin` ficam isentas no `stacked`. Qualquer outra ref da mesma issue que compartilha histórico não publicado bloqueia (resposta 1 do dono). A mensagem depende da direção:
+  - quando a outra branch não tem nada que esta não tenha, manda apagar, e só com os comandos das refs que existem;
+  - quando ela tem trabalho próprio, manda juntar tudo numa branch antes de apagar a outra, e nunca sugere `git branch -D`.
+- **Referências de fechamento na auditoria.** A auditoria lê até 100. Uma página incompleta, ou uma de checks incompleta, deixa o merge fora do loop com o motivo verdadeiro, em vez de interromper a auditoria para sempre.
+- **O plano é lido como o GitHub mostra.**
+  - Uma caixa dentro de bloco de código (inclusive dentro de item de lista) ou de comentário HTML não conta como critério.
+  - Um título dentro deles não é seção.
+  - Um texto só em comentário não conta como conteúdo nem como citação da branch.
+  - Um nome com sufixo (`feature/12-x.old`) não cita `feature/12-x`.
+  - Os blocos de código seguem o CommonMark.
+- **`check:context`.** Três leituras erradas de título com sublinhado (setext) foram corrigidas: linha que só parece lista, título vazio e título só de código. Depois da revisão do Copilot na PR #14, um comentário HTML aberto numa linha anterior passou a fechar no primeiro `-->` da linha, mesmo entre crases, como o GitHub renderiza.
+- **Autoria dos atos.** O código não muda. Os docs e um teste passam a dizer que só o Approve e a label exigem o dono. A retirada, um título quase-Approve, `# Plano`, edição, remoção, reabertura e uma nova aplicação da label por outro ator cancelam, venham de quem vierem.
+- **Comentários que não procediam.** O YAML do `issue-link` e o da auditoria citam a documentação: o `pull_request_target` usa o branch padrão desde 08/12/2025, e `queue: max` está documentado desde 07/05/2026.
+- **Docs.** Os templates copiáveis do guia ganharam o bloco Status, e a entrada da #3 no changelog agora diz 113 links.
+
+### Números medidos
+
+- `npm run check`: 909 testes em 8 arquivos verdes; `check:context` sem problemas em 17 arquivos, com 123 links internos; build OK.
+- Cada correção tem um teste que falha quando ela é revertida. Isso foi medido revertendo cada uma numa cópia fora do worktree, em quatro rodadas de revisão e verificação.
+- Os corpos reais das issues #1 a #5, #12 e #13 dão os mesmos critérios, seções e citações com o parser antigo e o novo.
+
+### Decisões tomadas
+
+- [0002: Enforcement soft do loop no GitHub Free](../decisions/0002-soft-enforcement-on-github-free.md): uma página incompleta na auditoria é um achado, não uma interrupção.
+
+### Patterns aplicados ou criados
+
+- [O gate do loop](../knowledge/patterns/loop-gate.md) e [Ciclo de vida de issue e branch](../knowledge/patterns/issue-branch-lifecycle.md) (atualizados)
+
+### Aprendizados / surpresas
+
+- **Mergear antes da revisão do Copilot deixa threads abertas sem ninguém ver.** As PRs #10 e #11 foram mergeadas uns 3 minutos antes de a revisão chegar. Daqui em diante a PR espera a revisão na cabeça, e a #13 põe isso no gate.
+- **Um revisor automático também erra.** Dois dos 7 comentários descreviam o GitHub de antes de mudanças documentadas. A resposta a eles é a fonte, não uma mudança de código.
+- **A correção sugerida nem sempre fecha o buraco.** A de "outra branch da mesma issue" sozinha deixava o gate aberto, porque os commits dos dois lados citam `#N`.
+
+---
+
 ## 2026-09-25: CI de qualidade, auditoria de main e refresh do vínculo (#3, PR #11)
 
 **Fase**: Learn
@@ -32,7 +79,7 @@ Uma entrada por mudança mergeada, da mais nova para a mais antiga, escrita no p
 
 ### Números medidos
 
-- `npm run check`: 737 testes em 8 arquivos verdes; `check:context` sem problemas em 16 arquivos, com 106 links internos; build OK.
+- `npm run check`: 737 testes em 8 arquivos verdes; `check:context` sem problemas em 16 arquivos, com 113 links internos; build OK.
 - `OBSERVE_ENDPOINT=http://127.0.0.1:9 npm run test:e2e`: 1 teste verde, cerca de 1 s.
 - **Na PR #11, a primeira execução real do `Vínculo com issue / issue-link`:** evento `pull_request_target`, gate de `main` rodando contra a cabeça da PR, verde em 8 s. O `Qualidade / check` ficou verde em 1 min num runner limpo, com o e2e incluído.
 - Cada correção das revisões tem um teste de regressão que falha quando ela é revertida. Foram mais de 100 mutações, todas capturadas, feitas numa cópia fora do worktree.

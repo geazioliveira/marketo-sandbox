@@ -49,7 +49,7 @@ O gate lê a primeira linha não vazia de cada comentário da issue, sem os espa
 Em volta dessas três linhas:
 
 - **Na dúvida, bloqueia.** Qualquer outra primeira linha numa destas formas de título que mencione "approve", em qualquer caixa, nunca conta como Approve e, depois de um Approve, o cancela: um heading de `#` a `######` (`## Owner Approve`, `# Approve retirado.`, `##### Approve retirado`), uma primeira linha sublinhada com `===` ou `---`, uma primeira linha inteira em negrito (`**Approve retirado**`), e qualquer um deles citado com `>`. Uma frase comum que menciona approve, ou uma referência como `#5`, não muda nada.
-- **A label vem depois do Approve.** `ready-for-agent` só conta se o dono a aplicou depois do Approve em vigor. Depois de uma revisão e de um novo Approve, o dono remove a label e a aplica de novo.
+- **A label vem depois do Approve.** `ready-for-agent` só conta se a última aplicação dela foi do dono, depois da última reabertura e depois do Approve em vigor. Depois de uma revisão e de um novo Approve, o dono remove a label e a aplica de novo.
 - **O Approve vale para o texto que o dono leu.** Depois dele, bloqueiam o gate: o corpo da issue editado, qualquer outro comentário editado depois do Approve, anterior ou posterior a ele, e qualquer comentário apagado. Editar o próprio Approve não bloqueia, porque são as palavras do dono.
 - **A branch é nomeada dentro da seção Plano** do plano vigente (num bug, que não tem Plano, dentro de Onde será corrigido), não em qualquer lugar do texto.
 
@@ -87,7 +87,7 @@ Todo intent, decisão, pattern, anti-pattern e agente termina com um único bloc
 
 ## Templates
 
-Mantenha a ordem das seções. Uma seção opcional sem nada a dizer fica de fora, exceto "Decisões relacionadas", que diz "Nenhuma ainda.". Todo template, menos a entrada do changelog, termina com o bloco Status acima.
+Mantenha a ordem das seções. Uma seção opcional sem nada a dizer fica de fora, exceto "Decisões relacionadas", que diz "Nenhuma ainda.". Todo template, menos a entrada do changelog, termina com o bloco Status acima, que já vem nele.
 
 ### Project intent
 
@@ -120,6 +120,12 @@ Mantenha a ordem das seções. Uma seção opcional sem nada a dizer fica de for
 ## Decisões em aberto
 
 - <uma pergunta que só o dono resolve, e o que espera por ela>
+
+## Status
+
+- **Criado**: AAAA-MM-DD (Fase: Intent | Build | Learn), <de onde veio> (#issue)
+- **Status**: <um valor do vocabulário acima>
+- **Atualizado**: AAAA-MM-DD (Fase: Intent | Build | Learn), <o que mudou e por quê> (#issue)
 ```
 
 ### Feature
@@ -154,6 +160,12 @@ Mantenha a ordem das seções. Uma seção opcional sem nada a dizer fica de for
 ## Resultados
 
 - <escrito no Learn: o que foi construído, onde se afastou do plano e a PR>
+
+## Status
+
+- **Criado**: AAAA-MM-DD (Fase: Intent | Build | Learn), <de onde veio> (#issue)
+- **Status**: <um valor do vocabulário acima>
+- **Atualizado**: AAAA-MM-DD (Fase: Intent | Build | Learn), <o que mudou e por quê> (#issue)
 ```
 
 ### Bug
@@ -186,6 +198,12 @@ Mantenha a ordem das seções. Uma seção opcional sem nada a dizer fica de for
 ## Resultados
 
 - <escrito no Learn: o que mudou e se a causa raiz se confirmou>
+
+## Status
+
+- **Criado**: AAAA-MM-DD (Fase: Intent | Build | Learn), <de onde veio> (#issue)
+- **Status**: <um valor do vocabulário acima>
+- **Atualizado**: AAAA-MM-DD (Fase: Intent | Build | Learn), <o que mudou e por quê> (#issue)
 ```
 
 ### Decisão
@@ -221,6 +239,12 @@ As decisões são numeradas com quatro dígitos, a partir da maior que existe.
 ## Relacionados
 
 - <as decisões, intents e patterns de que esta depende ou que ela molda>
+
+## Status
+
+- **Criado**: AAAA-MM-DD (Fase: Intent | Build | Learn), <de onde veio> (#issue)
+- **Status**: <um valor do vocabulário acima>
+- **Atualizado**: AAAA-MM-DD (Fase: Intent | Build | Learn), <o que mudou e por quê> (#issue)
 ```
 
 ### Pattern
@@ -251,6 +275,12 @@ As decisões são numeradas com quatro dígitos, a partir da maior que existe.
 ## Decisões relacionadas
 
 - [NNNN: <título>](../../decisions/NNNN-<slug>.md)
+
+## Status
+
+- **Criado**: AAAA-MM-DD (Fase: Intent | Build | Learn), <de onde veio> (#issue)
+- **Status**: <um valor do vocabulário acima>
+- **Atualizado**: AAAA-MM-DD (Fase: Intent | Build | Learn), <o que mudou e por quê> (#issue)
 ```
 
 ### Anti-pattern
@@ -273,6 +303,12 @@ As decisões são numeradas com quatro dígitos, a partir da maior que existe.
 ## Exemplo do erro
 
 <um trecho curto do código ou da decisão que deu errado>
+
+## Status
+
+- **Criado**: AAAA-MM-DD (Fase: Intent | Build | Learn), <de onde veio> (#issue)
+- **Status**: <um valor do vocabulário acima>
+- **Atualizado**: AAAA-MM-DD (Fase: Intent | Build | Learn), <o que mudou e por quê> (#issue)
 ```
 
 ### Agente
@@ -305,6 +341,12 @@ Um agente é uma tarefa repetível que um agente de IA executa sempre do mesmo j
 ## Definição de pronto
 
 - [ ] <um critério>
+
+## Status
+
+- **Criado**: AAAA-MM-DD (Fase: Intent | Build | Learn), <de onde veio> (#issue)
+- **Status**: <um valor do vocabulário acima>
+- **Atualizado**: AAAA-MM-DD (Fase: Intent | Build | Learn), <o que mudou e por quê> (#issue)
 ```
 
 ### Entrada do changelog

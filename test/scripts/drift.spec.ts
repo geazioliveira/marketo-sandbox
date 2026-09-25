@@ -3,6 +3,8 @@ import path from 'node:path'
 import {
   approveHeading,
   auditBaseline,
+  auditChecksPage,
+  auditClosingPage,
   auditCommitCap,
   auditCron,
   auditIssueCap,
@@ -456,6 +458,35 @@ describe('docs against the audit’s and the refresh’s contract values', () =>
     },
   )
 
+  it.each([workflowGuide, adr0002])(
+    '%s states the page the audit reads closing references and head checks with',
+    (file) => {
+      const text = bodyOf(read(file))
+      const closing = numbersIn(
+        text,
+        /mais de (\d+) referências de fechamento/g,
+      )
+      expect(closing.length, file).toBeGreaterThan(0)
+      for (const size of closing) expect(size, file).toBe(auditClosingPage)
+      const checks = numbersIn(text, /mais de (\d+) check (?:suites|runs)/g)
+      expect(checks.length, file).toBeGreaterThan(0)
+      for (const size of checks) expect(size, file).toBe(auditChecksPage)
+    },
+  )
+
+  it.each([workflowGuide, adr0002])(
+    '%s quotes the incomplete-page reason as the audit writes it',
+    (file) => {
+      const reason = 'referências de fechamento, não lidas todas'
+      expect(read('scripts/audit-main.mjs')).toContain(
+        `: mais de \${auditClosingPage} ${reason}`,
+      )
+      expect(read(file)).toContain(
+        `\`PR #P: mais de ${auditClosingPage} ${reason}`,
+      )
+    },
+  )
+
   it('the doc links in the audit’s and the refresh’s own text reach a heading that exists', () => {
     // The audit issue body links to the workflow guide and to ADR 0002 on
     // GitHub; a renamed heading would 404 in every issue it opens.
@@ -485,6 +516,136 @@ describe('docs against the audit’s and the refresh’s contract values', () =>
     )
     expect(script).toContain(`/blob/main/${adr0002}`)
   })
+})
+
+describe('docs against the gate’s own rules (#12)', () => {
+  const gate = read('scripts/gate.mjs')
+  const lineOf = (file: string, start: string): string =>
+    read(file)
+      .split(/\r?\n/)
+      .find((line) => line.startsWith(start)) ?? ''
+
+  it('the loop-gate pattern exempts from stacked exactly the refs the gate exempts', () => {
+    expect(gate).toContain('`refs/heads/${branch}`')
+    expect(gate).toContain('`refs/remotes/origin/${branch}`')
+    const stated = lineOf(loopGate, '- **Ref estranha**')
+    expect(stated).toContain('`refs/heads/<branch>`')
+    expect(stated).toContain('`refs/remotes/origin/<branch>`')
+    expect(stated).not.toContain('mesma issue')
+    expect(lineOf(loopGate, '- **Outra branch da mesma issue.**')).toContain(
+      'Nenhuma das duas isenções vale',
+    )
+  })
+
+  it.each([loopGate, lifecycle])(
+    '%s gives the remedies the gate prints for another branch of the issue',
+    (file) => {
+      for (const command of [
+        'git branch -d',
+        'git push origin --delete',
+        'git fetch --prune origin',
+      ]) {
+        expect(gate).toContain(command)
+        expect(read(file), file).toContain(command)
+      }
+      expect(gate).toContain('tem commits que esta não tem')
+    },
+  )
+
+  it('the loop-gate pattern states the label page the gate reads', () => {
+    const page = Number(/^const page = (\d+)$/m.exec(gate)?.[1])
+    expect(gate).toContain('labels(first: ${page})')
+    const stated = lineOf(loopGate, '- **O limite de leitura.**')
+    expect(numbersIn(stated, /mais de (\d+) labels/g)).toEqual([page])
+    expect(stated).toContain('`kind` e `state-label` bloqueiam')
+  })
+
+  it.each([loopGate, workflowGuide])(
+    '%s says a heading or a box inside code or an HTML comment does not count',
+    (file) => {
+      const stated = read(file)
+        .split(/\r?\n/)
+        .filter(
+          (line) =>
+            line.includes('comentário HTML') &&
+            line.includes('não abre seção') &&
+            /não (?:conta|é critério)/.test(line),
+        )
+      expect(stated, file).not.toEqual([])
+    },
+  )
+
+  it.each([loopGate, workflowGuide])(
+    '%s counts a reopening and another actor’s later ready-for-agent among the acts that cancel the Approve',
+    (file) => {
+      const stated = read(file)
+        .split(/\r?\n/)
+        .filter(
+          (line) =>
+            line.includes('cancelam o Approve venha de quem vier') &&
+            line.includes('uma reabertura') &&
+            line.includes('`ready-for-agent` por outro ator'),
+        )
+      expect(stated, file).not.toEqual([])
+    },
+  )
+
+  // The gate (label-not-owner, before-reopen) counts the last application
+  // only, and it must be the owner's, after the last reopening and after the
+  // Approve in force (#12).
+  it.each([workflowGuide, 'context/README.md'])(
+    '%s states the label rule the gate applies',
+    (file) => {
+      const rule = lineOf(file, '- **A label vem depois do Approve.**')
+      expect(rule, file).toContain(
+        '`ready-for-agent` só conta se a última aplicação dela foi do dono, depois da última reabertura e depois do Approve em vigor',
+      )
+    },
+  )
+
+  // hasContent and planCitesBranch read a section as GitHub shows it: a
+  // comment is not there, fenced code is (#12).
+  it.each([loopGate, workflowGuide])(
+    '%s says section content and the branch citation ignore HTML comments, and fenced code counts',
+    (file) => {
+      const stated = read(file)
+        .split(/\r?\n/)
+        .filter(
+          (line) =>
+            line.includes('`<!-- HIGH ou NORMAL -->`') &&
+            line.includes('está vazia') &&
+            line.includes('citada só dentro de um comentário não conta') &&
+            line.includes('Um bloco de código é texto visível'),
+        )
+      expect(stated, file).not.toEqual([])
+    },
+  )
+
+  // hiddenLines reads a fence under a list item at any indentation (#12).
+  it.each([loopGate, workflowGuide])(
+    '%s says a box in a code block nested in a list item does not count, and states the indented-code limit',
+    (file) => {
+      const stated = read(file)
+        .split(/\r?\n/)
+        .filter(
+          (line) =>
+            line.includes('item de lista') &&
+            line.includes('quatro espaços ou mais') &&
+            /caixa ne(?:le|sse bloco) não conta/.test(line) &&
+            line.includes('uma caixa nele ainda conta'),
+        )
+      expect(stated, file).not.toEqual([])
+    },
+  )
+
+  it.each([loopGate, lifecycle])(
+    '%s says the delete remedy names only the commands for the refs found',
+    (file) => {
+      expect(read(file), file).toMatch(
+        /cita só os comandos das (?:refs|cópias)/,
+      )
+    },
+  )
 })
 
 describe('docs against the skip tokens', () => {

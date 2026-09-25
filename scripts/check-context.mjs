@@ -32,6 +32,12 @@
 //   nor a link whose text or target spans two lines;
 // - a heading inside a blockquote or a list item generates no anchor here, so
 //   a link to it is reported as a broken anchor;
+// - a setext underline is read against the one line above it. A list item's
+//   continuation line over `---` is taken for a heading, though CommonMark
+//   makes that `---` a thematic break, so the Status block refuses it as a
+//   section; an ordered item numbered other than 1 right under a paragraph
+//   line is taken for a list item, though CommonMark continues the paragraph;
+//   and a table row (`| … |`) over an underline is never taken for a heading;
 // - an indented code block (four spaces) is read as prose, so a link in it is
 //   checked;
 // - of the named HTML entities in a heading, only &amp; &lt; &gt; &quot;
@@ -247,12 +253,16 @@ function unquote(line, limit = Infinity) {
  * or null for a line of a fenced code block, fences included. Links, headings
  * and statuses are read from the prose only: what sits in code is an example,
  * not a claim. A fence inside a blockquote counts too, and ends where the
- * quote ends, closed or not (CommonMark).
- * @returns {{ lines: string[], prose: (string | null)[] }}
+ * quote ends, closed or not (CommonMark). `shown` says, for each line, whether
+ * it shows any text outside HTML comments, its code spans included: a line
+ * that is all code span, such as `` `notas` ``, is blank prose but still the
+ * text of a heading when `===` or `---` underlines it.
+ * @returns {{ lines: string[], prose: (string | null)[], shown: boolean[] }}
  */
 function readMarkdown(text) {
   const lines = text.replace(/^\uFEFF/, '').split(/\r?\n/)
   const prose = []
+  const shown = []
   let fence = null
   let comment = false
   for (const line of lines) {
@@ -268,6 +278,7 @@ function readMarkdown(text) {
         )
           fence = null
         prose.push(null)
+        shown.push(false)
         continue
       }
     }
@@ -277,36 +288,73 @@ function readMarkdown(text) {
     if (open !== null && !(open[1][0] === '`' && open[2].includes('`'))) {
       fence = { char: open[1][0], size: open[1].length, depth: quoted.depth }
       prose.push(null)
+      shown.push(false)
       continue
     }
+    // A comment carried in from an earlier line makes this line raw HTML:
+    // markdown is not parsed there, so its first `-->` closes the comment even
+    // between backticks (GitHub renders it so). Only the rest of the line is
+    // read for code spans.
+    let head = ''
+    let body = line
+    if (comment) {
+      const end = line.indexOf('-->')
+      if (end < 0) {
+        prose.push(' '.repeat(line.length))
+        shown.push(false)
+        continue
+      }
+      head = ' '.repeat(end + 3)
+      body = line.slice(end + 3)
+      comment = false
+    }
+    const parts = splitCodeSpans(body)
     const masked = maskComments(
-      splitCodeSpans(line)
+      parts
         .map((part) => (part.code ? ' '.repeat(part.raw.length) : part.raw))
         .join(''),
-      comment,
+      false,
+    )
+    // The same masking with each code span kept as a mark, which can open or
+    // close no comment: what is left is what the line shows.
+    const marked = maskComments(
+      parts
+        .map((part) => (part.code ? 'x'.repeat(part.raw.length) : part.raw))
+        .join(''),
+      false,
     )
     comment = masked.comment
-    prose.push(masked.text)
+    prose.push(head + masked.text)
+    shown.push(marked.text.trim() !== '')
   }
-  return { lines, prose }
+  return { lines, prose, shown }
 }
 
 const atxHeading = /^ {0,3}(#{1,6})(?:[ \t]+(.*?))?(?:[ \t]+#+)?[ \t]*$/
 const setextUnderline = /^ {0,3}(?:=+|-+)[ \t]*$/
-/** A line that opens some other block, so a `---` under it is no heading. */
-const otherBlock = /^ {0,3}(?:[-*+>|#]|\d+[.)])/
+/**
+ * A line that opens some other block, so a `===` or `---` under it is no
+ * setext underline: a list item (its marker followed by a space, a tab or the
+ * end of the line), a blockquote, an ATX heading (the `#`s followed the same
+ * way), a table row or a thematic break. A line that only starts with one of
+ * those characters is a paragraph, and the underline makes it a heading:
+ * `**Notas**`, `_Notas_`, `#5`, `-foo` and `1)x` all are (CommonMark).
+ */
+const otherBlock =
+  /^ {0,3}(?:[-*+](?:[ \t]|$)|\d{1,9}[.)](?:[ \t]|$)|>|#{1,6}(?:[ \t]|$)|\||([-*_])(?:[ \t]*\1){2,}[ \t]*$)/
 
 /**
- * Whether line `index` is a setext heading's text: a line of prose that the
- * next line underlines with `===` (level 1) or `---` (level 2).
+ * Whether line `index` is a setext heading's text: a line that shows text,
+ * code spans included, and that the next line underlines with `===` (level 1)
+ * or `---` (level 2).
  */
-function isSetextHeading({ lines, prose }, index) {
+function isSetextHeading({ lines, prose, shown }, index) {
   const text = prose[index]
   const under = prose[index + 1]
   return (
     text !== null &&
     text !== undefined &&
-    text.trim() !== '' &&
+    shown[index] === true &&
     under !== null &&
     under !== undefined &&
     under.trim() !== '' &&
@@ -377,7 +425,8 @@ function slugify(text) {
 }
 
 /** Every anchor a markdown file offers: heading slugs, numbered on repeats, and explicit `<a id>`. */
-function anchorsOf({ lines, prose }) {
+function anchorsOf(markdown) {
+  const { lines, prose } = markdown
   const anchors = new Set()
   const occurrences = new Map()
   const add = (heading) => {
@@ -404,7 +453,7 @@ function anchorsOf({ lines, prose }) {
       add(atx[2] ?? '')
       return
     }
-    if (index > 0 && isSetextHeading({ lines, prose }, index - 1))
+    if (index > 0 && isSetextHeading(markdown, index - 1))
       add(lines[index - 1].trim())
   })
   return anchors
@@ -625,7 +674,8 @@ function checkRepository(cwd) {
   const checkTyped = (file) => {
     const relative = file.slice('context/'.length)
     if (isUntypedContextFile(relative)) return
-    const { lines, prose } = markdownOf(file)
+    const markdown = markdownOf(file)
+    const { lines, prose } = markdown
     const expected = contextKindOf(relative)
     if (expected === null) {
       reportOutsideLayout(file)
@@ -671,20 +721,20 @@ function checkRepository(cwd) {
     }
     const [start] = blocks
     // The block closes the file: a section after it, an ATX `#`/`##` heading
-    // or a setext one (a line underlined with `===` or `---`), is refused,
-    // and the block is read up to that section.
+    // (an empty one too) or a setext one (a line underlined with `===` or
+    // `---`), is refused, and the block is read up to that section.
     const nextSection = prose.findIndex(
       (text, index) =>
         index > start &&
         text !== null &&
-        (/^ {0,3}#{1,2}[ \t]/.test(text) ||
-          isSetextHeading({ lines, prose }, index)),
+        (/^ {0,3}#{1,2}(?:[ \t]|$)/.test(text) ||
+          isSetextHeading(markdown, index)),
     )
     if (nextSection >= 0)
       report(
         file,
         nextSection + 1,
-        `a seção ${quote(prose[nextSection].trim())} vem depois do bloco Status (linha ${start + 1}); o bloco Status é a última seção do arquivo`,
+        `a seção ${quote(prose[nextSection].trim() || lines[nextSection].trim())} vem depois do bloco Status (linha ${start + 1}); o bloco Status é a última seção do arquivo`,
       )
     const end = nextSection < 0 ? lines.length : nextSection
     // Read from the prose: a status in code or in an HTML comment is an

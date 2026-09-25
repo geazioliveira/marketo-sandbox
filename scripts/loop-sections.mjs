@@ -188,23 +188,138 @@ function pickSection(sections, required) {
 }
 
 /**
- * Markdown sections at levels 1–4, skipping fenced code. A section's content
- * runs to the next heading of the same or a higher level, so `### Contratos`
- * inside `## Plano` stays part of the plan.
+ * An opening fence, with the indentation before it: backticks with no
+ * backtick after them, or tildes.
+ */
+const fenceOpener = /^([ \t]*)(?:(`{3,})[^`]*|(~{3,}).*)$/
+/** A line that can close a fence: one run of a fence character, and blanks. */
+const fenceCloser = /^([ \t]*)(`{3,}|~{3,})[ \t]*$/
+/** The first line of an HTML comment block. */
+const commentOpener = /^ {0,3}<!--/
+/** A list item: a bullet, or a number with `.` or `)`, then a blank or nothing. */
+const listItem = /^[ \t]*(?:[-*+]|\d{1,9}[.)])(?:[ \t]|$)/
+/** An ATX heading, which ends any list above it. */
+const atxHeading = /^ {0,3}#{1,6}(?:[ \t]|$)/
+
+/** The width of a line's indentation in columns, a tab to the next stop of 4. */
+const indentWidth = (indent) =>
+  [...indent].reduce(
+    (width, char) => (char === '\t' ? width + 4 - (width % 4) : width + 1),
+    0,
+  )
+
+/**
+ * For each line, whether the rendered issue hides its Markdown, and why:
+ * `'fence'` for a line of fenced code, `'comment'` for a line of an HTML
+ * comment block, false for any other. parseSections and countCriteria both
+ * read lines through this one mask, so a heading and a checklist item inside
+ * either are skipped alike: a commented-out `## Critérios de aceite` is no
+ * section, and a box in sample code is no criterion. hasContent and
+ * planCitesBranch drop only the comment lines: fenced code is visible text.
+ *
+ * Fences follow CommonMark. An opening fence is a run of three or more
+ * backticks or tildes, indented at most three spaces; after backticks, the
+ * info string holds no backtick. The closing fence is a run of the same
+ * character at least as long as the opening one, indented at most three
+ * spaces, with nothing after it but spaces or tabs. So inside a three-backtick
+ * block a ```` ```js ```` line is code, and inside a four-backtick block a
+ * three-backtick line is code too. A fence left open runs to the end.
+ *
+ * Inside a list item, a fence is indented from the item's text, so it often
+ * sits four spaces or more from the margin (`1. Exemplo:` and then a fence
+ * indented four spaces). Erring on the side that blocks, an opening fence at
+ * any indentation counts when the last non-blank line before it is a list
+ * item or a continuation of one: a line indented under it, or a line of text
+ * right below it with no blank line between. A heading, a fence or a comment
+ * block at the margin, or a line at the margin after a blank one, ends the
+ * list. The item's text starts at most three columns left of such a fence,
+ * so the fence closes on a closing fence at most three columns right of its
+ * opening one, and a non-blank line more than three columns left of it ends
+ * the item and the fence with it. Anywhere else, a fence indented four spaces
+ * or more is indented code, as before, and a box in it still counts.
+ *
+ * An HTML comment block starts on a line whose text, after at most three
+ * spaces, opens with `<!--`, and runs through the first line from there that
+ * holds `-->`, all of that line included: GitHub renders the whole block as
+ * HTML, so a box after `-->` on its last line is no list item. One left open
+ * runs to the end. A comment that starts inside a line, or on a line indented
+ * four spaces or more, is not a block here and hides no whole line;
+ * countCriteria, hasContent and planCitesBranch cut those out on their own.
+ * @param {string[]} lines
+ * @returns {('fence' | 'comment' | false)[]}
+ */
+function hiddenLines(lines) {
+  let fence = null
+  let comment = false
+  // Whether the last non-blank line read was a list item or a continuation
+  // of one, and whether the line before this one was blank.
+  let inList = false
+  let afterBlank = true
+  return lines.map((line) => {
+    const blank = line.trim() === ''
+    const indent = indentWidth(/^[ \t]*/.exec(line)[0])
+    if (fence !== null) {
+      // A line left of where the item's text can start ends the item, and a
+      // fence inside it with it; the line is then read like any other.
+      if (blank || indent >= fence.floor) {
+        const closer = fenceCloser.exec(line)
+        if (
+          closer !== null &&
+          indent <= fence.limit &&
+          closer[2][0] === fence.run[0] &&
+          closer[2].length >= fence.run.length
+        )
+          fence = null
+        return 'fence'
+      }
+      fence = null
+    }
+    if (comment) {
+      comment = !line.includes('-->')
+      return 'comment'
+    }
+    const nested = inList
+    const opener = fenceOpener.exec(line)
+    const opensComment = commentOpener.test(line)
+    // A line continues an item when it is indented, or when it follows the
+    // item with no blank line between and could go on its paragraph: a
+    // heading, a fence or a comment block at the margin cannot.
+    if (!blank)
+      inList =
+        listItem.test(line) ||
+        (inList &&
+          !atxHeading.test(line) &&
+          (indent > 0 || (!afterBlank && opener === null && !opensComment)))
+    afterBlank = blank
+    if (opener !== null && (indent <= 3 || nested)) {
+      fence = {
+        run: opener[2] ?? opener[3],
+        limit: nested ? indent + 3 : 3,
+        floor: nested ? indent - 3 : 0,
+      }
+      return 'fence'
+    }
+    if (opensComment) {
+      comment = !line.includes('-->')
+      return 'comment'
+    }
+    return false
+  })
+}
+
+/**
+ * Markdown sections at levels 1–4, skipping the lines hiddenLines hides:
+ * fenced code and HTML comment blocks. A section's content runs to the next
+ * heading of the same or a higher level, so `### Contratos` inside
+ * `## Plano` stays part of the plan.
  * @returns {{ title: string, level: number, content: string }[]}
  */
 export function parseSections(markdown) {
   const lines = String(markdown ?? '').split(/\r?\n/)
+  const hidden = hiddenLines(lines)
   const found = []
-  let fence = null
   lines.forEach((line, index) => {
-    const opener = /^\s*(`{3,}|~{3,})/.exec(line)
-    if (opener) {
-      if (fence === null) fence = opener[1][0]
-      else if (opener[1][0] === fence) fence = null
-      return
-    }
-    if (fence !== null) return
+    if (hidden[index]) return
     const heading = /^(#{1,4})[ \t]+(.+?)[ \t#]*$/.exec(line)
     if (heading)
       found.push({ title: heading[2].trim(), level: heading[1].length, index })
@@ -225,15 +340,77 @@ export function parseSections(markdown) {
   })
 }
 
-/** Whether a section's content counts as written (a blank form field does not). */
+/**
+ * What countCriteria, hasContent and planCitesBranch cut out of the lines
+ * hiddenLines leaves as text, in the order tried at each position:
+ * 1. a code span on one line, kept: a `<!--` inside it is only text;
+ * 2. an HTML comment that opens a line hiddenLines does not read as a block
+ *    (indented four spaces or more, or by a tab), through the end of the line
+ *    where it closes;
+ * 3. any other HTML comment, inline in a line.
+ * GitHub renders no comment, and one left open hides the rest of the text. A
+ * code span that crosses a line is not recognised, so a `<!--` inside one
+ * hides more text, never less. Cutting only ever removes boxes, text and
+ * citations, so a misread lands on the side that blocks.
+ */
+const codeSpanOrComment =
+  /(`+)[^`\n]*?\1|^[ \t]*<!--[\s\S]*?(?:-->[^\n]*|(?![\s\S]))|<!--[\s\S]*?(?:-->|(?![\s\S]))/gm
+
+/** Text with its HTML comments cut out and its code spans kept (codeSpanOrComment). */
+const cutComments = (text) =>
+  text.replace(codeSpanOrComment, (match, ticks) =>
+    ticks === undefined ? '' : match,
+  )
+
+/**
+ * A section's content as the rendered issue shows its words: the lines of an
+ * HTML comment block dropped and the other comments cut out, while fenced
+ * code stays whole, since a code block is visible text. The cutting runs on
+ * each stretch of lines between fences and comment blocks on its own, so a
+ * `<!--` inside fenced code hides nothing.
+ */
+function shownText(content) {
+  const lines = String(content ?? '').split(/\r?\n/)
+  const hidden = hiddenLines(lines)
+  const shown = []
+  let stretch = []
+  const flush = () => {
+    if (stretch.length > 0) shown.push(cutComments(stretch.join('\n')))
+    stretch = []
+  }
+  lines.forEach((line, index) => {
+    if (hidden[index] === false) stretch.push(line)
+    else {
+      flush()
+      if (hidden[index] === 'fence') shown.push(line)
+    }
+  })
+  flush()
+  return shown.join('\n')
+}
+
+/**
+ * Whether a section's content counts as written: a blank form field does
+ * not, and neither does a section that holds only HTML comments, which
+ * GitHub shows empty (`<!-- HIGH ou NORMAL -->`). Fenced code counts.
+ */
 export function hasContent(content) {
-  const text = String(content ?? '').trim()
+  const text = shownText(content).trim()
   return text !== '' && text !== emptyFormAnswer
 }
 
-/** Checklist items (`- [ ]` or `- [x]`) with text after the box. */
+/**
+ * Checklist items (`- [ ]` or `- [x]`) with text after the box, as the
+ * rendered issue shows them: a box inside fenced code or inside an HTML
+ * comment is an example or a note, not a criterion.
+ */
 export function countCriteria(content) {
-  return (String(content ?? '').match(/^\s*[-*] \[[ xX]\] +\S/gm) ?? []).length
+  const lines = String(content ?? '').split(/\r?\n/)
+  const hidden = hiddenLines(lines)
+  const shown = cutComments(
+    lines.filter((_, index) => !hidden[index]).join('\n'),
+  )
+  return (shown.match(/^\s*[-*] \[[ xX]\] +\S/gm) ?? []).length
 }
 
 /**
@@ -282,16 +459,32 @@ const escapeRegExp = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
  * it (branchSectionFor). A longer name it prefixes does not count, and neither
  * does a mention elsewhere in the plan: "não usar `feature/3-old`" under Fora
  * de escopo cites nothing.
+ *
+ * A longer name is the branch followed by a letter, a digit, `_`, `/` or `-`,
+ * or by a dot and one of those: git takes `feature/3-a.old` for another branch
+ * (branchPattern refuses dots, so the gate never runs on it), while the dot
+ * that ends a sentence, `feature/3-a.`, still cites `feature/3-a`. Letters and
+ * digits are Unicode ones: `feature/3-a.ção` is a longer name too.
+ *
+ * The section is read as the rendered issue shows it (shownText): a name
+ * only inside an HTML comment cites nothing, while one in fenced code or in
+ * a code span does.
  * @returns {{ heading: string, section: boolean, cited: boolean }}
  */
 export function planCitesBranch(planText, branch, kind) {
   const heading = branchSectionFor(kind)
   const section = findSection(planText, heading)
   if (section === null) return { heading, section: false, cited: false }
+  const nameChar = '[\\p{L}\\p{N}_/-]'
   const exact = new RegExp(
-    `(?<![\\w/.-])${escapeRegExp(String(branch ?? ''))}(?![\\w/-])`,
+    `(?<![\\p{L}\\p{N}_/.-])${escapeRegExp(String(branch ?? ''))}(?!${nameChar}|\\.${nameChar})`,
+    'u',
   )
-  return { heading, section: true, cited: exact.test(section.content) }
+  return {
+    heading,
+    section: true,
+    cited: exact.test(shownText(section.content)),
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -422,6 +615,22 @@ const quoteLine = (line) =>
  * the second deliberate act, so a label left over from before a withdrawal
  * or a revision does not reopen the gate. After a new Approve the owner
  * applies it again (remove, then add).
+ *
+ * Whose acts count: only the two acts that open the gate check their author,
+ * the Approve and the last application of `ready-for-agent`, and both must be
+ * the owner's. Every act that closes it counts whoever did it: the withdrawal,
+ * a near-miss heading, a `# Plano`, an edit, a deletion, a reopening of the
+ * issue and a later application of `ready-for-agent` by another actor (the
+ * last application is the one judged) cancel the Approve from another user, a
+ * bot or a deleted account (a null author) alike. This is on purpose, not an
+ * oversight: a closing act never lets an unapproved plan through, and in
+ * doubt the gate blocks. Restricting the exact withdrawal to the owner would
+ * not even hold, since its near misses, a `# Plano` or an edit would still
+ * cancel. The docs call the withdrawal the owner's act (and it is, by
+ * convention); the gate honours it from anyone. A `# Owner Approve` by
+ * someone else neither opens the gate nor cancels the owner's standing
+ * Approve, while a `ready-for-agent` applied by someone else after the
+ * owner's does cancel it.
  *
  * What it cannot see:
  * - the agent posts from the owner's account, so an Approve the agent wrote
@@ -910,6 +1119,21 @@ export const auditVerdictFile = 'audit-verdict'
  * looking for the newest older than itself whose Julgar succeeded.
  */
 export const auditRunsRead = 20
+
+/**
+ * The page the audit reads a merged PR's head checks with: its check suites,
+ * and each suite's check runs. A head holding more than this in either is
+ * not judged green or red: its merge is out of the loop for that reason
+ * alone, since a re-run would read the same page.
+ */
+export const auditChecksPage = 100
+
+/**
+ * The page the audit reads a merged PR's closing references with, GraphQL's
+ * largest. When there are more and none of those read is an issue of this
+ * repository, the merge is out of the loop for that reason alone.
+ */
+export const auditClosingPage = 100
 
 /** When the daily audit runs: 06:17 UTC, as main-audit.yml's schedule. */
 export const auditCron = '17 6 * * *'

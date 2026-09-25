@@ -321,6 +321,39 @@ describe('scripts/check-context.mjs', () => {
       expect(run.status).toBe(0)
     })
 
+    it('accepts the anchor of a setext heading whose line starts like another block, or is all code', async () => {
+      // CommonMark: `**Notas**`, `#5 …` and `-foo` are paragraphs, not
+      // emphasis-only junk, a heading or a list item, so the underline makes
+      // each a heading; so does it a line that is all code span.
+      const run = await check({
+        'docs/development/workflow.md': lines(
+          '# Fluxo',
+          '',
+          '**Notas do dono**',
+          '===',
+          '',
+          '#5 em espera',
+          '---',
+          '',
+          '-fora',
+          '---',
+          '',
+          '`stacked`',
+          '---',
+        ),
+        'AGENTS.md': lines(
+          '# Roteador',
+          '',
+          '[a](docs/development/workflow.md#notas-do-dono)',
+          '[b](docs/development/workflow.md#5-em-espera)',
+          '[c](docs/development/workflow.md#-fora)',
+          '[d](docs/development/workflow.md#stacked)',
+        ),
+      })
+      expect(run.stdout + run.stderr).toMatch(/nenhum problema/)
+      expect(run.status).toBe(0)
+    })
+
     it('ignores links inside fenced code, inline code and HTML comments', async () => {
       const run = await check({
         'CLAUDE.md': lines(
@@ -677,6 +710,98 @@ describe('scripts/check-context.mjs', () => {
       },
     )
 
+    // Each of these lines only starts like another block, so CommonMark reads
+    // it as a paragraph, and the underline makes it a heading: a section after
+    // the Status block, which must not pass as part of it.
+    it.each([
+      ['a line wholly in bold', '**Resultados**', '==='],
+      ['a line wholly in emphasis', '_Resultados_', '---'],
+      ['an issue reference', '#12 depois do Status', '---'],
+      ['a dash with no space', '-resultados', '---'],
+      ['a number with no space', '1)resultados', '---'],
+      ['a line that is all code', '`resultados`', '==='],
+    ])(
+      'refuses %s underlined after the Status block as a section',
+      async (_, text, underline) => {
+        const run = await check({
+          'context/decisions/0001-first.md': lines(
+            '# ADR 0001: Primeira',
+            '',
+            '## Status',
+            '',
+            '- **Status**: Accepted',
+            '',
+            text,
+            underline,
+            '',
+            '- **Status**: Deprecated',
+          ),
+        })
+        const quoted = text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+        expectProblems(
+          run,
+          new RegExp(
+            `^context/decisions/0001-first\\.md:7: a seção "${quoted}" vem depois do bloco Status \\(linha 3\\); o bloco Status é a última seção do arquivo$`,
+          ),
+          /^context\/decisions\/0001-first\.md:10: status declarado fora do bloco Status \(linha 3\)/,
+        )
+      },
+    )
+
+    it.each(['#', '##'])(
+      'refuses an empty %s heading after the Status block as a section',
+      async (heading) => {
+        const run = await check({
+          'context/decisions/0001-first.md': lines(
+            '# ADR 0001: Primeira',
+            '',
+            '## Status',
+            '',
+            '- **Status**: Accepted',
+            '',
+            heading,
+            '',
+            '- **Status**: Deprecated',
+          ),
+        })
+        expectProblems(
+          run,
+          new RegExp(
+            `^context/decisions/0001-first\\.md:7: a seção "${heading}" vem depois do bloco Status \\(linha 3\\)`,
+          ),
+          /^context\/decisions\/0001-first\.md:9: status declarado fora do bloco Status \(linha 3\)/,
+        )
+      },
+    )
+
+    it('reads a thematic break, a quote, a comment or an empty list item over `---` as no section', async () => {
+      // Each opens a block of its own, so the `---` under it is a thematic
+      // break, not a setext underline.
+      const run = await check({
+        'context/decisions/0001-first.md': lines(
+          '# ADR 0001: Primeira',
+          '',
+          '## Status',
+          '',
+          '- **Status**: Accepted',
+          '',
+          '***',
+          '---',
+          '',
+          '> Uma citação.',
+          '---',
+          '',
+          '<!-- uma nota -->',
+          '---',
+          '',
+          '2026.',
+          '---',
+        ),
+      })
+      expect(run.stdout + run.stderr).toMatch(/nenhum problema/)
+      expect(run.status).toBe(0)
+    })
+
     it('reads a rule or a list line over `---` in the Status block as no section', async () => {
       // A `---` after a blank line is a thematic break, and one right under a
       // list item is no setext underline: neither opens a section.
@@ -704,6 +829,30 @@ describe('scripts/check-context.mjs', () => {
       expectProblems(
         run,
         /^context\/intent\/bug-link\.md:11: linha de status fora do formato "- \*\*Status\*\*: <valor>": "- \*\*Status\*\*: Deprecated"$/,
+      )
+    })
+
+    // Inside a comment carried in from an earlier line, the line is raw HTML:
+    // its `-->` closes the comment even between backticks, and the heading
+    // after it is a real section (GitHub renders `<h2>Depois</h2>`).
+    it('closes a comment at a `-->` inside backticks and reads the heading after it', async () => {
+      const run = await check({
+        'context/decisions/0001-first.md': lines(
+          '# ADR 0001: Primeira',
+          '',
+          '## Status',
+          '',
+          '- **Status**: Accepted',
+          '',
+          '<!--',
+          'comentário com `-->` no meio',
+          '## Depois',
+          '-->',
+        ),
+      })
+      expectProblems(
+        run,
+        /^context\/decisions\/0001-first\.md:9: a seção "## Depois" vem depois do bloco Status \(linha 3\); o bloco Status é a última seção do arquivo$/,
       )
     })
 
@@ -1067,6 +1216,41 @@ describe('the context vocabularies in scripts/loop-sections.mjs', () => {
     expect(layout).toContain(
       'um arquivo fora destas pastas faz o check:context recusar',
     )
+  })
+
+  it('end every typed template of the Context Mesh guide with the Status block it defines', () => {
+    // The checker refuses a typed file without the block, so a template
+    // copied as it stands must already carry it; the changelog entry has none.
+    const guide = readFileSync(
+      path.join(projectRoot, 'context', 'README.md'),
+      'utf8',
+    )
+    const fenced = (text: string): string[] =>
+      [...text.matchAll(/^```markdown\n([\s\S]*?)^```$/gm)].map(
+        (match) => match[1],
+      )
+    // Split by the section headings only: the sketch itself opens with `## Status`.
+    const [, afterBlock = ''] = guide.split('\n## O bloco Status\n')
+    const [blockSection, templates = ''] = afterBlock.split('\n## Templates\n')
+    const [block] = fenced(blockSection)
+    expect(block).toMatch(/^## Status\n\n- \*\*Criado\*\*: /)
+    const kinds: string[] = contextKinds.map(({ kind }) => kind)
+    const typedTemplates = new Map<string, string>()
+    let changelogEntries = 0
+    for (const template of fenced(templates)) {
+      const title = /^# ([^:]+?)(?: NNNN)?: /.exec(template)
+      if (title !== null && kinds.includes(title[1])) {
+        typedTemplates.set(title[1], template)
+        expect(template.endsWith(`\n\n${block}`), title[1]).toBe(true)
+        expect(template.match(/^## Status$/gm), title[1]).toHaveLength(1)
+      } else {
+        expect(template, template).toMatch(/^## AAAA-MM-DD: /)
+        expect(template).not.toMatch(/^## Status$/m)
+        changelogEntries += 1
+      }
+    }
+    expect([...typedTemplates.keys()].sort()).toEqual([...kinds].sort())
+    expect(changelogEntries).toBe(1)
   })
 
   it('name every title kind the Context Mesh guide shows', () => {

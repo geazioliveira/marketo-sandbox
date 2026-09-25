@@ -276,6 +276,8 @@ export declare const auditJudgeStep: string
 export declare const auditVerdictStep: string
 export declare const auditVerdictFile: string
 export declare const auditRunsRead: number
+export declare const auditChecksPage: number
+export declare const auditClosingPage: number
 export declare const auditCron: string
 export declare const issueLinkWorkflowFile: string
 export declare const issueLinkEvent: string
