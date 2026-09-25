@@ -21,6 +21,9 @@
 .settings/
 *.sublime-workspace
 
+# OS: Finder writes one in every folder it opens.
+.DS_Store
+
 # IDE - VSCode
 .vscode/*
 !.vscode/settings.json

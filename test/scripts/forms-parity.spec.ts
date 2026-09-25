@@ -617,14 +617,55 @@ describe(workflows.issueLink, () => {
 describe(workflows.check, () => {
   const text = read(workflows.check)
 
-  it('installs, lints, tests and then refuses a dirty tree', () => {
+  it('installs, runs the aggregate check and the e2e, and then refuses a dirty tree', () => {
+    // #3 moved lint and test into `npm run check`, the one command a person
+    // also runs before the PR; the chain itself is pinned below.
     const scripts = runBlocks(text)
-    expect(scripts.slice(0, 3)).toEqual(['npm ci', 'npm run lint', 'npm test'])
+    expect(scripts).toHaveLength(4)
+    expect(scripts.slice(0, 3)).toEqual([
+      'npm ci',
+      'npm run check',
+      'npm run test:e2e',
+    ])
     expect(scripts.at(-1)).toContain('git status --porcelain')
+  })
+
+  it('runs the e2e as its own step, its telemetry pointed at a closed loopback port', () => {
+    // ObserveModule calls out by default (#9); the e2e must not reach the network.
+    const e2e = stepsOf(text).find(
+      (step) => stepField(step, 'run') === 'npm run test:e2e',
+    )
+    expect(e2e && stepField(e2e, 'name')).toBe('e2e')
+    expect(e2e && stepField(e2e, 'OBSERVE_ENDPOINT')).toBe('http://127.0.0.1:9')
+  })
+
+  it('relies on a `npm run check` that chains lint, typecheck, test, check:context and build', () => {
+    const { scripts } = JSON.parse(read('package.json')) as {
+      scripts: Record<string, string>
+    }
+    expect(scripts.check.split(' && ')).toEqual([
+      'npm run lint',
+      'npm run typecheck',
+      'npm test',
+      'npm run check:context',
+      'npm run build',
+    ])
+    expect(scripts.typecheck).toBe('tsc --noEmit')
+    expect(scripts['check:context']).toBe('node scripts/check-context.mjs')
   })
 
   it('reads the repository with a read-only token', () => {
     expect(topMap(text, 'permissions')).toEqual({ contents: 'read' })
     expect(text).not.toMatch(/:\s*write\b/)
+  })
+
+  it('never cancels or replaces a run on main, and supersedes a stale one elsewhere', () => {
+    // A group holds one pending run, and a newer one replaces it: on main the
+    // group is the commit, so a third push cannot drop the second's verdict.
+    expect(topMap(text, 'concurrency')).toEqual({
+      group:
+        "check-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}",
+      'cancel-in-progress': "${{ github.ref != 'refs/heads/main' }}",
+    })
   })
 })

@@ -21,12 +21,15 @@
     "start:debug": "nest start --debug --watch",
     "start:prod": "node dist/main",
     "lint": "oxlint src/ test/ scripts/",
+    "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:cov": "vitest run --coverage",
     "test:debug": "vitest --inspect-brk --no-file-parallelism",
     "test:e2e": "vitest run --config ./vitest.config.e2e.ts",
-    "gate": "node scripts/gate.mjs"
+    "gate": "node scripts/gate.mjs",
+    "check:context": "node scripts/check-context.mjs",
+    "check": "npm run lint && npm run typecheck && npm test && npm run check:context && npm run build"
   },
   "dependencies": {
     "@faker-js/faker": "^10.6.0",

@@ -175,6 +175,48 @@ export declare const requiredChecks: readonly RequiredCheck[]
 export declare function changelogHeadingFor(issue: number): RegExp
 export declare const changelogHeading: RegExp
 
+// Context files
+
+export type ContextKind =
+  | 'Project intent'
+  | 'Feature'
+  | 'Bug'
+  | 'ADR'
+  | 'Pattern'
+  | 'Anti-pattern'
+  | 'Agent'
+
+export interface ContextKindRule {
+  kind: ContextKind
+  file: RegExp
+  shape: string
+  statuses: readonly string[]
+}
+
+export interface UntypedContextPath {
+  file: RegExp
+  shape: string
+}
+
+export declare const intentStatuses: readonly string[]
+export declare const bugStatuses: readonly string[]
+export declare const decisionStatuses: readonly string[]
+export declare const knowledgeStatuses: readonly string[]
+export declare const contextKinds: readonly ContextKindRule[]
+export declare const untypedContextPaths: readonly UntypedContextPath[]
+export declare function isUntypedContextFile(
+  file: string | null | undefined,
+): boolean
+export declare function contextKindOf(file: string | null | undefined): {
+  kind: ContextKind
+  title: string
+  statuses: readonly string[]
+} | null
+export declare const statusHeading: RegExp
+export declare const statusLine: RegExp
+export declare const statusDeclaration: RegExp
+export declare const repositoryFileUrl: string
+
 // The gate's steps and its cache
 
 export type StepStatus = 'ok' | 'no' | 'unchecked' | 'skip'
@@ -218,3 +260,27 @@ export declare function gateStatus(
   cache: GateCache | null | undefined,
   context: { branch: string; now?: number; pendingSince?: string | null },
 ): { state: GateState; cache?: GateCache }
+
+// The audit of main and the issue-link refresh
+
+export declare const auditBaseline: string
+export declare const mainAuditWorkflowFile: string
+export declare const auditTitlePrefix: string
+export declare function auditTitleFor(sha: string | null | undefined): string
+export declare const auditLabels: readonly string[]
+export declare const auditCommitCap: number
+export declare const auditIssueCap: number
+export declare const auditLinkRetries: number
+export declare const auditRetryDelayMs: number
+export declare const auditJudgeStep: string
+export declare const auditVerdictStep: string
+export declare const auditVerdictFile: string
+export declare const auditRunsRead: number
+export declare const auditCron: string
+export declare const issueLinkWorkflowFile: string
+export declare const issueLinkEvent: string
+export declare const issueLinkWorkflowPath: string
+export declare const refreshPollMs: number
+export declare const refreshWaitMs: number
+export declare const skipCiTokens: readonly string[]
+export declare const skipChecksTrailer: string
