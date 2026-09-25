@@ -31,7 +31,7 @@ Esta é a segunda fatia do harness acompanhado na #1.
   Cada caso abre **automaticamente** uma issue `bug` + `needs-triage` chamada "Mudança em main fora do loop: <sha7>" (resposta 2 do dono na #3), sem duplicar, e o workflow fica vermelho.
 - [x] `issue-link-refresh.yml` reage a label, comentário, fechamento e reabertura numa issue, re-executando o `issue-link` das PRs abertas que fecham aquela issue. Se o `GITHUB_TOKEN` não conseguir disparar o rerun, a limitação fica documentada na ADR 0002, com o que se mediu.
 - [x] Na PR desta issue, o check `issue-link` roda a partir de `main` e fica verde. É a primeira prova ao vivo do harness.
-- [ ] Na primeira execução, o `main-audit` audita o merge desta própria PR e não abre issue.
+- [x] Na primeira execução, o `main-audit` audita o merge desta própria PR e não abre issue. A run 36095621001 julgou `8d4662f..731dbc7`, leu "731dbc7: PR #11, fecha #3, checks exigidos verdes" e achou 0 mudanças fora do loop, sem abrir issue ([comentário na #3](https://github.com/geazioliveira/marketo-sandbox/issues/3#issuecomment-5826887490)).
 
 ## Abordagem técnica
 
@@ -66,10 +66,10 @@ O que foi construído está na [entrada do changelog](../evolution/changelog.md)
 - **Estar no loop também exige os checks verdes.** Um merge só conta como dentro do loop se a PR teve `Vínculo com issue / issue-link` (de `pull_request_target`) e `Qualidade / check` verdes antes do merge. Assim um merge de PR vermelha vira issue.
 - **Três casos passaram a virar issue:** uma reescrita de `main` desde a última auditoria (pelo compare do GitHub quando o topo antigo sumiu do clone), um intervalo com mais de 200 commits, e mais de 10 commits fora do loop numa auditoria (uma issue só).
 - **Tokens de pular CI e o trailer `skip-checks: true` ficam proibidos** no título, no corpo e nos commits da PR.
-- **Os dois últimos critérios dependem de GitHub ao vivo.** O primeiro, `issue-link` verde a partir de `main` na PR, é marcado depois do CI desta PR. O segundo, a primeira auditoria do merge sem issue, só é observável depois do merge: o resultado vai num comentário na #3, e a PR da #4 o registra aqui.
+- **Os dois últimos critérios dependem de GitHub ao vivo.** O primeiro, `issue-link` verde a partir de `main` na PR, é marcado depois do CI desta PR. O segundo, a primeira auditoria do merge sem issue, só é observável depois do merge: o resultado foi para um comentário na #3, e a PR da #4 marcou o critério aqui.
 
 ## Status
 
 - **Criado**: 2026-09-25 (Fase: Intent), do plano aprovado na #3 (#3)
-- **Status**: In Progress
-- **Atualizado**: 2026-09-25 (Fase: Learn), o `issue-link` rodou de `main` e ficou verde na PR #11; só falta observar a primeira auditoria depois do merge, que a PR da #4 registra (#3)
+- **Status**: Completed
+- **Atualizado**: 2026-09-25 (Fase: Learn), a primeira auditoria de `main` julgou o merge da PR #11 sem mudança fora do loop, e o último critério foi marcado (#4)

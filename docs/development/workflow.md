@@ -305,9 +305,9 @@ Quando os hooks do Claude Code chegarem (#5), o dono pode desligá-los na própr
 | O que o mock precisa fazer, com critérios de aceite | `context/intent/` |
 | Uma escolha relevante e os motivos | `context/decisions/` |
 | Uma regra que a revisão confere | `context/knowledge/patterns/` |
-| Um erro a não repetir | `context/knowledge/anti-patterns/` (o primeiro chegou com a #2; a #4 traz os do histórico) |
+| Um erro a não repetir | `context/knowledge/anti-patterns/` (o primeiro chegou com a #2, e a #4 trouxe os do histórico) |
 | Uma tarefa repetível para um agente de IA | `context/agents/agent-<nome>.md` (a pasta chega com o primeiro agente) |
-| Uma definição | `context/knowledge/glossary.md` (chega com a #4) |
+| Uma definição | [`context/knowledge/glossary.md`](../../context/knowledge/glossary.md) |
 | O que mudou e o que ensinou | O [changelog](../../context/evolution/changelog.md), no passo Learn |
 | Como rodar, mudar ou operar algo | `docs/` |
 

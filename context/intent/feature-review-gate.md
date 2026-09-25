@@ -34,7 +34,7 @@ A auditoria de `main` registra o merge que chegar sem as duas coisas.
   5. responder cada thread antes de resolvê-la;
   6. renovar o veredito.
 - [x] Cada regra tem teste, e cada teste falha quando a regra é revertida.
-- [ ] A PR desta issue espera a revisão do Copilot na cabeça e tem zero threads abertas no merge. Os passos novos só rodam a partir de `main` na PR seguinte.
+- [x] A PR desta issue espera a revisão do Copilot na cabeça e tem zero threads abertas no merge. Os passos novos só rodam a partir de `main` na PR seguinte. A PR #15 foi mergeada em `7a18d31` com a revisão do Copilot na cabeça `1eb08fd` e 0 de 8 threads abertas ([comentário de evidência na #13](https://github.com/geazioliveira/marketo-sandbox/issues/13#issuecomment-5837763326)).
 - [x] `npm run check` e o e2e passam, e o gate fica aberto.
 
 ## Abordagem técnica
@@ -84,10 +84,10 @@ Desvios do plano, descobertos nas revisões adversariais e medidos em PRs reais 
 - **Uma revisão do Copilot a caminho também bloqueia.** O plano pedia que a consulta da PR lesse `reviewRequests`, e a primeira versão do gate não lia; a revisão do Copilot na PR #15 apontou a falta. Agora um pedido pendente ao Copilot (`copilotRequested`, o `Bot` com o `databaseId`) segura o merge mesmo com uma revisão na cabeça, porque as threads da revisão nova ainda não existem, e a mensagem manda esperá-la em vez de pedir outra. Com uma revisão na cabeça e os pedidos lidos pela metade (ou sem `totalCount`), sem o do Copilot entre eles, o passo fica `unchecked`. Medido na PR #15: o GraphQL mostra o pedido pendente, e o `requested_reviewers` do REST vem vazio.
 - **A ADR 0003 ficou com o número 0003.** As ADRs retroativas da #4 passam a ser numeradas a partir de 0004, o que é um desvio só de numeração em relação ao plano da #4.
 
-O último critério depende do GitHub ao vivo: a PR desta issue esperar a revisão do Copilot na cabeça e ter zero threads abertas no merge. Ele só pode ser conferido depois do merge. A evidência fica na própria #13, num comentário logo depois do merge, com a revisão do Copilot na cabeça e as threads lidas do GitHub no merge. A PR da #4 só marca a caixa neste arquivo, citando esse comentário, porque o intent só muda por PR.
+O último critério depende do GitHub ao vivo: a PR desta issue esperar a revisão do Copilot na cabeça e ter zero threads abertas no merge. Ele só pode ser conferido depois do merge. A evidência fica na própria #13, num comentário logo depois do merge, com a revisão do Copilot na cabeça e as threads lidas do GitHub no merge. A PR da #4 marcou a caixa neste arquivo, citando esse comentário, porque o intent só muda por PR.
 
 ## Status
 
 - **Criado**: 2026-09-25 (Fase: Intent), do plano aprovado na #13 (#13)
-- **Status**: In Progress
-- **Atualizado**: 2026-09-25 (Fase: Learn), Resultados escritos antes da PR; falta a revisão do Copilot na cabeça da PR desta issue (#13)
+- **Status**: Completed
+- **Atualizado**: 2026-09-25 (Fase: Learn), a PR #15 foi mergeada com a revisão do Copilot na cabeça e zero threads abertas, e o último critério foi marcado com a evidência da #13 (#4)

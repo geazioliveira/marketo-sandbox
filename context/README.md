@@ -13,9 +13,9 @@ Os formatos desta página não são só orientação: o `npm run check:context`,
 | [intent/](intent/) | O que está sendo construído e por quê, com critérios de aceite: `intent/project-intent.md`, um `intent/feature-<slug>.md` por feature e um `intent/bug-<slug>.md` por bug |
 | [decisions/](decisions/) | Uma escolha relevante por arquivo, `decisions/NNNN-<slug>.md`, indexadas com o status em [decisions/README.md](decisions/README.md) |
 | [knowledge/patterns/](knowledge/patterns/) | Regras que o trabalho segue e que a revisão confere, uma por `knowledge/patterns/<nome>.md` |
-| [knowledge/anti-patterns/](knowledge/anti-patterns/) | Erros cometidos aqui e o que fazer em vez disso, um por `knowledge/anti-patterns/<nome>.md`. O primeiro chegou com a #2; a #4 traz os do histórico |
+| [knowledge/anti-patterns/](knowledge/anti-patterns/) | Erros cometidos aqui e o que fazer em vez disso, um por `knowledge/anti-patterns/<nome>.md`. O primeiro chegou com a #2, e a #4 trouxe os do histórico |
 | `agents/` | Agentes de execução reutilizáveis, um por `agents/agent-<nome>.md`, com o título `# Agent: <nome>` e o bloco Status. A pasta chega com o primeiro agente |
-| `knowledge/glossary.md` | O vocabulário do projeto, com as palavras a evitar. Chega com a #4 |
+| [`knowledge/glossary.md`](knowledge/glossary.md) | O vocabulário do projeto, com as palavras a evitar |
 | [`evolution/changelog.md`](evolution/changelog.md) | Uma entrada por mudança mergeada, escrita no passo Learn |
 | `evolution/history/` e `evolution/learning-<slug>.md` | O registro arquivado e as notas de aprendizado longas demais para uma entrada do changelog. Chegam com o primeiro arquivo |
 | `README.md`, em qualquer pasta | O índice da pasta, como este e o de [decisões](decisions/README.md) |

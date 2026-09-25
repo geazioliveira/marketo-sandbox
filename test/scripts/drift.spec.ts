@@ -948,20 +948,21 @@ describe('docs against the review gate’s contract values (#13)', () => {
     },
   )
 
-  it('the decision index leaves to #4 only numbers no decision holds yet', () => {
+  it('the decision index attributes to #4 only decisions that exist', () => {
+    // Before #4 the index promised its retroactive decisions numbers no file
+    // held yet; #4 wrote them, so every number it names now has its file.
     const held = readdirSync(path.join(root, 'context', 'decisions'))
       .map((file) => /^(\d{4})-/.exec(file)?.[1])
       .filter((number): number is string => number !== undefined)
       .map(Number)
     expect(held).toContain(3)
-    const promised = sentencesOf(read('context/decisions/README.md'))
+    const attributed = sentencesOf(read('context/decisions/README.md'))
       .filter(
         (sentence) => sentence.includes('#4') && /retroativ/.test(sentence),
       )
       .flatMap((sentence) => numbersIn(sentence, /\b(\d{4})\b/g))
-    expect(promised.length).toBeGreaterThan(0)
-    for (const number of promised)
-      expect(number).toBeGreaterThan(Math.max(...held))
+    expect(attributed.length).toBeGreaterThan(0)
+    for (const number of attributed) expect(held).toContain(number)
   })
 
   it('ADR 0003 quotes the owner’s request as the intent records it', () => {
