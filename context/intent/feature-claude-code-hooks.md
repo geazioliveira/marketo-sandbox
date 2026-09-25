@@ -2,7 +2,7 @@
 
 ## Declaração de intenção
 
-O gate e o CI registram desvios depois que acontecem. A issue #5 pede hooks de projeto que interrompam, antes da ação, atalhos do agente como escrever o próprio Approve, mover labels de estado, editar código sem o gate aberto e abrir PR sem issue. O dono continua sendo quem aprova o plano e muda o estado da issue.
+O gate e o CI registram desvios depois que acontecem. A issue #5 pede hooks de projeto que interrompam, antes da ação, atalhos do agente como escrever o próprio Approve, aplicar `ready-for-agent`, editar código sem o gate aberto e abrir PR sem issue. Ao publicar um plano numa issue em `needs-triage`, o agente deve movê-la para `ready-for-human`; só o dono aprova e aplica `ready-for-agent`.
 
 ## Critérios de aceite
 
@@ -43,4 +43,4 @@ Preenchidos no Learn desta issue.
 
 - **Criado**: 2026-09-25 (Fase: Intent), do plano aprovado na issue #5 (#5)
 - **Status**: In Progress
-- **Atualizado**: 2026-09-25 (Fase: Intent), branch aberta após o merge da #4 (#5)
+- **Atualizado**: 2026-09-25 (Fase: Build), o dono autorizou o agente a mover `needs-triage` para `ready-for-human` ao publicar o plano; o Approve e `ready-for-agent` continuam exclusivos do dono (#5)
