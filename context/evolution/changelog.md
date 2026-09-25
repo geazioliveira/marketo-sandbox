@@ -12,7 +12,7 @@ Uma entrada por mudança mergeada, da mais nova para a mais antiga, escrita no p
 ### O que foi construído / corrigido
 
 - Ao publicar um plano completo numa issue em `needs-triage`, o agente troca essa label por `ready-for-human` no mesmo passo. O dono continua sendo o único a escrever `# Owner Approve` e aplicar `ready-for-agent`.
-- A regra agora aparece no `AGENTS.md`, no fluxo, na ADR 0001, no pattern do gate, no glossário e na mensagem que o gate imprime. Esta PR separa a documentação compartilhada da implementação dos hooks da #5.
+- A regra agora aparece no `AGENTS.md`, no fluxo, na ADR 0001, no pattern do gate, no glossário e na mensagem que o gate imprime. Esta PR separa a documentação compartilhada dos hooks da #5, que ainda irão chegar.
 
 ### Números medidos
 
@@ -29,7 +29,7 @@ Uma entrada por mudança mergeada, da mais nova para a mais antiga, escrita no p
 
 ### Aprendizados / surpresas
 
-- Os documentos gerais do Context Mesh já estavam em `main`. Só a regra mais recente precisava de PR própria; o intent e os futuros hooks da #5 ficaram fora dela.
+- Os documentos gerais do Context Mesh já estavam em `main`. Só a regra mais recente precisava de PR própria; o intent ficou na branch da #5, e os hooks da #5 ainda irão chegar.
 
 ---
 
