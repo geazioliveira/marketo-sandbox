@@ -1,0 +1,83 @@
+# The only server-side check behind "toda PR é vinculada a uma issue" (#2):
+# it runs the loop gate (scripts/gate.mjs) in CI mode against the pull request.
+#
+# Why pull_request_target: GitHub takes this YAML, and the default checkout ref,
+# from the default branch (main), never from the pull request. A pull request
+# therefore cannot loosen its own check by editing this file or the gate; under
+# plain pull_request its own copies of both would judge it.
+#
+# Why that is safe here: nothing from the pull request is installed or executed.
+# The gate and Node come from main (trusted/); the PR head is checked out only as
+# git data (pr/), and the gate reads its files through `git show`. The token is
+# read-only (permissions below) and no checkout persists credentials. A fork PR
+# is refused by actions/checkout v7 while allow-unsafe-pr-checkout stays off, so
+# it goes red here: a lane lives on a branch of this repository.
+#
+# Bootstrap: the PR that adds this file (#2) gets no server-side run, because the
+# workflow is not on main yet. The first real run is on the PR of #3.
+#
+# What does not trigger a run: an Approve, a label move or a plan comment on the
+# issue. After one of those, re-run this job (or push) to refresh the verdict.
+name: Vínculo com issue
+
+on:
+  pull_request_target:
+    # edited: the body's first line is judged. ready_for_review and
+    # converted_to_draft: intent-first and learn block only outside draft.
+    # No branches filter: a PR to a base other than main must go red (pr-base),
+    # not skip.
+    types:
+      - opened
+      - edited
+      - synchronize
+      - reopened
+      - ready_for_review
+      - converted_to_draft
+
+permissions:
+  contents: read
+  issues: read
+  pull-requests: read
+
+# Only the verdict on the PR's latest state matters.
+concurrency:
+  group: issue-link-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  issue-link:
+    name: issue-link
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      # The trusted gate and its contracts, from main. Cone mode also keeps the
+      # root files, so .nvmrc comes along.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: trusted
+          persist-credentials: false
+          sparse-checkout: scripts
+      # PR code is DATA only: nothing from pr/ is installed or executed. Full
+      # history, so origin/main and the other branches exist for the stacked,
+      # up-to-date, intent-first and learn steps.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: pr
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      # No package cache: nothing is installed, and a cache saved from this
+      # context would land in main's cache scope.
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: trusted/.nvmrc
+          package-manager-cache: false
+      # Event data reaches the shell only through env, never interpolated into
+      # the script, so a branch name cannot inject a command.
+      - name: Gate do loop (modo CI)
+        working-directory: pr
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_HEAD_REF: ${{ github.event.pull_request.head.ref }}
+        run: node "$GITHUB_WORKSPACE/trusted/scripts/gate.mjs" --pr "$PR_NUMBER" --branch "$PR_HEAD_REF"

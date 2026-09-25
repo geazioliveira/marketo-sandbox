@@ -1,0 +1,1196 @@
+#!/usr/bin/env node
+// The loop gate: which steps of the issue-first loop hold for the work in
+// front of you, and whether building (locally) or merging (in CI) may go on.
+//
+// Ported from brunohab/lite-campaign's scripts/gate.mjs, with three of its
+// known defects fixed: Learn was ticked by any mention of #N in the changelog
+// (#124), a stacked branch passed and intent-first read the first commit of the
+// branch below it (#122), and two state labels at once opened the gate (#103).
+// Every rule applied here lives in scripts/loop-sections.mjs; this file only
+// gathers facts from git and GitHub and reports them against those rules.
+//
+// Two modes:
+// - local (`npm run gate`): the branch is HEAD. A lost network degrades the
+//   issue's steps to unchecked, because a gate that stops work for want of a
+//   network is one people learn to route around. A missing issue or a refused
+//   credential still blocks: those are answers, not silence.
+// - CI (`--pr <n> --branch <headRef>`): fail-closed. issue-link.yml runs the
+//   copy of this file from main against a checkout of the PR head, so nothing
+//   here may assume it lives in the repository it judges, and the PR's files
+//   are read through git (`git show <sha>:<path>`), never through fs.
+//
+// What it cannot see: the agent posts from the owner's account, so it cannot
+// tell who typed an Approve. ownerRule states that convention on every run.
+import { spawnSync } from 'node:child_process'
+import { existsSync, realpathSync, writeFileSync } from 'node:fs'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
+import {
+  approveState,
+  branchCategory,
+  branchShapes,
+  categoryLabels,
+  changelogHeadingFor,
+  checkSections,
+  closesLine,
+  countCriteria,
+  criteriaSection,
+  currentPlan,
+  gateCacheFile,
+  gateCacheSchema,
+  headAndRest,
+  kindOf,
+  ownerRule,
+  parseBranch,
+  planCitesBranch,
+  readyLabel,
+  sectionsFor,
+  stateLabels,
+  stepIds,
+} from './loop-sections.mjs'
+
+const trunk = 'main'
+const originTrunk = `refs/remotes/origin/${trunk}`
+const intentDir = 'context/intent/'
+const changelogPath = 'context/evolution/changelog.md'
+// GraphQL pages are read whole or not judged: an Approve or a withdrawal on an
+// unread page would silently change the verdict.
+const page = 100
+
+const issueQuery = `query($owner: String!, $name: String!, $number: Int!) { repository(owner: $owner, name: $name) { owner { login } issue(number: $number) { number state body lastEditedAt labels(first: 50) { nodes { name } } comments(last: ${page}) { totalCount nodes { body createdAt lastEditedAt author { __typename login } } } timelineItems(last: ${page}, itemTypes: [LABELED_EVENT, REOPENED_EVENT, COMMENT_DELETED_EVENT]) { totalCount nodes { __typename ... on LabeledEvent { createdAt actor { __typename login } label { name } } ... on ReopenedEvent { createdAt } ... on CommentDeletedEvent { createdAt } } } } } }`
+
+const prQuery = `query($owner: String!, $name: String!, $number: Int!) { repository(owner: $owner, name: $name) { pullRequest(number: $number) { baseRefName headRefName headRefOid isDraft body closingIssuesReferences(first: 10) { totalCount nodes { number repository { nameWithOwner } } } } } }`
+
+const usage = [
+  'Uso:',
+  '  node scripts/gate.mjs [--json] [--no-cache]            modo local (a branch é o HEAD)',
+  '  node scripts/gate.mjs --pr <n> --branch <headRef> [--json]  modo CI (fail-closed)',
+].join('\n')
+
+// ---------------------------------------------------------------------------
+// Arguments
+
+function parseArgs(argv) {
+  const options = {
+    json: false,
+    cache: true,
+    pr: null,
+    branch: null,
+    help: false,
+  }
+  for (let i = 0; i < argv.length; i += 1) {
+    const arg = argv[i]
+    if (arg === '--json') options.json = true
+    else if (arg === '--no-cache') options.cache = false
+    else if (arg === '--help' || arg === '-h') options.help = true
+    else if (arg === '--pr' || arg === '--branch') {
+      const key = arg.slice(2)
+      const value = argv[i + 1]
+      i += 1
+      if (value === undefined || value.startsWith('-'))
+        return { error: `${arg} precisa de um valor` }
+      if (options[key] !== null) return { error: `${arg} repetido` }
+      if (key === 'pr') {
+        if (!/^[1-9]\d*$/.test(value))
+          return { error: `--pr espera o número da PR, recebeu "${value}"` }
+        options.pr = Number(value)
+      } else options.branch = value
+    } else return { error: `opção desconhecida: ${arg}` }
+  }
+  if ((options.pr === null) !== (options.branch === null))
+    return { error: '--pr e --branch andam juntos (modo CI)' }
+  return { options }
+}
+
+// ---------------------------------------------------------------------------
+// git and gh, both through argv (never a shell)
+
+function git(...args) {
+  const run = spawnSync('git', args, {
+    encoding: 'utf8',
+    maxBuffer: 64 * 1024 * 1024,
+  })
+  return {
+    ok: !run.error && run.status === 0,
+    status: run.status,
+    out: run.stdout ?? '',
+  }
+}
+
+/** Trimmed stdout, or null when git failed. */
+function gitOut(...args) {
+  const run = git(...args)
+  return run.ok ? run.out.trim() : null
+}
+
+const isAncestor = (older, newer) =>
+  git('merge-base', '--is-ancestor', older, newer).status === 0
+
+const hexSha = /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/
+
+/**
+ * The commits of a revision range, oldest first, or null when git fails.
+ * Parsed so that no byte in a message can break it: rev-list gives the shape
+ * (one line of hashes per commit, parents included), and the messages come
+ * NUL-separated from git log -z (git refuses a NUL inside a message). A
+ * message that cannot be matched to its commit reads as empty, which only
+ * ever lands on the reporting or blocking side.
+ * @returns {{ sha: string, parents: string[], message: string }[] | null}
+ */
+function commitsIn(range, { firstParent = false } = {}) {
+  const walk = firstParent ? ['--first-parent'] : []
+  const shape = git(
+    'rev-list',
+    '--reverse',
+    '--parents',
+    ...walk,
+    ...range,
+    '--',
+  )
+  if (!shape.ok) return null
+  const commits = []
+  for (const line of shape.out.split('\n')) {
+    const [sha = '', ...parents] = line.trim().split(' ')
+    if (hexSha.test(sha) && parents.every((parent) => hexSha.test(parent)))
+      commits.push({ sha, parents, message: '' })
+  }
+  if (commits.length === 0) return commits
+  const bySha = new Map(commits.map((commit) => [commit.sha, commit]))
+  const read = new Set()
+  const parts = git(
+    'log',
+    '-z',
+    '--format=%H%x00%B',
+    ...walk,
+    ...range,
+    '--',
+  ).out.split('\0')
+  for (let i = 0; i < parts.length - 1; i += 1) {
+    const commit = bySha.get(parts[i])
+    if (commit === undefined || read.has(commit.sha)) continue
+    commit.message = parts[i + 1]
+    read.add(commit.sha)
+    i += 1
+  }
+  return commits
+}
+
+const firstLine = (text) =>
+  String(text ?? '')
+    .split('\n')
+    .map((line) => line.trim())
+    .find((line) => line !== '') ?? ''
+
+/**
+ * One GraphQL call. Never throws, and tells apart the three ways it can fail:
+ * lite-campaign's first gate read every non-zero exit as a lost network, and a
+ * branch naming an issue nobody had opened sailed through.
+ * - missing: GitHub answered that the thing does not exist (blocks);
+ * - unverified: gh is absent or the credential was refused (blocks), so
+ *   nothing about the issue was verified;
+ * - unreachable: anything else (local: unchecked; CI: blocks).
+ * The patterns are broad on purpose: a misread error lands on the side that
+ * blocks, never on the side that degrades.
+ */
+function graphql(query, variables) {
+  const args = ['api', 'graphql']
+  for (const [key, value] of Object.entries(variables))
+    args.push('-F', `${key}=${value}`)
+  args.push('-f', `query=${query}`)
+  const run = spawnSync('gh', args, {
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      GH_PROMPT_DISABLED: '1',
+      GH_NO_UPDATE_NOTIFIER: '1',
+    },
+    timeout: 30_000,
+    maxBuffer: 64 * 1024 * 1024,
+  })
+  if (run.error?.code === 'ENOENT')
+    return {
+      ok: false,
+      kind: 'unverified',
+      reason: 'gh não está instalado ou não está no PATH',
+    }
+  if (run.error)
+    return {
+      ok: false,
+      kind: 'unreachable',
+      reason:
+        run.error.code === 'ETIMEDOUT'
+          ? 'gh não respondeu em 30 s'
+          : String(run.error.message),
+    }
+  let payload = null
+  try {
+    payload = JSON.parse(run.stdout)
+  } catch {
+    payload = null
+  }
+  const errors = Array.isArray(payload?.errors) ? payload.errors : []
+  if (run.status === 0 && errors.length === 0 && payload?.data != null)
+    return { ok: true, data: payload.data }
+  const text = [
+    run.stderr ?? '',
+    ...errors.map((e) => `${e?.type ?? ''} ${e?.message ?? ''}`),
+  ].join('\n')
+  const reason =
+    firstLine(run.stderr) ||
+    firstLine(errors[0]?.message) ||
+    `gh saiu com status ${run.status}`
+  if (
+    errors.some((e) => e?.type === 'NOT_FOUND') ||
+    /could not resolve|not found|HTTP 404/i.test(text)
+  )
+    return { ok: false, kind: 'missing', reason }
+  if (
+    /auth|credential|not logged|token|HTTP 401|HTTP 403|bad credentials/i.test(
+      text,
+    )
+  )
+    return { ok: false, kind: 'unverified', reason }
+  return { ok: false, kind: 'unreachable', reason }
+}
+
+/**
+ * `owner/name` from an origin URL GitHub hands out, or null: HTTPS, the scp
+ * form, or ssh://, each with or without `.git` and a trailing slash.
+ */
+function parseRemote(url) {
+  const matched =
+    /^(?:https:\/\/github\.com\/|git@github\.com:|ssh:\/\/git@github\.com\/)([A-Za-z0-9-]+)\/([A-Za-z0-9._-]+?)(?:\.git)?\/?$/.exec(
+      String(url ?? '').trim(),
+    )
+  return matched ? { owner: matched[1], name: matched[2] } : null
+}
+
+function realpathOrSelf(target) {
+  try {
+    return realpathSync.native(target)
+  } catch {
+    return path.resolve(target)
+  }
+}
+
+const short = (sha) => String(sha ?? '').slice(0, 7)
+const quoted = (items) => items.map((item) => `"${item}"`).join(', ')
+
+// ---------------------------------------------------------------------------
+// The run
+
+const marks = { ok: 'x', no: ' ', unchecked: '?', skip: '-' }
+
+function main() {
+  const parsedArgs = parseArgs(process.argv.slice(2))
+  if (parsedArgs.error) {
+    process.stderr.write(`gate: ${parsedArgs.error}\n\n${usage}\n`)
+    process.exitCode = 2
+    return
+  }
+  const { options } = parsedArgs
+  if (options.help) {
+    process.stdout.write(`${usage}\n\n${ownerRule}\n`)
+    return
+  }
+
+  const ci = options.pr !== null
+  const mode = ci ? 'ci' : 'local'
+  const steps = new Map(
+    stepIds.map((id) => [
+      id,
+      { id, status: 'skip', blocks: false, detail: '' },
+    ]),
+  )
+  const notes = new Map()
+  const set = (id, status, detail, { blocks = false, extra = [] } = {}) => {
+    // A typo in a step id would otherwise add a step no test pins.
+    if (!steps.has(id)) throw new Error(`passo desconhecido: ${id}`)
+    steps.set(id, { id, status, blocks, detail })
+    if (extra.length > 0) notes.set(id, extra)
+  }
+  const skipAll = (detail) => {
+    for (const step of steps.values())
+      if (step.status === 'skip' && step.detail === '') step.detail = detail
+  }
+  const head = []
+  const tail = []
+  const facts = {
+    repo: null,
+    branch: null,
+    issue: null,
+    headSha: null,
+    verified: false,
+    gitDir: null,
+  }
+  let gateable = false
+
+  const finish = ({ exitOk = false } = {}) => {
+    const list = [...steps.values()]
+    const blocked = list
+      .filter(
+        (s) =>
+          s.blocks && (s.status === 'no' || (ci && s.status === 'unchecked')),
+      )
+      .map((s) => s.id)
+    const open = gateable && blocked.length === 0
+    const result = {
+      schema: gateCacheSchema,
+      mode,
+      repo: facts.repo,
+      branch: facts.branch,
+      issue: facts.issue,
+      headSha: facts.headSha,
+      open,
+      verified: facts.verified,
+      steps: list,
+      blocked,
+      checkedAt: new Date().toISOString(),
+    }
+
+    const lines = [...head]
+    for (const step of list) {
+      lines.push(
+        `  [${marks[step.status]}] ${step.id}${step.detail ? `: ${step.detail}` : ''}`,
+      )
+      for (const note of notes.get(step.id) ?? []) lines.push(`      ${note}`)
+    }
+    if (gateable) {
+      if (blocked.length > 0) {
+        lines.push('', `Build BLOQUEADO na #${facts.issue}:`)
+        for (const id of blocked) lines.push(`  ${id}: ${steps.get(id).detail}`)
+      } else {
+        lines.push('', `O gate está aberto para a #${facts.issue}.`)
+        if (list.some((s) => s.status === 'no' || s.status === 'unchecked'))
+          lines.push(
+            'Os passos sem [x] são os que ainda faltam ou não puderam ser verificados.',
+          )
+      }
+    }
+    lines.push(...tail, '', ownerRule)
+    const human = `${lines.join('\n')}\n`
+
+    if (options.json) {
+      process.stdout.write(`${JSON.stringify(result, null, 2)}\n`)
+      // The report still reaches a person reading CI logs, without touching
+      // the JSON a hook parses from stdout.
+      process.stderr.write(human)
+    } else process.stdout.write(human)
+
+    // Only the local gate writes the cache the hooks (#5) read; a CI verdict
+    // describes a PR head, not the worktree someone is building in.
+    if (!ci && options.cache) {
+      const gitDir = facts.gitDir
+      if (gitDir !== null) {
+        const cache = {
+          schema: gateCacheSchema,
+          repo: result.repo,
+          branch: result.branch,
+          issue: result.issue,
+          headSha: result.headSha,
+          open: result.open,
+          verified: result.verified,
+          steps: result.steps,
+          checkedAt: result.checkedAt,
+        }
+        try {
+          writeFileSync(
+            path.join(gitDir, gateCacheFile),
+            `${JSON.stringify(cache, null, 2)}\n`,
+          )
+        } catch (error) {
+          process.stderr.write(
+            `gate: não foi possível gravar o cache: ${error.message}\n`,
+          )
+        }
+      }
+    }
+    process.exitCode = open || exitOk ? 0 : 1
+  }
+
+  // 1. The repository. One rev-parse answers both: every spawn counts when
+  // the gate runs before each build step.
+  const [toplevel = null, gitDir = null] = (
+    gitOut('rev-parse', '--show-toplevel', '--absolute-git-dir') ?? ''
+  )
+    .split('\n')
+    .filter(Boolean)
+  facts.gitDir = gitDir
+  if (toplevel === null) {
+    set('repo', 'no', 'o diretório atual não é um repositório git', {
+      blocks: true,
+    })
+    skipAll('não avaliado: não há repositório')
+    head.push(
+      'Não há repositório git aqui, então não há trabalho para julgar.',
+      '',
+    )
+    finish()
+    return
+  }
+  const remoteUrl = gitOut('remote', 'get-url', 'origin')
+  const identity = parseRemote(remoteUrl)
+  facts.repo = identity ? `${identity.owner}/${identity.name}` : null
+  let canQuery = identity !== null
+  {
+    const problems = []
+    if (identity === null)
+      problems.push(
+        `o remote origin (${remoteUrl ?? 'ausente'}) não é um repositório do GitHub`,
+      )
+    if (ci) {
+      // In CI the gate is the trusted copy from main and lives outside this
+      // checkout, so identity comes from the remote and the workflow's context.
+      const expected = process.env.GITHUB_REPOSITORY
+      if (
+        identity &&
+        expected &&
+        expected.toLowerCase() !== facts.repo.toLowerCase()
+      ) {
+        problems.push(
+          `origin é ${facts.repo}, mas o workflow roda em ${expected}`,
+        )
+        canQuery = false
+      }
+    } else {
+      // Locally the gate judges the checkout it belongs to: a worktree's gate
+      // run from another worktree would read the wrong branch's files.
+      const scriptRoot = path.dirname(
+        path.dirname(fileURLToPath(import.meta.url)),
+      )
+      if (realpathOrSelf(toplevel) !== realpathOrSelf(scriptRoot))
+        problems.push(
+          `este gate pertence a ${scriptRoot}, mas o repositório atual é ${toplevel}`,
+        )
+      if (!existsSync(path.join(toplevel, 'AGENTS.md')))
+        problems.push(`AGENTS.md não existe em ${toplevel}`)
+    }
+    set(
+      'repo',
+      problems.length === 0 ? 'ok' : 'no',
+      problems.length === 0
+        ? `${facts.repo} em ${toplevel}`
+        : problems.join('; '),
+      { blocks: true },
+    )
+  }
+
+  // 2. The branch, and the issue it names.
+  const branch = ci
+    ? options.branch
+    : gitOut('symbolic-ref', '--quiet', '--short', 'HEAD')
+  facts.branch = branch
+  facts.headSha = gitOut('rev-parse', '--verify', '--quiet', 'HEAD^{commit}')
+  const originMain = gitOut(
+    'rev-parse',
+    '--verify',
+    '--quiet',
+    `${originTrunk}^{commit}`,
+  )
+
+  if (!ci && branch === trunk) {
+    if (originMain !== null) {
+      const ahead = Number(
+        gitOut('rev-list', '--count', `${originMain}..HEAD`) ?? 0,
+      )
+      const behind = Number(
+        gitOut('rev-list', '--count', `HEAD..${originMain}`) ?? 0,
+      )
+      if (ahead > 0) {
+        set(
+          'up-to-date',
+          'no',
+          `${trunk} local está ${ahead} commit(s) à frente de origin/${trunk}; publique ou descarte antes de cortar uma branch`,
+        )
+        tail.push(
+          '',
+          `Aviso: ${trunk} local tem ${ahead} commit(s) que origin/${trunk} não tem. Uma branch cortada daqui leva esses commits junto e o gate a recusa como empilhada.`,
+        )
+      } else
+        set(
+          'up-to-date',
+          'ok',
+          behind > 0
+            ? `${trunk} local está ${behind} commit(s) atrás de origin/${trunk}; rode git pull`
+            : `${trunk} local é igual a origin/${trunk}`,
+        )
+    } else
+      set(
+        'up-to-date',
+        'unchecked',
+        `sem origin/${trunk} local; rode git fetch origin`,
+      )
+    skipAll(`em ${trunk}: nada em construção`)
+    head.push(
+      `Em ${trunk}: nada está sendo construído, então não há o que julgar.`,
+      '',
+    )
+    tail.push(
+      '',
+      `Para começar: escolha uma issue aprovada e corte ${branchShapes} de origin/${trunk} atualizado.`,
+    )
+    finish({ exitOk: true })
+    return
+  }
+
+  const named = parseBranch(branch)
+  if (named === null) {
+    set(
+      'branch',
+      'no',
+      branch === null
+        ? 'HEAD destacado (detached): não há branch para julgar'
+        : `${branch} não nomeia uma issue`,
+      { blocks: true },
+    )
+    skipAll('não avaliado: a branch não nomeia uma issue')
+    head.push(
+      branch === null
+        ? 'HEAD está destacado (detached), então não há branch para julgar.'
+        : `A branch ${branch} não nomeia uma issue.`,
+      `Uma branch é ${branchShapes}, cortada de origin/${trunk} atualizado.`,
+      'Recusada: não existe lane sem issue (claude/*, batch/ e qualquer outra forma são recusadas).',
+      '',
+    )
+    finish()
+    return
+  }
+
+  const number = named.issue
+  facts.issue = number
+  gateable = true
+  head.push(
+    `Gate do loop para a #${number} em ${branch} (${ci ? `modo CI, PR #${options.pr}` : 'modo local'})`,
+    '',
+  )
+
+  // 3. The issue, through GraphQL: gh issue view --json exposes neither
+  // lastEditedAt, nor the author's type, nor who applied each label.
+  const issueStepIds = [
+    'issue-open',
+    'kind',
+    'state-label',
+    'sections',
+    'criteria',
+    'approve',
+    'branch-in-plan',
+  ]
+  let kind = null
+  let labelsRead = false
+  const fetched = canQuery
+    ? graphql(issueQuery, {
+        owner: identity.owner,
+        name: identity.name,
+        number,
+      })
+    : {
+        ok: false,
+        kind: 'skipped',
+        reason: 'o passo repo falhou, então o GitHub não foi consultado',
+      }
+  const issue = fetched.ok ? fetched.data?.repository?.issue : null
+  if (fetched.ok && issue == null)
+    Object.assign(fetched, {
+      ok: false,
+      kind: 'missing',
+      reason: 'o GitHub respondeu sem a issue',
+    })
+
+  if (!fetched.ok) {
+    const cause =
+      fetched.kind === 'missing'
+        ? `a #${number} não existe em ${facts.repo}`
+        : fetched.kind === 'unverified'
+          ? `nada sobre a #${number} foi verificado: ${fetched.reason}`
+          : fetched.kind === 'skipped'
+            ? `não lido: ${fetched.reason}`
+            : `GitHub inacessível: ${fetched.reason}`
+    const refused = fetched.kind === 'missing' || fetched.kind === 'unverified'
+    set(
+      'issue-open',
+      refused ? 'no' : 'unchecked',
+      refused && fetched.kind === 'missing'
+        ? `${cause} (${fetched.reason})`
+        : cause,
+      {
+        blocks: true,
+      },
+    )
+    for (const id of issueStepIds.slice(1))
+      set(id, 'unchecked', refused ? 'não lido: a issue não foi lida' : cause, {
+        blocks: true,
+      })
+    set('size', 'unchecked', 'não lido: a issue não foi lida')
+    if (fetched.kind === 'unreachable' && !ci)
+      tail.push(
+        '',
+        'Aviso: a issue não foi lida (GitHub inacessível). Os passos marcados com ? não foram verificados; rode o gate de novo com rede.',
+      )
+  } else {
+    facts.verified = true
+    const labels = (issue.labels?.nodes ?? []).map((node) => node.name)
+    labelsRead = true
+    set(
+      'issue-open',
+      issue.state === 'OPEN' ? 'ok' : 'no',
+      issue.state === 'OPEN'
+        ? `#${number} está aberta`
+        : `#${number} está ${issue.state === 'CLOSED' ? 'fechada' : String(issue.state).toLowerCase()}`,
+      { blocks: true },
+    )
+
+    const category = kindOf(labels)
+    kind = category.kind
+    set(
+      'kind',
+      kind ? 'ok' : 'no',
+      kind
+        ? kind
+        : category.found.length === 0
+          ? `nenhuma label de categoria (${categoryLabels.join(' ou ')})`
+          : `mais de uma label de categoria: ${category.found.join(', ')}`,
+      { blocks: true },
+    )
+
+    // Exactly one state label, and it is the ready one. Checking only for the
+    // ready label let `ready-for-human` + `ready-for-agent` open the gate
+    // (lite-campaign #103), so contradictions are named.
+    const states = stateLabels.filter((name) => labels.includes(name))
+    set(
+      'state-label',
+      states.length === 1 && states[0] === readyLabel ? 'ok' : 'no',
+      states.length === 1 && states[0] === readyLabel
+        ? readyLabel
+        : states.length === 0
+          ? `nenhuma label de estado; o build só começa em ${readyLabel}, que o dono aplica depois do Approve`
+          : states.length > 1
+            ? `labels de estado contraditórias: ${states.join(', ')}; deve haver só ${readyLabel}`
+            : `${states[0]}: o build só começa em ${readyLabel}, que o dono aplica depois do Approve`,
+      { blocks: true },
+    )
+
+    const comments = issue.comments?.nodes ?? []
+    const events = issue.timelineItems?.nodes ?? []
+    const plan = currentPlan({ body: issue.body, comments })
+    const planSource =
+      plan.source === 'comment'
+        ? `comentário "# Plano" de ${plan.comment.createdAt}`
+        : 'corpo da issue'
+    const required = sectionsFor(kind)
+    const { missing, empty } = checkSections(plan.text, kind)
+    const whyOf = new Map(required.map(({ heading, why }) => [heading, why]))
+    const sectionProblems = [
+      ...(missing.length > 0 ? [`faltam ${quoted(missing)}`] : []),
+      ...(empty.length > 0 ? [`vazias ${quoted(empty)}`] : []),
+    ]
+    set(
+      'sections',
+      sectionProblems.length === 0 ? 'ok' : 'no',
+      sectionProblems.length === 0
+        ? `as ${required.length} seções de ${kind === 'bug' ? 'bug' : 'feature'} estão no plano (${planSource})`
+        : `${sectionProblems.join('; ')} (${planSource})`,
+      {
+        blocks: true,
+        extra: [...missing, ...empty].map(
+          (heading) => `${heading}: ${whyOf.get(heading)}`,
+        ),
+      },
+    )
+
+    const criteria = countCriteria(criteriaSection(plan.text))
+    set(
+      'criteria',
+      criteria > 0 ? 'ok' : 'no',
+      criteria > 0
+        ? `${criteria} critério(s) de aceite`
+        : 'a seção de critérios de aceite não tem nenhum item de checklist (- [ ] …)',
+      { blocks: true },
+    )
+
+    const commentsTotal = issue.comments?.totalCount ?? 0
+    const eventsTotal = issue.timelineItems?.totalCount ?? 0
+    if (commentsTotal > page || eventsTotal > page) {
+      set(
+        'approve',
+        'no',
+        `a issue tem ${commentsTotal} comentário(s) e ${eventsTotal} evento(s) de label, reabertura ou comentário apagado; o gate lê só os últimos ${page} de cada e não julga o Approve sem ler tudo`,
+        { blocks: true },
+      )
+    } else {
+      const approve = approveState({
+        issue: { lastEditedAt: issue.lastEditedAt },
+        comments,
+        events,
+        ownerLogin: fetched.data.repository.owner?.login,
+      })
+      set('approve', approve.ok ? 'ok' : 'no', approve.detail, { blocks: true })
+    }
+
+    // The exact name, in the section that carries it (Plano for a feature).
+    const citation = planCitesBranch(plan.text, branch, kind)
+    set(
+      'branch-in-plan',
+      citation.cited ? 'ok' : 'no',
+      citation.cited
+        ? `a seção ${citation.heading} do plano cita ${branch}`
+        : citation.section
+          ? `a seção ${citation.heading} do plano vigente (${planSource}) não cita a branch ${branch}`
+          : `o plano vigente (${planSource}) não tem a seção ${citation.heading}, que cita a branch ${branch}`,
+      { blocks: true },
+    )
+    set('size', 'ok', `${plan.text.length} caracteres (${planSource})`)
+  }
+
+  // 4. The pull request (CI only).
+  let pr = null
+  if (ci) {
+    const prIds = ['pr-base', 'pr-closes', 'pr-closes-only', 'pr-first-line']
+    const prFetched = canQuery
+      ? graphql(prQuery, {
+          owner: identity.owner,
+          name: identity.name,
+          number: options.pr,
+        })
+      : {
+          ok: false,
+          kind: 'skipped',
+          reason: 'o passo repo falhou, então o GitHub não foi consultado',
+        }
+    pr = prFetched.ok ? prFetched.data?.repository?.pullRequest : null
+    if (!prFetched.ok || pr == null) {
+      const missingPr = !prFetched.ok ? prFetched.kind === 'missing' : true
+      for (const id of prIds)
+        set(
+          id,
+          missingPr ? 'no' : 'unchecked',
+          missingPr
+            ? `a PR #${options.pr} não existe em ${facts.repo}`
+            : `PR não lida: ${prFetched.reason}`,
+          { blocks: true },
+        )
+      pr = null
+    } else {
+      set(
+        'pr-base',
+        pr.baseRefName === trunk ? 'ok' : 'no',
+        pr.baseRefName === trunk
+          ? trunk
+          : `a PR aponta para ${pr.baseRefName}, não para ${trunk}`,
+        { blocks: true },
+      )
+      const refs = pr.closingIssuesReferences ?? { totalCount: 0, nodes: [] }
+      const sameRepo = (node) =>
+        String(node.repository?.nameWithOwner ?? '').toLowerCase() ===
+        String(facts.repo).toLowerCase()
+      const closed = (refs.nodes ?? []).map((node) =>
+        sameRepo(node)
+          ? `#${node.number}`
+          : `${node.repository?.nameWithOwner}#${node.number}`,
+      )
+      const closesIt = (refs.nodes ?? []).some(
+        (node) => node.number === number && sameRepo(node),
+      )
+      set(
+        'pr-closes',
+        closesIt ? 'ok' : 'no',
+        closesIt
+          ? `a PR fecha a #${number}`
+          : refs.totalCount === 0
+            ? `a PR não fecha nenhuma issue; a primeira linha do corpo deve ser "Closes #${number}."`
+            : `a PR fecha ${closed.join(', ')}, não a #${number}`,
+        { blocks: true },
+      )
+      set(
+        'pr-closes-only',
+        refs.totalCount === 1 ? 'ok' : 'no',
+        refs.totalCount === 1
+          ? 'a PR fecha uma issue só'
+          : refs.totalCount === 0
+            ? 'a PR não fecha nenhuma issue'
+            : `a PR fecha ${refs.totalCount} issues (${closed.join(', ')}); deve fechar só a #${number}`,
+        { blocks: true },
+      )
+      const first = headAndRest(pr.body).head
+      const closes = closesLine.exec(first)
+      set(
+        'pr-first-line',
+        closes && Number(closes[1]) === number ? 'ok' : 'no',
+        closes && Number(closes[1]) === number
+          ? first
+          : first === ''
+            ? `o corpo da PR está vazio; a primeira linha deve ser "Closes #${number}."`
+            : `a primeira linha é "${first}"; deve ser exatamente "Closes #${number}."`,
+        { blocks: true },
+      )
+    }
+  } else
+    for (const id of [
+      'pr-base',
+      'pr-closes',
+      'pr-closes-only',
+      'pr-first-line',
+    ])
+      set(id, 'skip', 'só no modo CI')
+
+  // 5. The branch against its issue and, in CI, against the PR.
+  {
+    const problems = []
+    let unknown = null
+    // A prefix may ask for a category (a fix is for a bug).
+    const category = branchCategory.get(named.prefix)
+    if (category !== undefined) {
+      if (!labelsRead)
+        unknown = `${named.prefix}/ exige a label ${category}, e as labels não foram lidas`
+      else if (kind !== category)
+        problems.push(
+          `uma branch ${named.prefix}/ exige a label ${category} na issue`,
+        )
+    }
+    if (ci) {
+      if (pr === null)
+        unknown = 'a PR não foi lida, então a cabeça dela não foi conferida'
+      else {
+        if (pr.headRefName !== branch)
+          problems.push(`a PR vem de ${pr.headRefName}, não de ${branch}`)
+        if (pr.headRefOid !== facts.headSha)
+          problems.push(
+            `HEAD (${short(facts.headSha)}) não é a cabeça da PR (${short(pr.headRefOid)})`,
+          )
+      }
+    }
+    set(
+      'branch',
+      problems.length > 0 ? 'no' : unknown !== null ? 'unchecked' : 'ok',
+      problems.length > 0
+        ? problems.join('; ')
+        : (unknown ?? `${branch} nomeia a #${number}`),
+      { blocks: true },
+    )
+  }
+
+  // 6. The history: read from git only, so it works on a PR checkout.
+  const learnBlocks = ci && !(pr?.isDraft === true)
+  if (facts.headSha === null) {
+    set('stacked', 'no', 'HEAD não tem commit', { blocks: true })
+    for (const id of [
+      'up-to-date',
+      'intent-first',
+      'learn',
+      'commits-cite-issue',
+    ])
+      set(id, 'unchecked', 'HEAD não tem commit', {
+        blocks: (id === 'intent-first' || id === 'learn') && learnBlocks,
+      })
+  } else if (originMain === null) {
+    set('stacked', 'no', `sem origin/${trunk} local; rode git fetch origin`, {
+      blocks: true,
+    })
+    for (const id of [
+      'up-to-date',
+      'intent-first',
+      'learn',
+      'commits-cite-issue',
+    ])
+      set(id, 'unchecked', `sem origin/${trunk} local; rode git fetch origin`, {
+        blocks: (id === 'intent-first' || id === 'learn') && learnBlocks,
+      })
+  } else {
+    // Stacked (lite-campaign #122): a foreign ref shares this branch's history
+    // when the commits both have are not all in origin/main. A local main
+    // ahead of origin/main and a branch cut from claude/* both land here, and
+    // so does a ref that points exactly at HEAD: right after
+    // `git switch -c feature/N-x main`, main is HEAD, and that is when the
+    // gate must already refuse. Only two kinds of ref are exempt:
+    // (a) another issue's branch strictly ahead of HEAD, once every commit
+    //     HEAD holds outside origin/main cites #N: it was built on top of this
+    //     one, and its own gate run is the one that blocks. Before that,
+    //     "contains HEAD" also describes the branch this one was cut from, once
+    //     it moves on or merges this one back in, and one citing commit is not
+    //     enough: the other branch's commits below the cut would ride along;
+    // (b) a ref whose shared commits outside origin/main all cite #N: it was
+    //     cut from this branch at an earlier commit, and this branch moved on.
+    //     Until HEAD holds a commit citing #N (right after a cut), this is
+    //     the only exemption that can apply, and it applies to main and
+    //     claude/* too: a start point whose unpublished commits all cite #N
+    //     passes here, and intent-first judges it.
+    // Every other ref, HEAD's own position included, goes through the
+    // merge-base test. In CI only published refs exist (refs/remotes/origin/*):
+    // a local main ahead or an unpublished claude/* branch is invisible there,
+    // so the local run, before the first commit, is where those are caught.
+    // git drops the refs already merged into origin/main in one call, so the
+    // per-ref checks run only for the few candidates left.
+    const cites = new RegExp(`#${number}(?!\\d)`)
+    let headCites = null
+    const headCitesIssue = () => {
+      const mine = (commitsIn(['HEAD', `^${originMain}`]) ?? []).filter(
+        (commit) => commit.parents.length <= 1,
+      )
+      headCites ??=
+        mine.length > 0 && mine.every((commit) => cites.test(commit.message))
+      return headCites
+    }
+    const sharing = []
+    const candidates = (
+      gitOut(
+        'for-each-ref',
+        '--format=%(objectname) %(refname)',
+        '--no-merged',
+        originMain,
+        'refs/heads',
+        'refs/remotes',
+      ) ?? ''
+    )
+      .split('\n')
+      .filter(Boolean)
+      .map((line) => {
+        const space = line.indexOf(' ')
+        return { sha: line.slice(0, space), ref: line.slice(space + 1) }
+      })
+    for (const { sha, ref } of candidates) {
+      if (ref.endsWith('/HEAD') || ref === originTrunk) continue
+      const name = ref.startsWith('refs/heads/')
+        ? ref.slice('refs/heads/'.length)
+        : ref.slice('refs/remotes/'.length).replace(/^[^/]+\//, '')
+      const other = parseBranch(name)
+      // Same-issue refs (this branch, its pushed copy) are not foreign.
+      if (other?.issue === number) continue
+      if (
+        other !== null &&
+        sha !== facts.headSha &&
+        isAncestor(facts.headSha, sha) &&
+        headCitesIssue()
+      )
+        continue
+      const shared = gitOut('merge-base', facts.headSha, sha)
+      if (shared === null || isAncestor(shared, originMain)) continue
+      const below = commitsIn([shared, `^${originMain}`])
+      if (
+        below !== null &&
+        below.length > 0 &&
+        below.every((commit) => cites.test(commit.message))
+      )
+        continue
+      sharing.push(ref)
+    }
+    // This branch's own commits: first-parent from HEAD, minus origin/main and
+    // minus every ref it shares history with, so a stacked branch is judged by
+    // its own first commit and not the one of the branch below (#122).
+    const walked =
+      commitsIn(
+        ['HEAD', `^${originMain}`, ...sharing.map((ref) => `^${ref}`)],
+        { firstParent: true },
+      ) ?? []
+    // Hidden stacking: a merge anywhere on that line whose other parent is
+    // not in origin/main brought in work from outside it, and its ref may be
+    // gone (`git merge --no-ff side`, then `git branch -D side`), so no ref
+    // above shows it. Merging origin/main in stays allowed.
+    const foreignMerges = walked.filter((commit) =>
+      commit.parents.slice(1).some((parent) => !isAncestor(parent, originMain)),
+    )
+    // A merge of this branch's own published copy (a `git pull` that made a
+    // merge commit) lands above too; the remedy then is a rebase, not a recut.
+    const ownCopy = `refs/remotes/origin/${facts.branch}`
+    const ownCopyMerge =
+      foreignMerges.length > 0 &&
+      gitOut('rev-parse', '--verify', '--quiet', ownCopy) !== null &&
+      foreignMerges.every((commit) =>
+        commit.parents
+          .slice(1)
+          .every(
+            (parent) =>
+              isAncestor(parent, originMain) || isAncestor(parent, ownCopy),
+          ),
+      )
+    const shortRef = (ref) => ref.replace(/^refs\/(?:heads|remotes)\//, '')
+    const stackProblems = [
+      ...(sharing.length > 0
+        ? [
+            `compartilha commits que origin/${trunk} não tem com ${sharing.map(shortRef).join(', ')}`,
+          ]
+        : []),
+      ...(foreignMerges.length > 0
+        ? [
+            `um merge traz commits de fora de origin/${trunk}: ${foreignMerges.map((commit) => short(commit.sha)).join(', ')}`,
+          ]
+        : []),
+    ]
+    set(
+      'stacked',
+      stackProblems.length === 0 ? 'ok' : 'no',
+      stackProblems.length === 0
+        ? `nenhuma outra ref compartilha commits que origin/${trunk} não tem, e nenhum merge traz commits de fora dele`
+        : ownCopyMerge
+          ? `${stackProblems.join('; ')}; o merge trouxe a cópia publicada desta própria branch: desfaça-o e traga essa cópia com git pull --rebase (ou --ff-only)`
+          : `${stackProblems.join('; ')}; corte a branch de origin/${trunk} atualizado e traga para ela só o origin/${trunk}`,
+      { blocks: true },
+    )
+
+    const base = gitOut('merge-base', 'HEAD', originMain)
+    const behind =
+      base === originMain
+        ? 0
+        : Number(gitOut('rev-list', '--count', `HEAD..${originMain}`) ?? 0)
+    set(
+      'up-to-date',
+      base === originMain ? 'ok' : 'no',
+      base === originMain
+        ? `contém o topo de origin/${trunk}`
+        : `origin/${trunk} tem ${behind} commit(s) que esta branch não tem`,
+    )
+
+    const own = walked.filter((commit) => commit.parents.length <= 1)
+    // Merge commits are skipped, so the only commits before the first own one
+    // are merges, and each must be a clean merge of origin/main: its tree is
+    // the tree of a parent origin/main contains. Otherwise it carries content
+    // of its own ahead of the intent: a side branch merged in, or a merge of
+    // origin/main amended with code (`git commit --amend` after the merge).
+    const firstOwn = own.length === 0 ? walked.length : walked.indexOf(own[0])
+    const unclean = walked.slice(0, firstOwn).find((merge) => {
+      const trees = (
+        gitOut(
+          'rev-parse',
+          ...[merge.sha, ...merge.parents].map((rev) => `${rev}^{tree}`),
+        ) ?? ''
+      ).split('\n')
+      const [tree, ...parentTrees] = trees
+      if (!hexSha.test(tree ?? '')) return true
+      // The matching parent must also contain every other parent: a merge
+      // with `-s ours` keeps an old base's tree and would silently drop what
+      // origin/main gained since.
+      return !merge.parents.some(
+        (parent, i) =>
+          parentTrees[i] === tree &&
+          isAncestor(parent, originMain) &&
+          merge.parents.every((other) => isAncestor(other, parent)),
+      )
+    })
+
+    if (unclean !== undefined)
+      set(
+        'intent-first',
+        'no',
+        `merge com conteúdo próprio antes do intent (${short(unclean.sha)} ${firstLine(unclean.message)}); antes do intent, só um merge limpo de origin/${trunk}`,
+        { blocks: learnBlocks },
+      )
+    else if (own.length === 0)
+      set(
+        'intent-first',
+        'no',
+        `nenhum commit próprio ainda; o primeiro deve tocar só ${intentDir}`,
+        {
+          blocks: learnBlocks,
+        },
+      )
+    else {
+      const first = own[0]
+      // -z: paths come raw, so a pt-BR name (feature-criação.md) is not
+      // quoted into "feature-cria\303\247\303\243o.md" by core.quotePath.
+      const files = git(
+        'diff-tree',
+        '--no-commit-id',
+        '--name-only',
+        '-r',
+        '--root',
+        '-z',
+        first.sha,
+      )
+        .out.split('\0')
+        .filter(Boolean)
+      const outside = files.filter((file) => !file.startsWith(intentDir))
+      set(
+        'intent-first',
+        files.length > 0 && outside.length === 0 ? 'ok' : 'no',
+        files.length === 0
+          ? `o primeiro commit próprio (${short(first.sha)}) não toca arquivo nenhum`
+          : outside.length === 0
+            ? `o primeiro commit próprio (${short(first.sha)}) toca só ${intentDir}`
+            : `o primeiro commit próprio (${short(first.sha)}) toca ${outside.slice(0, 3).join(', ')}${outside.length > 3 ? ', …' : ''}`,
+        { blocks: learnBlocks },
+      )
+    }
+
+    // Learn (lite-campaign #124): a changelog entry heading for this issue that
+    // this branch added. A mention of #N in prose, or a heading main already
+    // had, does not count.
+    const heading = changelogHeadingFor(number)
+    const headingsIn = (text) =>
+      String(text)
+        .split(/\r?\n/)
+        .map((line) => line.trimEnd())
+        .filter((line) => heading.test(line))
+    const atHead = git('show', `HEAD:${changelogPath}`)
+    if (!atHead.ok)
+      set('learn', 'no', `${changelogPath} não existe em HEAD`, {
+        blocks: learnBlocks,
+      })
+    else {
+      const now = headingsIn(atHead.out)
+      const before = new Set(
+        now.length === 0 || base === null
+          ? []
+          : headingsIn(git('show', `${base}:${changelogPath}`).out),
+      )
+      const added = now.filter((line) => !before.has(line))
+      set(
+        'learn',
+        added.length > 0 ? 'ok' : 'no',
+        added.length > 0
+          ? `entrada nova no changelog: ${added[0]}`
+          : now.length > 0
+            ? `o heading da #${number} já existia no merge-base com origin/${trunk}; esta branch não acrescentou entrada`
+            : `nenhum heading "## AAAA-MM-DD: … (#${number})" em ${changelogPath}`,
+        { blocks: learnBlocks },
+      )
+    }
+
+    const silent = own.filter((commit) => !cites.test(commit.message))
+    set(
+      'commits-cite-issue',
+      own.length === 0 ? 'skip' : silent.length === 0 ? 'ok' : 'no',
+      own.length === 0
+        ? 'nenhum commit próprio ainda'
+        : silent.length === 0
+          ? `${own.length} commit(s) próprio(s), todos citam #${number}`
+          : `sem #${number}: ${silent
+              .slice(0, 3)
+              .map(
+                (commit) => `${short(commit.sha)} ${firstLine(commit.message)}`,
+              )
+              .join('; ')}${silent.length > 3 ? '; …' : ''}`,
+    )
+  }
+
+  // 7. Before a PR (local only): nothing uncommitted, and the branch published.
+  if (ci) {
+    set('worktree-clean', 'skip', 'só no modo local')
+    set('pushed', 'skip', 'só no modo local')
+  } else {
+    const dirty = (git('status', '--porcelain').out ?? '')
+      .split('\n')
+      .filter(Boolean)
+    set(
+      'worktree-clean',
+      dirty.length === 0 ? 'ok' : 'no',
+      dirty.length === 0 ? 'limpa' : `${dirty.length} mudança(s) sem commit`,
+    )
+    const remote = gitOut(
+      'rev-parse',
+      '--verify',
+      '--quiet',
+      `refs/remotes/origin/${branch}^{commit}`,
+    )
+    set(
+      'pushed',
+      remote !== null && remote === facts.headSha ? 'ok' : 'no',
+      remote === null
+        ? `origin/${branch} não existe: a branch ainda não foi publicada`
+        : remote === facts.headSha
+          ? `origin/${branch} está em ${short(remote)}`
+          : `origin/${branch} está em ${short(remote)}, HEAD em ${short(facts.headSha)}`,
+    )
+  }
+
+  finish()
+}
+
+main()

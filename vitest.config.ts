@@ -1,4 +1,4 @@
-import { defineConfig } from 'vitest/config';
+import { configDefaults, defineConfig } from 'vitest/config';
 import tsconfigPaths from 'vite-tsconfig-paths';
 
 export default defineConfig({
@@ -9,5 +9,8 @@ export default defineConfig({
     globals: true,
     root: './',
     include: ['**/*.spec.ts'],
+    // vitest globs dot-directories, so without this a run from the main
+    // checkout also collects every Claude Code worktree under .claude/.
+    exclude: [...configDefaults.exclude, '.claude/**'],
   },
 });

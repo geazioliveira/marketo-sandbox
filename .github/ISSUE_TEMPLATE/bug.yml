@@ -1,0 +1,119 @@
+# Issue form for a bug (category label `bug`).
+#
+# Each required textarea label is a heading of `bugSections` in
+# scripts/loop-sections.mjs, word for word and in order: GitHub writes every
+# answer under `### <label>`, and the gate looks for exactly those headings.
+# test/scripts/forms-parity.spec.ts holds the two equal.
+#
+# A bug plan has no `Plano` section, so the branch name goes in `Onde será
+# corrigido`: the gate searches that section, and only that one, for it
+# (branchSectionFor in scripts/loop-sections.mjs). A `fix/` branch is accepted
+# only on an issue labelled `bug` (branchCategory).
+#
+# A form carries a full plan, so the issue opens waiting for the owner: the
+# category label plus `ready-for-human`, never `needs-triage` (a report without
+# a plan) and never `ready-for-agent` (only the owner applies it, after the
+# Approve). docs/development/workflow.md gives the label rules.
+#
+# GitHub enforces `validations.required` only in public repositories. In this
+# private repository a blank field is still submitted, as `_No response_`, and
+# the gate's `sections` step refuses it. The flag stays so the form shows which
+# fields the plan needs.
+name: Bug
+description: Um defeito, com o que acontece, como reproduzir, a causa raiz, onde será corrigido, critérios de aceite e riscos.
+labels: [bug, ready-for-human]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Como esta issue vira trabalho**
+
+        - O plano da correção vive aqui. Preencha todos os campos obrigatórios: o gate recusa campo vazio, mesmo quando o formulário deixa enviar.
+        - A issue abre com `ready-for-human`. O dono aprova com um comentário cuja primeira linha é exatamente `# Owner Approve`, seguida das palavras dele, e só depois desse comentário move a label de `ready-for-human` para `ready-for-agent`. Só o dono faz as duas coisas.
+        - Depois do Approve, não edite o corpo nem nenhum comentário, anterior ou posterior a ele (só o próprio Approve pode ser editado), e não apague comentários: qualquer um desses revoga o Approve. Uma revisão vai num comentário novo cuja primeira linha é exatamente `# Plano`, com o plano inteiro; respostas vão em comentários novos.
+        - Um comentário que não quer mexer no Approve não abre com um título que fale de approve: heading de `#` a `######`, título sublinhado com `===` ou `---`, linha inteira em negrito, ou qualquer um deles citado com `>`. Depois de um Approve, um título desses o cancela. Uma frase comum que menciona approve, ou uma referência como `#5`, não muda nada.
+        - Os critérios de aceite são marcados em `context/intent/`, nunca aqui: marcar um checkbox edita o corpo.
+        - Dentro de um campo, use subtítulos `####` ou menores. O GitHub já usa `###` para o título de cada campo.
+  - type: textarea
+    id: o-que-acontece
+    attributes:
+      label: O que acontece
+      description: 'O comportamento, como quem usa o encontra.'
+      placeholder: |
+        O que foi feito, o que se esperava e o que aconteceu (mensagem de erro, status HTTP, saída).
+    validations:
+      required: true
+  - type: textarea
+    id: como-reproduzir
+    attributes:
+      label: Como reproduzir
+      description: 'Os passos, para que a correção tenha algo que falhe antes.'
+      placeholder: |
+        1. ...
+        2. ...
+        3. Resultado: ...
+    validations:
+      required: true
+  - type: textarea
+    id: causa-raiz
+    attributes:
+      label: Causa raiz
+      description: 'Por que acontece, não só onde.'
+      placeholder: |
+        `src/modulo/arquivo.ts:42` em abc1234: por que o código se comporta assim.
+    validations:
+      required: true
+  - type: textarea
+    id: onde-corrigir
+    attributes:
+      label: Onde será corrigido
+      description: 'O arquivo ou a issue que é dona da correção, e o nome exato da branch. O gate procura esse nome, exatamente assim, dentro desta seção.'
+      placeholder: |
+        O arquivo ou a issue dona da correção, e o nome exato da branch: fix/<número>-<slug> (o número é o desta issue).
+
+        Branch: fix/<número>-<slug>
+    validations:
+      required: true
+  - type: textarea
+    id: criterios
+    attributes:
+      label: Critérios de aceite
+      description: 'O teste que falha antes e passa depois. Um item por linha, cada um começando com `- [ ]` seguido do texto; marcados só em context/intent, nunca no corpo.'
+      value: '- [ ] '
+    validations:
+      required: true
+  - type: textarea
+    id: riscos
+    attributes:
+      label: Riscos
+      description: 'HIGH ou NORMAL e o raciocínio.'
+      placeholder: |
+        HIGH ou NORMAL, e por quê.
+    validations:
+      required: true
+  - type: input
+    id: issue-mae
+    attributes:
+      label: Issue mãe
+      description: 'A issue que acompanha esta, se houver.'
+      placeholder: '#1'
+    validations:
+      required: false
+  - type: textarea
+    id: bloqueada-por
+    attributes:
+      label: Bloqueada por
+      description: 'Issues que precisam fechar antes de esta começar, se houver.'
+      placeholder: |
+        - #N: por quê.
+    validations:
+      required: false
+  - type: textarea
+    id: fora-de-escopo
+    attributes:
+      label: Fora de escopo
+      description: 'O que esta correção não faz, e onde isso será feito.'
+      placeholder: |
+        - O que fica de fora (#N, se já houver issue).
+    validations:
+      required: false
