@@ -1,12 +1,26 @@
 #!/usr/bin/env node
-// Re-runs the issue-link check of every open pull request that closes an
-// issue, when something on that issue changes (#3).
+// Re-runs the issue-link check of the open pull requests an event is about:
+// every open PR that closes an issue, when something on that issue changes
+// (#3), or one PR, after a review on it or on demand (#13).
 //
 // Why: issue-link.yml runs on pull_request_target, and only events on the PR
 // trigger it. A withdrawn Approve, a moved label, a new `# Plano`, a closing
 // or a reopening happen on the issue, and each used to leave a green check
-// with a stale verdict. .github/workflows/issue-link-refresh.yml runs this on
-// those issue events; the gate, re-run, reads the issue again.
+// with a stale verdict. A review is no pull_request_target event either, and
+// since #13 the gate judges the Copilot review on the head and the open
+// review threads. .github/workflows/issue-link-refresh.yml runs this from
+// main; the gate, re-run, reads the issue and the PR again.
+//
+// Two modes, by GITHUB_EVENT_NAME:
+// - issues and issue_comment (issue mode): the open PRs that close
+//   ISSUE_NUMBER, as GitHub links them; nothing when IS_PR says the event's
+//   issue is a pull request;
+// - workflow_run, of review-signal.yml, and workflow_dispatch (PR mode):
+//   PR_NUMBER, re-read here, and skipped when it is no longer open (Copilot
+//   reviews merged PRs late, as it did #10 and #11). A workflow_run whose
+//   pull_requests GitHub left empty hands HEAD_BRANCH instead, and the open
+//   PRs of that branch in this repository are refreshed; a fork's branch of
+//   the same name is not one of them.
 //
 // It judges nothing itself and writes nothing but the re-run (actions: write).
 //
@@ -32,14 +46,17 @@
 //   until the first live event. The fresh verdict before merge stays the rule
 //   (docs/development/workflow.md#pull-requests-e-merge).
 //
-// Input comes only from the environment: GITHUB_REPOSITORY, ISSUE_NUMBER,
-// IS_PR ('true' when the event's issue is a pull request) and GH_TOKEN, which
-// gh reads; REFRESH_POLL_MS and REFRESH_WAIT_MS, for the tests.
+// Input comes only from the environment: GITHUB_REPOSITORY and
+// GITHUB_EVENT_NAME, which the runner sets; ISSUE_NUMBER and IS_PR ('true'
+// when the event's issue is a pull request) in issue mode; PR_NUMBER and
+// HEAD_BRANCH in PR mode; GH_TOKEN, which gh reads; REFRESH_POLL_MS and
+// REFRESH_WAIT_MS, for the tests.
 import { spawnSync } from 'node:child_process'
 import {
   issueLinkEvent,
   issueLinkWorkflowFile,
   refreshPollMs,
+  refreshPrCommand,
   refreshWaitMs,
 } from './loop-sections.mjs'
 
@@ -48,10 +65,26 @@ const repoPattern = /^([A-Za-z0-9-]+)\/([A-Za-z0-9._-]+)$/
 const timeoutMs = 30_000
 const maxBuffer = 64 * 1024 * 1024
 const pageSize = 10
+const issueEvents = ['issues', 'issue_comment']
+const prEvents = ['workflow_run', 'workflow_dispatch']
+const positive = /^[1-9]\d*$/
+/** A branch name, as git allows one: 1 to 255 characters, no space, no control character. */
+const isBranchName = (text) =>
+  text.length > 0 &&
+  text.length <= 255 &&
+  ![...text].some((char) => char <= ' ' || char === '\u007f')
 
 // includeClosedPrs: false still lists merged PRs (measured on #2, closed by
 // the merged PR #10), so only state OPEN is acted on below.
 const issueQuery = `query($owner: String!, $name: String!, $number: Int!) { repository(owner: $owner, name: $name) { issue(number: $number) { closedByPullRequestsReferences(first: ${pageSize}, includeClosedPrs: false) { totalCount nodes { number state headRefOid } } } } }`
+
+// PR mode: the PR as it is now, whatever the event carried.
+const pullQuery = `query($owner: String!, $name: String!, $number: Int!) { repository(owner: $owner, name: $name) { pullRequest(number: $number) { number state headRefOid } } }`
+
+// PR mode with no PR number: the open PRs of a head branch. headRefName is
+// only the name, so a fork's branch of the same name comes too, and its
+// headRepository tells it apart.
+const branchQuery = `query($owner: String!, $name: String!, $branch: String!) { repository(owner: $owner, name: $name) { pullRequests(first: ${pageSize}, headRefName: $branch, states: [OPEN]) { totalCount nodes { number state headRefOid headRepository { nameWithOwner } } } } }`
 
 /** A failure that ends the refresh red, with a reason a person can act on. */
 class RefreshError extends Error {}
@@ -115,12 +148,31 @@ function readInput(env) {
   const named = repoPattern.exec(repo)
   if (named === null)
     errors.push(`GITHUB_REPOSITORY deve ser dono/nome, recebeu "${repo}"`)
+  const event = String(env.GITHUB_EVENT_NAME ?? '')
+  const issueMode = issueEvents.includes(event)
+  if (!issueMode && !prEvents.includes(event))
+    errors.push(
+      `GITHUB_EVENT_NAME deve ser ${[...issueEvents, ...prEvents].join(', ')}, recebeu "${event}"`,
+    )
   const issue = String(env.ISSUE_NUMBER ?? '')
-  if (!/^[1-9]\d*$/.test(issue))
-    errors.push(`ISSUE_NUMBER deve ser o número da issue, recebeu "${issue}"`)
   const isPr = String(env.IS_PR ?? '')
-  if (isPr !== 'true' && isPr !== 'false')
-    errors.push(`IS_PR deve ser true ou false, recebeu "${isPr}"`)
+  const pr = String(env.PR_NUMBER ?? '')
+  const branch = String(env.HEAD_BRANCH ?? '')
+  if (issueMode) {
+    if (!positive.test(issue))
+      errors.push(`ISSUE_NUMBER deve ser o número da issue, recebeu "${issue}"`)
+    if (isPr !== 'true' && isPr !== 'false')
+      errors.push(`IS_PR deve ser true ou false, recebeu "${isPr}"`)
+  } else if (event === 'workflow_dispatch' || pr !== '') {
+    if (!positive.test(pr))
+      errors.push(`PR_NUMBER deve ser o número da PR, recebeu "${pr}"`)
+  } else if (event === 'workflow_run' && !isBranchName(branch))
+    // GitHub left the run's pull_requests empty (it does for a fork's PR,
+    // and the research could not rule out other cases): the branch is all
+    // there is to find the PR by.
+    errors.push(
+      `sem PR_NUMBER, HEAD_BRANCH deve ser a branch da PR, recebeu "${branch}"`,
+    )
   const pollMs = env.REFRESH_POLL_MS || String(refreshPollMs)
   const waitMs = env.REFRESH_WAIT_MS || String(refreshWaitMs)
   for (const [key, value] of [
@@ -137,8 +189,12 @@ function readInput(env) {
       repo,
       owner: named[1],
       name: named[2],
-      issue: Number(issue),
-      isPr: isPr === 'true',
+      event,
+      mode: issueMode ? 'issue' : 'pr',
+      issue: issueMode ? Number(issue) : null,
+      isPr: issueMode && isPr === 'true',
+      pr: !issueMode && pr !== '' ? Number(pr) : null,
+      branch: !issueMode && pr === '' ? branch : null,
       pollMs: Number(pollMs),
       waitMs: Number(waitMs),
     },
@@ -167,6 +223,74 @@ function closingPulls({ owner, name, issue }) {
     )
   const nodes = Array.isArray(refs.nodes) ? refs.nodes : []
   return { nodes, total: Number(refs.totalCount ?? nodes.length) }
+}
+
+/** The payload of one GraphQL read, or a RefreshError with GitHub's reason. */
+function graphqlData(what, payload, pick) {
+  const errors = Array.isArray(payload?.errors) ? payload.errors : []
+  const data = pick(payload?.data?.repository)
+  if (errors.length > 0 || data == null)
+    throw new RefreshError(
+      `a consulta ${what} falhou: ${firstLine(errors[0]?.message) || 'sem dados'}`,
+    )
+  return data
+}
+
+/** One PR as it is now: its number, state and head. */
+function readPull({ owner, name }, number) {
+  const what = `da PR #${number}`
+  const payload = ghJson(`a PR #${number}`, [
+    'api',
+    'graphql',
+    '-F',
+    `owner=${owner}`,
+    '-F',
+    `name=${name}`,
+    '-F',
+    `number=${number}`,
+    '-f',
+    `query=${pullQuery}`,
+  ])
+  return graphqlData(what, payload, (repository) => repository?.pullRequest)
+}
+
+/**
+ * The open PRs of a head branch in this repository. The branch goes as a raw
+ * string (-f): -F would read a value that starts with @ as a file.
+ */
+function branchPulls({ owner, name, repo }, branch) {
+  const what = `das PRs da branch ${branch}`
+  const payload = ghJson(`as PRs da branch ${branch}`, [
+    'api',
+    'graphql',
+    '-F',
+    `owner=${owner}`,
+    '-F',
+    `name=${name}`,
+    '-f',
+    `branch=${branch}`,
+    '-f',
+    `query=${branchQuery}`,
+  ])
+  const pulls = graphqlData(
+    what,
+    payload,
+    (repository) => repository?.pullRequests,
+  )
+  const nodes = (Array.isArray(pulls.nodes) ? pulls.nodes : []).filter(
+    (pr) => pr != null,
+  )
+  const own = nodes.filter(
+    (pr) =>
+      String(pr.headRepository?.nameWithOwner ?? '').toLowerCase() ===
+      repo.toLowerCase(),
+  )
+  return {
+    nodes: own,
+    others: nodes.length - own.length,
+    total: Number(pulls.totalCount ?? nodes.length),
+    read: nodes.length,
+  }
 }
 
 /** One run, as GET actions/runs/{id} gives it now. */
@@ -246,6 +370,103 @@ function refresh(input, pr, deadline) {
   return { lines, failed: false }
 }
 
+/**
+ * The note that ends an interrupted refresh: how to renew the verdict by
+ * hand. Dispatching the refresh again only retries it: the command returns
+ * before the refresh runs, so alone it is no fresh verdict.
+ */
+function interrupted(input, error) {
+  const lines = [
+    `Atualização interrompida: ${error.message}.`,
+    'Antes do merge, renove o veredito à mão (gh run rerun <id> e gh run watch <id> --exit-status, ou o gate em modo CI na cabeça da PR) ou faça push na PR.',
+  ]
+  if (input.pr !== null)
+    lines.push(
+      `Para só tentar o refresh de novo: ${refreshPrCommand(input.pr)}; sozinho, isso não é veredito fresco.`,
+    )
+  return lines
+}
+
+/** Issue mode: every open PR that closes the issue. */
+function refreshIssue(input, deadline, lines) {
+  lines.push(`Atualiza o issue-link das PRs que fecham a #${input.issue}.`)
+  if (input.isPr) {
+    lines.push(
+      `A #${input.issue} é uma PR, não uma issue: os eventos dela já rodam o issue-link. Nada a fazer.`,
+    )
+    return 0
+  }
+  const { nodes, total } = closingPulls(input)
+  const open = nodes.filter((pr) => pr?.state === 'OPEN')
+  for (const pr of nodes.filter((node) => node?.state !== 'OPEN'))
+    lines.push(`- PR #${pr?.number} ignorada: está ${pr?.state}.`)
+  if (open.length === 0)
+    lines.push(`Nenhuma PR aberta fecha a #${input.issue}: nada a re-rodar.`)
+  let exitCode = 0
+  for (const pr of open) {
+    const refreshed = refresh(input, pr, deadline)
+    lines.push(...refreshed.lines)
+    if (refreshed.failed) exitCode = 1
+  }
+  if (total > nodes.length) {
+    // Only the first page was read: a PR past it keeps its old verdict.
+    lines.push(
+      `A #${input.issue} é fechada por ${total} PRs e só ${nodes.length} foram lidas; re-rode o issue-link das outras à mão.`,
+    )
+    exitCode = 1
+  }
+  return exitCode
+}
+
+/**
+ * PR mode: one PR, re-read now, or the open PRs of a branch. A PR that is no
+ * longer open has no verdict left to renew.
+ */
+function refreshPull(input, deadline, lines) {
+  const why =
+    input.event === 'workflow_run'
+      ? 'depois de uma revisão (Sinal de revisão)'
+      : 'a pedido (workflow_dispatch)'
+  let pulls
+  let exitCode = 0
+  if (input.pr !== null) {
+    lines.push(`Atualiza o issue-link da PR #${input.pr}, ${why}.`)
+    pulls = [readPull(input, input.pr)]
+  } else {
+    lines.push(
+      `Atualiza o issue-link das PRs abertas da branch ${input.branch}, ${why}: a run do sinal não nomeou a PR.`,
+    )
+    const { nodes, others, total, read } = branchPulls(input, input.branch)
+    if (others > 0)
+      lines.push(
+        `- ${others} PR(s) de fork com a branch ${input.branch} ignorada(s): o issue-link só vale para branches deste repositório.`,
+      )
+    if (nodes.length === 0)
+      lines.push(
+        `Nenhuma PR aberta da branch ${input.branch} neste repositório: nada a re-rodar.`,
+      )
+    if (total > read) {
+      lines.push(
+        `A branch ${input.branch} tem ${total} PRs abertas e só ${read} foram lidas; re-rode o issue-link das outras à mão.`,
+      )
+      exitCode = 1
+    }
+    pulls = nodes
+  }
+  for (const pr of pulls) {
+    if (pr.state !== 'OPEN') {
+      lines.push(
+        `- PR #${pr.number} ignorada: está ${pr.state}, e o issue-link dela não decide mais nada. Nada a re-rodar.`,
+      )
+      continue
+    }
+    const refreshed = refresh(input, pr, deadline)
+    lines.push(...refreshed.lines)
+    if (refreshed.failed) exitCode = 1
+  }
+  return exitCode
+}
+
 function main() {
   const read = readInput(process.env)
   if (read.errors) {
@@ -256,40 +477,15 @@ function main() {
   const { input } = read
   // One deadline for every PR, so the waits together stay inside the job.
   const deadline = Date.now() + input.waitMs
-  const lines = [`Atualiza o issue-link das PRs que fecham a #${input.issue}.`]
-  if (input.isPr) {
-    lines.push(
-      `A #${input.issue} é uma PR, não uma issue: os eventos dela já rodam o issue-link. Nada a fazer.`,
-    )
-    process.stdout.write(`${lines.join('\n')}\n`)
-    return
-  }
-
+  const lines = []
   try {
-    const { nodes, total } = closingPulls(input)
-    const open = nodes.filter((pr) => pr?.state === 'OPEN')
-    for (const pr of nodes.filter((node) => node?.state !== 'OPEN'))
-      lines.push(`- PR #${pr?.number} ignorada: está ${pr?.state}.`)
-    if (open.length === 0)
-      lines.push(`Nenhuma PR aberta fecha a #${input.issue}: nada a re-rodar.`)
-    for (const pr of open) {
-      const refreshed = refresh(input, pr, deadline)
-      lines.push(...refreshed.lines)
-      if (refreshed.failed) process.exitCode = 1
-    }
-    if (total > nodes.length) {
-      // Only the first page was read: a PR past it keeps its old verdict.
-      lines.push(
-        `A #${input.issue} é fechada por ${total} PRs e só ${nodes.length} foram lidas; re-rode o issue-link das outras à mão.`,
-      )
-      process.exitCode = 1
-    }
+    process.exitCode =
+      input.mode === 'issue'
+        ? refreshIssue(input, deadline, lines)
+        : refreshPull(input, deadline, lines)
   } catch (error) {
     if (!(error instanceof RefreshError)) throw error
-    lines.push(
-      `Atualização interrompida: ${error.message}.`,
-      'Antes do merge, renove o veredito à mão (gh run rerun) ou faça push na PR.',
-    )
+    lines.push(...interrupted(input, error))
     process.exitCode = 1
   }
   process.stdout.write(`${lines.join('\n')}\n`)

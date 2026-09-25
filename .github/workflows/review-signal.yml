@@ -1,0 +1,44 @@
+# The untrusted half of the refresh after a review (#13): it only signals
+# that a review was submitted or dismissed on a pull request.
+#
+# Why it holds nothing: pull_request_review runs this workflow from the pull
+# request's own merge ref, not from main, so this YAML is the PR's to edit and
+# cannot be trusted. It has no permissions, checks nothing out and runs no
+# script of the repository: it prints the PR number and ends.
+#
+# The trusted half runs from main: issue-link-refresh.yml answers this
+# workflow's completed run on workflow_run (by the name below,
+# reviewSignalWorkflow in scripts/loop-sections.mjs), re-reads the PR and
+# re-runs its issue-link check, whose gate judges the Copilot review on the
+# head and the open review threads. It trusts nothing from this run but the
+# PR it points at, and only when this run succeeded.
+#
+# A PR that edits this file can only change what it signals. A missing
+# signal leaves the verdict stale, which the fresh verdict before merge and
+# the audit of main cover (docs/development/workflow.md#pull-requests-e-merge).
+# Resolving or unresolving a thread triggers no workflow at all: after one,
+# bring the PR's check up to date with
+# `gh workflow run issue-link-refresh.yml --ref main -f pr=<n>`, which alone
+# is no fresh verdict before a merge.
+# Whether Copilot's own review fires pull_request_review is unmeasured until
+# the first live PR after this file reaches main.
+name: Sinal de revisão
+
+on:
+  pull_request_review:
+    types: [submitted, dismissed]
+
+permissions: {}
+
+jobs:
+  signal:
+    name: signal
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      # Event data reaches the shell only through env, never interpolated
+      # into the script.
+      - name: Sinaliza a revisão
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: echo "Revisão na PR #$PR_NUMBER. O issue-link-refresh.yml, de main, re-roda o issue-link dela."
