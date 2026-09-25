@@ -300,9 +300,11 @@ const reviewedSha = (review) =>
 
 /** What a failed review said (copilotFailedReview), for the message: its first line, quoted. */
 const failure = (review) =>
-  typeof review.body === 'string'
-    ? ` ("${firstLine(review.body).slice(0, 200)}")`
-    : ' (o GitHub não deu o corpo dela)'
+  typeof review.body !== 'string'
+    ? ' (o GitHub não deu o corpo dela)'
+    : review.body.trim() === ''
+      ? ' (o corpo dela veio vazio)'
+      : ` ("${firstLine(review.body).slice(0, 200)}")`
 
 /** An open thread as a message names it: `path:line`, its opener and its link. */
 function describeThread(thread) {

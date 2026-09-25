@@ -896,11 +896,14 @@ export const copilotFailedReview =
 
 /**
  * Whether a review is one of Copilot's failures (copilotFailedReview). A
- * review whose body GitHub did not give as text cannot be told from one, so
- * it reads as failed: a misread lands on the side that blocks.
+ * review whose body GitHub did not give as text, or gave empty or blank,
+ * shows no sign that Copilot reviewed anything, so it reads as failed: a
+ * misread lands on the side that blocks (Copilot review on PR #15).
  */
 const failedReview = (review) =>
-  typeof review?.body !== 'string' || copilotFailedReview.test(review.body)
+  typeof review?.body !== 'string' ||
+  review.body.trim() === '' ||
+  copilotFailedReview.test(review.body)
 
 const bySubmittedAt = (a, b) =>
   String(a.submittedAt ?? '').localeCompare(String(b.submittedAt ?? ''))

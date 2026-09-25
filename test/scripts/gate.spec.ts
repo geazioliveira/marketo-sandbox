@@ -2924,6 +2924,11 @@ describe.concurrent('scripts/gate.mjs', () => {
         () => ['falhou (o GitHub não deu o corpo dela)', REQUEST],
       ],
       [
+        'a review of the head with a blank body',
+        (head) => [review(head, { body: ' \n\t ' })],
+        () => ['falhou (o corpo dela veio vazio)', REQUEST],
+      ],
+      [
         'a good review of an older commit, then a failed one of the head',
         (head) => [
           review(OLD, { submittedAt: at('12:30') }),

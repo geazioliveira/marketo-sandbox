@@ -76,7 +76,7 @@ Desvios do plano, descobertos nas revisões adversariais e medidos em PRs reais 
   - "Copilot wasn't able to review…";
   - "Copilot was unable to review this pull request because…", no caso de cota, cobrança ou elegibilidade.
 
-  Sem essa regra, o fim da cota de Copilot do dono deixaria o gate verde sem revisão nenhuma. As três falhas bloqueiam, porque não há bypass.
+  Sem essa regra, o fim da cota de Copilot do dono deixaria o gate verde sem revisão nenhuma. As três falhas bloqueiam, porque não há bypass. Uma revisão sem corpo, ou com o corpo vazio ou só com espaços, também conta como falha, porque nada nela mostra que o Copilot revisou alguma coisa (achado da revisão do Copilot na PR #15).
 - **Página parcial de revisões.** Cada resposta numa thread também é uma revisão, então uma PR longa passa de 100. Uma revisão do Copilot que conta entre as 100 mais recentes basta, porque as mais antigas não a desfazem. A página fica `unchecked` só quando nenhuma das lidas conta. Isso afrouxa o texto do critério sobre "página lida pela metade", da mesma forma que a auditoria já fazia.
 - **O veredito fresco antes do merge** é o gate em modo CI rodado na cabeça, ou `gh run rerun` do `issue-link` seguido de `gh run watch --exit-status`. Um `gh workflow run` do refresh sozinho não é veredito fresco, porque retorna antes de o refresh rodar. As mensagens do gate dizem como renovar.
 - **O `workflow_dispatch` roda a ref disparada,** não `main`. O comando é emitido com `--ref main`, e o job recusa outra ref.

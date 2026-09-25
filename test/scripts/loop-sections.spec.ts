@@ -1713,6 +1713,8 @@ describe('copilotReviewOn', () => {
   it.each([
     ['no body', undefined],
     ['a null body', null],
+    ['an empty body', ''],
+    ['a blank body', ' \n\t '],
   ])(
     'refuses a review of the head with %s, as a failure it cannot tell apart',
     (_, body) => {
