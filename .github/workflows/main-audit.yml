@@ -13,8 +13,11 @@
 # Two steps. Julgar judges the range, opens or comments the issues and leaves
 # the count of commits out of the loop for Veredito; it fails only when it was
 # interrupted (a gh or git failure), and then the remedy is to re-run this
-# run. Veredito turns the count into the run's color. So a red run whose
-# Julgar succeeded judged its range, and one whose Julgar failed did not.
+# run. A page GitHub sends incomplete (more closing references, check suites
+# or check runs than one page holds) is no interruption, since a re-run would
+# read the same page: that PR's merge is out of the loop, with that reason.
+# Veredito turns the count into the run's color. So a red run whose Julgar
+# succeeded judged its range, and one whose Julgar failed did not.
 #
 # The range runs from the head of the newest run of this workflow on main that
 # is older than this one (a re-run keeps its id) and whose Julgar succeeded,
@@ -55,6 +58,13 @@ permissions:
 # One audit at a time, and none dropped: with the default queue a third push
 # would cancel the second push's pending run. queue: max keeps up to 100
 # waiting, in order, and a run cancelled past that is covered by the next one.
+# queue is a documented concurrency key since 2026-05-07 (GitHub changelog,
+# https://github.blog/changelog/2026-05-07-github-actions-concurrency-groups-now-allow-larger-queues/),
+# listed beside group and cancel-in-progress in the workflow syntax reference
+# (https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax).
+# GitHub refuses queue: max only with cancel-in-progress set to true. Nothing
+# rests on the queue: the next audit starts at the head of the last run whose
+# Julgar succeeded, so the commits of a cancelled run are judged all the same.
 concurrency:
   group: main-audit
   cancel-in-progress: false

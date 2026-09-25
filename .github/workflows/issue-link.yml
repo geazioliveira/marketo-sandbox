@@ -55,6 +55,15 @@ jobs:
     steps:
       # The trusted gate and its contracts, from main. Cone mode also keeps the
       # root files, so .nvmrc comes along.
+      # No ref, on purpose. On pull_request_target the default ref is the
+      # event's SHA on the default branch, whatever the PR's base: since
+      # 2025-12-08 GitHub takes the workflow file and this checkout's commit
+      # from the default branch (GitHub changelog of 2025-11-07,
+      # https://github.blog/changelog/2025-11-07-actions-pull_request_target-and-environment-branch-protections-changes/).
+      # So a PR to another base still gets main's gate, which fails it at
+      # pr-base. Pinning ref: main would change which gate a re-run uses: a
+      # re-run keeps the original run's SHA of main, and ref: main would fetch
+      # main's tip at re-run time instead.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           path: trusted
