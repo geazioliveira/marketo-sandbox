@@ -6,9 +6,9 @@ O Context Mesh e o fluxo do loop já estão em `main`, mas a orientação mais r
 
 ## Critérios de aceite
 
-- [ ] `AGENTS.md`, o fluxo, a ADR 0001, o pattern do gate, o glossário e a mensagem do gate distinguem a transição do agente dos atos exclusivos do dono.
-- [ ] A PR traz somente a regra compartilhada e não inclui o intent nem a implementação dos hooks da #5.
-- [ ] O intent e o changelog registram o resultado; `npm run check:context`, os testes pertinentes e o gate passam.
+- [x] `AGENTS.md`, o fluxo, a ADR 0001, o pattern do gate, o glossário e a mensagem do gate distinguem a transição do agente dos atos exclusivos do dono.
+- [x] A PR traz somente a regra compartilhada e não inclui o intent nem a implementação dos hooks da #5.
+- [x] O intent e o changelog registram o resultado; `npm run check:context`, os testes pertinentes e o gate passam.
 - [ ] A PR fecha somente a #17, com os checks exigidos verdes, uma revisão do Copilot na cabeça e nenhuma thread aberta antes do merge.
 - [ ] A branch da #5 é reconciliada com o merge desta PR antes de sua própria PR.
 
@@ -32,10 +32,12 @@ Nenhuma. O dono aprovou na #17 a recomendação de manter esta PR restrita à re
 
 ## Resultados
 
-Preenchidos no Learn desta issue.
+O primeiro commit (`ae5e24d`) trouxe só este intent. O segundo (`1b3f8f0`) levou as seis mudanças compartilhadas de `3a92ee1` para uma branch própria da #17, sem `context/intent/feature-claude-code-hooks.md` nem os hooks. A #6 já usa `enhancement` + `ready-for-human`; os relatos #7, #8 e #9 seguem em `needs-triage` enquanto não têm plano.
+
+`npm run check` passou: lint (com um aviso preexistente em `src/app.module.ts:16`), typecheck, 1.337 testes, `check:context` (38 arquivos, 486 links internos) e build. O e2e passou (1 teste) com `OBSERVE_ENDPOINT=http://127.0.0.1:9`. Revisão da PR, veredito final e reconciliação da branch da #5 são passos posteriores a este Learn.
 
 ## Status
 
 - **Criado**: 2026-09-25 (Fase: Intent), do plano aprovado na issue #17 (#17)
-- **Status**: In Progress
-- **Atualizado**: 2026-09-25 (Fase: Intent), branch cortada de `origin/main` após o Approve do dono (#17)
+- **Status**: Completed
+- **Atualizado**: 2026-09-25 (Fase: Learn), regra compartilhada isolada da #5 e checks locais concluídos; revisão e reconciliação seguem no fluxo da PR (#17)
