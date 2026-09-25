@@ -291,12 +291,29 @@ function readMarkdown(text) {
       shown.push(false)
       continue
     }
-    const parts = splitCodeSpans(line)
+    // A comment carried in from an earlier line makes this line raw HTML:
+    // markdown is not parsed there, so its first `-->` closes the comment even
+    // between backticks (GitHub renders it so). Only the rest of the line is
+    // read for code spans.
+    let head = ''
+    let body = line
+    if (comment) {
+      const end = line.indexOf('-->')
+      if (end < 0) {
+        prose.push(' '.repeat(line.length))
+        shown.push(false)
+        continue
+      }
+      head = ' '.repeat(end + 3)
+      body = line.slice(end + 3)
+      comment = false
+    }
+    const parts = splitCodeSpans(body)
     const masked = maskComments(
       parts
         .map((part) => (part.code ? ' '.repeat(part.raw.length) : part.raw))
         .join(''),
-      comment,
+      false,
     )
     // The same masking with each code span kept as a mark, which can open or
     // close no comment: what is left is what the line shows.
@@ -304,10 +321,10 @@ function readMarkdown(text) {
       parts
         .map((part) => (part.code ? 'x'.repeat(part.raw.length) : part.raw))
         .join(''),
-      comment,
+      false,
     )
     comment = masked.comment
-    prose.push(masked.text)
+    prose.push(head + masked.text)
     shown.push(marked.text.trim() !== '')
   }
   return { lines, prose, shown }

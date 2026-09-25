@@ -24,14 +24,14 @@ Cada uma das 7 threads do Copilot deixadas abertas nas PRs #10 e #11 foi verific
   - Um texto só em comentário não conta como conteúdo nem como citação da branch.
   - Um nome com sufixo (`feature/12-x.old`) não cita `feature/12-x`.
   - Os blocos de código seguem o CommonMark.
-- **`check:context`.** Três leituras erradas de título com sublinhado (setext) foram corrigidas: linha que só parece lista, título vazio e título só de código.
+- **`check:context`.** Três leituras erradas de título com sublinhado (setext) foram corrigidas: linha que só parece lista, título vazio e título só de código. Depois da revisão do Copilot na PR #14, um comentário HTML aberto numa linha anterior passou a fechar no primeiro `-->` da linha, mesmo entre crases, como o GitHub renderiza.
 - **Autoria dos atos.** O código não muda. Os docs e um teste passam a dizer que só o Approve e a label exigem o dono. A retirada, um título quase-Approve, `# Plano`, edição, remoção, reabertura e uma nova aplicação da label por outro ator cancelam, venham de quem vierem.
 - **Comentários que não procediam.** O YAML do `issue-link` e o da auditoria citam a documentação: o `pull_request_target` usa o branch padrão desde 08/12/2025, e `queue: max` está documentado desde 07/05/2026.
 - **Docs.** Os templates copiáveis do guia ganharam o bloco Status, e a entrada da #3 no changelog agora diz 113 links.
 
 ### Números medidos
 
-- `npm run check`: 909 testes em 8 arquivos verdes; `check:context` sem problemas em 17 arquivos, com 118 links internos; build OK.
+- `npm run check`: 909 testes em 8 arquivos verdes; `check:context` sem problemas em 17 arquivos, com 123 links internos; build OK.
 - Cada correção tem um teste que falha quando ela é revertida. Isso foi medido revertendo cada uma numa cópia fora do worktree, em quatro rodadas de revisão e verificação.
 - Os corpos reais das issues #1 a #5, #12 e #13 dão os mesmos critérios, seções e citações com o parser antigo e o novo.
 

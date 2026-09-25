@@ -832,6 +832,30 @@ describe('scripts/check-context.mjs', () => {
       )
     })
 
+    // Inside a comment carried in from an earlier line, the line is raw HTML:
+    // its `-->` closes the comment even between backticks, and the heading
+    // after it is a real section (GitHub renders `<h2>Depois</h2>`).
+    it('closes a comment at a `-->` inside backticks and reads the heading after it', async () => {
+      const run = await check({
+        'context/decisions/0001-first.md': lines(
+          '# ADR 0001: Primeira',
+          '',
+          '## Status',
+          '',
+          '- **Status**: Accepted',
+          '',
+          '<!--',
+          'comentário com `-->` no meio',
+          '## Depois',
+          '-->',
+        ),
+      })
+      expectProblems(
+        run,
+        /^context\/decisions\/0001-first\.md:9: a seção "## Depois" vem depois do bloco Status \(linha 3\); o bloco Status é a última seção do arquivo$/,
+      )
+    })
+
     it('refuses a section after the Status block, and a status declared in it', async () => {
       const run = await check({
         'context/decisions/0001-first.md': lines(

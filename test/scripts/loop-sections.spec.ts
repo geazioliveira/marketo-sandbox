@@ -175,6 +175,24 @@ describe('foldHeading and matchesHeading', () => {
 })
 
 describe('parseSections', () => {
+  // GitHub renders `texto <!--` as text and the next `## Riscos` as a real
+  // heading: an ATX heading interrupts the paragraph, so the inline comment
+  // never forms (checked with GitHub's markdown API on PR #14). A block comment
+  // that opens a line hides its lines until `-->`, even one between backticks.
+  it('reads a heading after an inline `<!--` as a section, as GitHub does', () => {
+    const titles = parseSections('texto <!--\n## Riscos\nHIGH\n-->').map(
+      (section) => section.title,
+    )
+    expect(titles).toEqual(['Riscos'])
+  })
+
+  it('ends a block comment at a `-->` between backticks, as GitHub does', () => {
+    const titles = parseSections(
+      '<!--\n## Escondido\ncom `-->` no meio\n## Depois\n-->',
+    ).map((section) => section.title)
+    expect(titles).toEqual(['Depois'])
+  })
+
   it('keeps a nested heading inside its parent section', () => {
     const sections = parseSections(
       '## Plano\n\ntexto\n\n### Contratos\n\n- a\n\n## Riscos\n\nNORMAL',
