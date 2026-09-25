@@ -153,6 +153,8 @@ interface IssueOptions {
   body?: string
   lastEditedAt?: string | null
   labels?: string[]
+  /** The labels' totalCount; defaults to their number, and null leaves it out. */
+  labelsTotal?: number | null
   comments?: Comment[]
   events?: object[]
   commentsTotal?: number
@@ -162,6 +164,9 @@ interface IssueOptions {
 function issueAnswer(options: IssueOptions = {}): GhAnswer {
   const comments = options.comments ?? [approve()]
   const events = options.events ?? defaultEvents()
+  const labels = options.labels ?? ['enhancement', 'ready-for-agent']
+  const labelsTotal =
+    options.labelsTotal === undefined ? labels.length : options.labelsTotal
   return {
     number: ISSUE,
     mode: 'ok',
@@ -174,9 +179,8 @@ function issueAnswer(options: IssueOptions = {}): GhAnswer {
           body: options.body ?? featureBody(),
           lastEditedAt: options.lastEditedAt ?? null,
           labels: {
-            nodes: (options.labels ?? ['enhancement', 'ready-for-agent']).map(
-              (name) => ({ name }),
-            ),
+            ...(labelsTotal === null ? {} : { totalCount: labelsTotal }),
+            nodes: labels.map((name) => ({ name })),
           },
           comments: {
             totalCount: options.commentsTotal ?? comments.length,
@@ -306,26 +310,32 @@ async function ci(
   return ciOver(repo, fixture, { env })
 }
 
-/** CI mode over a repository some case has already shaped, on BRANCH. */
+/**
+ * CI mode over a repository some case has already shaped, on `branch` (BRANCH
+ * unless given). Only that branch and main are deleted locally, so a case
+ * deletes any other local branch itself.
+ */
 async function ciOver(
   repo: TempRepo,
   fixture: (head: string) => GhFixture,
   {
     env = {},
     prepare,
+    branch = BRANCH,
   }: {
     env?: Record<string, string>
     /** Runs on the trusted copy of the gate before it runs. */
     prepare?: (script: string) => void
+    branch?: string
   } = {},
 ) {
   const head = await repo.head()
   await repo.git('switch', '-q', '--detach')
-  await repo.git('branch', '-q', '-D', BRANCH)
+  await repo.git('branch', '-q', '-D', branch)
   await repo.git('branch', '-q', '-D', 'main')
   const trusted = installGate(path.join(repo.root, 'trusted'))
   prepare?.(trusted)
-  const run = await repo.gateJson(['--pr', String(PR), '--branch', BRANCH], {
+  const run = await repo.gateJson(['--pr', String(PR), '--branch', branch], {
     fixture: fixture(head),
     script: trusted,
     env: { GITHUB_REPOSITORY: `${OWNER}/${NAME}`, ...env },
@@ -348,6 +358,16 @@ const passingCi = (head: string): GhFixture => ({
   issue: issueAnswer(),
   pr: prAnswer(head),
 })
+
+/** The gate over the standard work branch in either mode, with this issue. */
+const inMode = (fresh: Fresh, mode: 'local' | 'CI', issue: IssueOptions) =>
+  mode === 'local'
+    ? local(fresh, issue)
+    : ci(fresh, (head) => ({ issue: issueAnswer(issue), pr: prAnswer(head) }))
+
+/** Labels that are neither a category nor a state, to fill an issue up. */
+const fillerLabels = (count: number) =>
+  Array.from({ length: count }, (_, i) => `area-${i + 1}`)
 
 const step = (result: GateResult, id: string) => {
   const found = result.steps.find((entry) => entry.id === id)
@@ -747,6 +767,92 @@ describe.concurrent('scripts/gate.mjs', () => {
       expect(step(result, 'state-label').status).toBe('no')
     })
 
+    // GitHub gives the gate one page of 100 labels. The 101st, needs-triage
+    // here, contradicts ready-for-agent, and a gate that judged the page it
+    // read as the whole list would open.
+    test.for(['local', 'CI'] as const)(
+      'blocks kind and state-label when the issue has more labels than the gate read (%s)',
+      async (mode, { expect, fresh }) => {
+        const labels = [
+          'enhancement',
+          'ready-for-agent',
+          ...fillerLabels(98),
+          'needs-triage',
+        ]
+        const { status, result } = await inMode(fresh, mode, { labels })
+        for (const id of ['kind', 'state-label'])
+          expect(step(result, id)).toMatchObject({
+            status: 'no',
+            blocks: true,
+            detail: expect.stringContaining(
+              'a issue tem 101 labels e o gate leu 100: 1 ficou sem ler',
+            ),
+          })
+        expect(step(result, 'kind').detail).toContain('não julga a categoria')
+        expect(step(result, 'state-label').detail).toContain(
+          'não julga o estado',
+        )
+        expect(result.blocked).toEqual(['kind', 'state-label'])
+        expect(status).toBe(1)
+      },
+    )
+
+    test.for(['local', 'CI'] as const)(
+      'judges exactly 100 labels, one page, as the whole list (%s)',
+      async (mode, { expect, fresh }) => {
+        const labels = ['enhancement', 'ready-for-agent', ...fillerLabels(98)]
+        const { status, result } = await inMode(fresh, mode, { labels })
+        expect(step(result, 'kind')).toMatchObject({
+          status: 'ok',
+          detail: 'enhancement',
+        })
+        expect(step(result, 'state-label')).toMatchObject({
+          status: 'ok',
+          detail: 'ready-for-agent',
+        })
+        expect(result.blocked).toEqual([])
+        expect(status).toBe(0)
+      },
+    )
+
+    test('blocks kind and state-label when GitHub does not say how many labels there are', async ({
+      expect,
+      fresh,
+    }) => {
+      const { status, result } = await local(fresh, { labelsTotal: null })
+      expect(step(result, 'kind')).toMatchObject({ status: 'no', blocks: true })
+      expect(step(result, 'state-label').detail).toContain(
+        'o GitHub não disse quantas labels a issue tem',
+      )
+      expect(status).toBe(1)
+    })
+
+    test('does not tick a fix/ branch’s category from a partial page of labels', async ({
+      expect,
+      fresh,
+    }) => {
+      const branch = 'fix/42-a-thing'
+      const { status, result } = await local(
+        fresh,
+        {
+          labels: [
+            'bug',
+            'ready-for-agent',
+            ...fillerLabels(98),
+            'enhancement',
+          ],
+          body: bugBody(branch),
+        },
+        { branch },
+      )
+      expect(step(result, 'branch')).toMatchObject({
+        status: 'unchecked',
+        detail: 'fix/ exige a label bug, e as labels não foram lidas',
+      })
+      expect(step(result, 'kind').status).toBe('no')
+      expect(status).toBe(1)
+    })
+
     test('blocks a missing section, names it and says why it exists', async ({
       expect,
       fresh,
@@ -789,6 +895,92 @@ describe.concurrent('scripts/gate.mjs', () => {
       expect(step(result, 'criteria').status).toBe('no')
       expect(step(result, 'sections').status).toBe('ok')
     })
+
+    // The rendered issue shows no box in either: one is sample code, the
+    // other a note GitHub hides.
+    test.for([
+      ['fenced code', 'Um exemplo:\n\n```md\n- [ ] O gate abre.\n```'],
+      ['an HTML comment', 'A preencher.\n\n<!--\n- [ ] O gate abre.\n-->'],
+    ] as const)(
+      'blocks acceptance criteria whose only checklist is inside %s',
+      async ([, criteria], { expect, fresh }) => {
+        const { status, result } = await local(fresh, {
+          body: featureBody({ 'Critérios de aceite': criteria }),
+        })
+        expect(step(result, 'criteria').status).toBe('no')
+        expect(step(result, 'sections').status).toBe('ok')
+        expect(status).toBe(1)
+      },
+    )
+
+    // A code example indented under a list item is still fenced code: GitHub
+    // shows no box in it (#12).
+    test.for([
+      [
+        'a numbered item',
+        '1. Exemplo:\n\n    ```md\n    - [ ] O gate abre.\n    ```',
+      ],
+      ['a bullet', '- Exemplo:\n\n    ```md\n    - [ ] O gate abre.\n    ```'],
+    ] as const)(
+      'blocks acceptance criteria whose only checklist is fenced code under %s',
+      async ([, criteria], { expect, fresh }) => {
+        const { status, result } = await local(fresh, {
+          body: featureBody({ 'Critérios de aceite': criteria }),
+        })
+        expect(step(result, 'criteria')).toMatchObject({
+          status: 'no',
+          blocks: true,
+        })
+        expect(step(result, 'sections').status).toBe('ok')
+        expect(status).toBe(1)
+      },
+    )
+
+    // GitHub shows a section that holds only an HTML comment as empty. Before
+    // #12 the comment's text made it a written section, and the gate opened.
+    test.for(['local', 'CI'] as const)(
+      'blocks a required section that holds only an HTML comment (%s)',
+      async (mode, { expect, fresh }) => {
+        const { status, result } = await inMode(fresh, mode, {
+          body: featureBody({ Riscos: '<!-- HIGH ou NORMAL -->' }),
+        })
+        expect(step(result, 'sections')).toMatchObject({
+          status: 'no',
+          blocks: true,
+        })
+        expect(step(result, 'sections').detail).toContain('vazias "Riscos"')
+        expect(result.blocked).toContain('sections')
+        expect(status).toBe(1)
+      },
+    )
+
+    // GitHub shows neither the heading nor the box of a commented-out
+    // section. Before #12 the heading still made a section, whose content
+    // began below the `<!--`, so the box counted and the gate opened.
+    test.for(['local', 'CI'] as const)(
+      'blocks a plan whose only acceptance criteria are commented out (%s)',
+      async (mode, { expect, fresh }) => {
+        const body = featureBody({
+          'Estado atual':
+            'Texto do estado.\n\n<!--\n## Critérios de aceite\n\n- [ ] O gate abre.\n-->',
+          'Critérios de aceite': null,
+        })
+        const { status, result } = await inMode(fresh, mode, { body })
+        expect(step(result, 'sections')).toMatchObject({
+          status: 'no',
+          blocks: true,
+        })
+        expect(step(result, 'sections').detail).toContain('Critérios de aceite')
+        expect(step(result, 'criteria')).toMatchObject({
+          status: 'no',
+          blocks: true,
+        })
+        expect(result.blocked).toEqual(
+          expect.arrayContaining(['sections', 'criteria']),
+        )
+        expect(status).toBe(1)
+      },
+    )
 
     test('reads the plan in force from the latest "# Plano" comment', async ({
       expect,
@@ -869,6 +1061,29 @@ describe.concurrent('scripts/gate.mjs', () => {
       expect(step(result, 'branch-in-plan').status).toBe('no')
     })
 
+    // git takes feature/42-a-thing.old for another branch.
+    test('does not take a dotted suffix of this branch for this one', async ({
+      expect,
+      fresh,
+    }) => {
+      const { status, result } = await local(fresh, {
+        body: featureBody({ Plano: `Branch: ${BRANCH}.old, e só ela.` }),
+      })
+      expect(step(result, 'branch-in-plan').status).toBe('no')
+      expect(status).toBe(1)
+    })
+
+    test('takes this branch at the end of a sentence, before its period', async ({
+      expect,
+      fresh,
+    }) => {
+      const { status, result } = await local(fresh, {
+        body: featureBody({ Plano: `A branch é ${BRANCH}.\n\n1. Intent.` }),
+      })
+      expect(step(result, 'branch-in-plan').status).toBe('ok')
+      expect(status).toBe(0)
+    })
+
     test('reads the branch from "## Plano", not from a "## Plano de testes" before it', async ({
       expect,
       fresh,
@@ -877,6 +1092,38 @@ describe.concurrent('scripts/gate.mjs', () => {
         body: featureBody({
           'Critérios de aceite':
             '- [ ] O gate abre na branch certa.\n\n## Plano de testes\n\nTestes de unidade.',
+        }),
+      })
+      expect(step(result, 'branch-in-plan').status).toBe('ok')
+      expect(status).toBe(0)
+    })
+
+    // The branch-in-plan step reads Plano as GitHub shows it (#12): a name
+    // inside an HTML comment is not shown, a name in fenced code is.
+    test.for([
+      ['a comment block', `<!--\nBranch: \`${BRANCH}\`.\n-->\n\n1. Intent.`],
+      ['an inline comment', `1. Intent. <!-- branch ${BRANCH} -->`],
+    ] as const)(
+      'blocks a plan that cites the branch only inside %s',
+      async ([, plano], { expect, fresh }) => {
+        const { status, result } = await local(fresh, {
+          body: featureBody({ Plano: plano }),
+        })
+        expect(step(result, 'branch-in-plan')).toMatchObject({
+          status: 'no',
+          blocks: true,
+        })
+        expect(status).toBe(1)
+      },
+    )
+
+    test('takes the branch cited in fenced code inside Plano', async ({
+      expect,
+      fresh,
+    }) => {
+      const { status, result } = await local(fresh, {
+        body: featureBody({
+          Plano: `1. Cortar a branch:\n\n\`\`\`sh\ngit switch -c ${BRANCH} origin/main\n\`\`\`\n\n2. Build e Learn.`,
         }),
       })
       expect(step(result, 'branch-in-plan').status).toBe('ok')
@@ -1611,6 +1858,231 @@ describe.concurrent('scripts/gate.mjs', () => {
       expect(step(result, 'stacked').status).toBe('ok')
     })
 
+    // One issue, one branch (ADR 0001). Every commit on both sides cites #42,
+    // so git cannot tell which branch was cut from which, and neither
+    // exemption may apply: before #12, feature/42-lower's intent commit and
+    // changelog entry ticked intent-first and learn for this branch.
+    const lower = 'feature/42-lower'
+    const sameIssueDetail = 'outra branch da #42'
+    // The remedy depends on the direction (#12): a branch HEAD contains is
+    // deleted with -d, which refuses unmerged work; one holding commits HEAD
+    // lacks is merged into a single branch first. -D is never suggested.
+    // The delete names only the commands for the refs found: -d for a local
+    // branch, a push --delete (and the prune, should GitHub no longer have
+    // it) for a copy on origin.
+    const prune = 'se ela já não existe no GitHub, com git fetch --prune origin'
+    const deleteIt = (name: string, refs: 'both' | 'local' | 'origin') =>
+      ({
+        both: `apague a outra branch da #42 com git branch -d ${name} e com git push origin --delete ${name} (${prune})`,
+        local: `apague a outra branch da #42 com git branch -d ${name}`,
+        origin: `apague a outra branch da #42 com git push origin --delete ${name} (${prune})`,
+      })[refs]
+    const keepOne = (name: string) =>
+      `a outra branch da #42, ${name}, tem commits que esta não tem: fique com uma só, traga para ela o trabalho da outra, e só então apague a outra (git branch -d recusa apagar trabalho não mergeado)`
+
+    test('blocks a branch cut from another branch of the same issue, in both modes', async ({
+      expect,
+      fresh,
+    }) => {
+      const repo = await fresh()
+      await workBranch(repo, { branch: lower })
+      await repo.git('switch', '-q', '-c', BRANCH)
+      await repo.commit({ 'src/b.ts': 'x\n' }, 'Outra parte (Refs #42)')
+      await repo.publish(BRANCH)
+
+      const local = await judge(repo)
+      expect(step(local.result, 'stacked')).toMatchObject({
+        status: 'no',
+        blocks: true,
+      })
+      expect(step(local.result, 'stacked').detail).toContain(
+        `${sameIssueDetail} (${lower}, origin/${lower})`,
+      )
+      // HEAD holds everything the lower branch holds: deleting it is safe.
+      expect(step(local.result, 'stacked').detail).toContain(
+        deleteIt(lower, 'both'),
+      )
+      expect(step(local.result, 'stacked').detail).not.toContain('tem commits')
+      expect(step(local.result, 'stacked').detail).not.toContain('-D')
+      expect(step(local.result, 'stacked').detail).not.toContain(
+        'corte a branch',
+      )
+      expect(local.status).toBe(1)
+
+      // CI sees only published branches.
+      await repo.git('branch', '-q', '-D', lower)
+      const ci = await ciOver(repo, passingCi)
+      expect(step(ci.result, 'stacked').detail).toContain(
+        `${sameIssueDetail} (origin/${lower})`,
+      )
+      // Only the copy on origin is there: no git branch -d for it.
+      expect(step(ci.result, 'stacked').detail).toContain(
+        deleteIt(lower, 'origin'),
+      )
+      expect(step(ci.result, 'stacked').detail).not.toContain('git branch -d')
+      expect(ci.result.blocked).toContain('stacked')
+      expect(ci.status).toBe(1)
+    })
+
+    // A branch of #42 that was never published has no copy on origin to
+    // delete: the remedy names git branch -d alone, and following it opens
+    // the gate.
+    test('names only git branch -d for an unpublished branch of the same issue', async ({
+      expect,
+      fresh,
+    }) => {
+      const repo = await fresh()
+      await workBranch(repo, { branch: lower, publish: false })
+      await repo.git('switch', '-q', '-c', BRANCH)
+      await repo.commit({ 'src/b.ts': 'x\n' }, 'Outra parte (Refs #42)')
+      await repo.publish(BRANCH)
+
+      const local = await judge(repo)
+      expect(step(local.result, 'stacked').detail).toContain(
+        `${sameIssueDetail} (${lower})`,
+      )
+      expect(step(local.result, 'stacked').detail).toContain(
+        deleteIt(lower, 'local'),
+      )
+      expect(step(local.result, 'stacked').detail).not.toContain(
+        'git push origin --delete',
+      )
+      expect(step(local.result, 'stacked').detail).not.toContain('--prune')
+      expect(local.status).toBe(1)
+
+      await repo.git('branch', '-q', '-d', lower)
+      const after = await judge(repo)
+      expect(step(after.result, 'stacked').status).toBe('ok')
+    })
+
+    test('blocks the branch another branch of the same issue was cut from, in both modes', async ({
+      expect,
+      fresh,
+    }) => {
+      const repo = await fresh()
+      await workBranch(repo, { branch: lower })
+      await repo.git('switch', '-q', '-c', BRANCH)
+      await repo.commit({ 'src/b.ts': 'x\n' }, 'Outra parte (Refs #42)')
+      await repo.publish(BRANCH)
+      await repo.git('switch', '-q', lower)
+      const issue = { body: featureBody({}, lower) }
+
+      const local = await judge(repo, issue)
+      expect(step(local.result, 'stacked').status).toBe('no')
+      expect(step(local.result, 'stacked').detail).toContain(
+        `${sameIssueDetail} (${BRANCH}, origin/${BRANCH})`,
+      )
+      // The other branch holds src/b.ts, which HEAD lacks: never "delete it".
+      expect(step(local.result, 'stacked').detail).toContain(keepOne(BRANCH))
+      expect(step(local.result, 'stacked').detail).not.toContain(
+        'apague a outra branch',
+      )
+      expect(step(local.result, 'stacked').detail).not.toContain('-D')
+      expect(local.status).toBe(1)
+
+      await repo.git('branch', '-q', '-D', BRANCH)
+      const ci = await ciOver(
+        repo,
+        (head) => ({
+          issue: issueAnswer(issue),
+          pr: prAnswer(head, { headRefName: lower }),
+        }),
+        { branch: lower },
+      )
+      expect(step(ci.result, 'stacked').detail).toContain(
+        `${sameIssueDetail} (origin/${BRANCH})`,
+      )
+      expect(step(ci.result, 'stacked').detail).toContain(keepOne(BRANCH))
+      expect(step(ci.result, 'stacked').detail).not.toContain(
+        'apague a outra branch',
+      )
+      expect(ci.result.blocked).toContain('stacked')
+      expect(ci.status).toBe(1)
+    })
+
+    // Owner's answer 1 on #12: a leftover under an old name blocks too. Its
+    // commits all cite #42, so exemption (b) alone would let it through.
+    test('blocks on a leftover of the same issue under an old name, in both modes', async ({
+      expect,
+      fresh,
+    }) => {
+      const repo = await fresh()
+      const old = 'feature/42-old'
+      await workBranch(repo, { branch: old })
+      await repo.git('branch', '-q', '-m', BRANCH)
+      await repo.commit({ 'src/more.ts': 'x\n' }, 'Mais (Refs #42)')
+      await repo.publish(BRANCH)
+
+      const local = await judge(repo)
+      expect(step(local.result, 'stacked').status).toBe('no')
+      expect(step(local.result, 'stacked').detail).toContain(
+        `${sameIssueDetail} (origin/${old})`,
+      )
+      // After git branch -m, the old name is on origin alone: the remedy
+      // names no git branch -d, which would fail with "branch not found".
+      // Deleted or renamed on GitHub and never pruned here, the tracking ref
+      // outlives the branch: git push --delete fails on it, and a prune clears
+      // it.
+      expect(step(local.result, 'stacked').detail).toContain(
+        deleteIt(old, 'origin'),
+      )
+      expect(step(local.result, 'stacked').detail).not.toContain(
+        'git branch -d',
+      )
+      expect(local.result.blocked).toEqual(['stacked'])
+      expect(local.status).toBe(1)
+
+      const ci = await ciOver(repo, passingCi)
+      expect(step(ci.result, 'stacked').detail).toContain(
+        `${sameIssueDetail} (origin/${old})`,
+      )
+      expect(ci.result.blocked).toContain('stacked')
+      expect(ci.status).toBe(1)
+    })
+
+    // Owner's decision on #12: only refs/heads/<branch> and
+    // refs/remotes/origin/<branch> are this branch. The same name under
+    // another remote is someone else's copy, and its commits citing #42 must
+    // not tick exemption (b) for it either.
+    test('exempts only this branch and its copy on origin: the same name under another remote blocks, in both modes', async ({
+      expect,
+      fresh,
+    }) => {
+      const repo = await fresh()
+      await workBranch(repo)
+      // Origin's copy left behind by a new commit.
+      await repo.commit({ 'src/more.ts': 'x\n' }, 'Mais (Refs #42)')
+
+      const own = await judge(repo)
+      expect(step(own.result, 'stacked').status).toBe('ok')
+      expect(step(own.result, 'pushed').status).toBe('no')
+      expect(own.status).toBe(0)
+
+      await repo.git('update-ref', `refs/remotes/upstream/${BRANCH}`, 'HEAD~1')
+      const local = await judge(repo)
+      expect(step(local.result, 'stacked')).toMatchObject({
+        status: 'no',
+        blocks: true,
+      })
+      expect(step(local.result, 'stacked').detail).toContain(
+        `não tem com upstream/${BRANCH}`,
+      )
+      expect(step(local.result, 'stacked').detail).toContain('corte a branch')
+      expect(step(local.result, 'stacked').detail).not.toContain(
+        sameIssueDetail,
+      )
+      expect(local.result.blocked).toEqual(['stacked'])
+      expect(local.status).toBe(1)
+
+      await repo.publish(BRANCH)
+      const ci = await ciOver(repo, passingCi)
+      expect(step(ci.result, 'stacked').detail).toContain(
+        `não tem com upstream/${BRANCH}`,
+      )
+      expect(ci.result.blocked).toContain('stacked')
+      expect(ci.status).toBe(1)
+    })
+
     test('blocks when there is no origin/main to compare with', async ({
       expect,
       fresh,
@@ -2285,10 +2757,14 @@ describe.concurrent('scripts/gate.mjs', () => {
 
   describe.concurrent('the fake gh reads the GraphQL', () => {
     /** The shim, called directly with the gate's argv shape and a query. */
-    const callFake = async (repo: TempRepo, query: string) => {
+    const callFake = async (
+      repo: TempRepo,
+      query: string,
+      issue: IssueOptions = {},
+    ) => {
       writeFileSync(
         repo.fixturePath,
-        JSON.stringify({ owner: OWNER, name: NAME, issue: issueAnswer() }),
+        JSON.stringify({ owner: OWNER, name: NAME, issue: issueAnswer(issue) }),
       )
       return exec(
         path.join(repo.bin, 'gh'),
@@ -2318,7 +2794,7 @@ describe.concurrent('scripts/gate.mjs', () => {
     const selection = (issueFields: string) =>
       `${header} { repository(owner: $owner, name: $name) { owner { login } issue(number: $number) { ${issueFields} } } }`
     const complete =
-      'state body lastEditedAt labels(first: 50) { nodes { name } } comments(last: 100) { totalCount nodes { body createdAt lastEditedAt author { __typename login } } } timelineItems(last: 100, itemTypes: [LABELED_EVENT, REOPENED_EVENT, COMMENT_DELETED_EVENT]) { totalCount nodes { __typename ... on LabeledEvent { createdAt actor { __typename login } label { name } } ... on ReopenedEvent { createdAt } ... on CommentDeletedEvent { createdAt } } }'
+      'state body lastEditedAt labels(first: 100) { totalCount nodes { name } } comments(last: 100) { totalCount nodes { body createdAt lastEditedAt author { __typename login } } } timelineItems(last: 100, itemTypes: [LABELED_EVENT, REOPENED_EVENT, COMMENT_DELETED_EVENT]) { totalCount nodes { __typename ... on LabeledEvent { createdAt actor { __typename login } label { name } } ... on ReopenedEvent { createdAt } ... on CommentDeletedEvent { createdAt } } }'
 
     test('refuses a query that does not select lastEditedAt', async ({
       expect,
@@ -2351,6 +2827,72 @@ describe.concurrent('scripts/gate.mjs', () => {
         login: OWNER,
       })
     })
+
+    // As GitHub does: a page holds first or last nodes, and totalCount still
+    // counts them all, so a spec can put more on the fixture than a page.
+    test('cuts each connection to the page the query asked for', async ({
+      expect,
+      fresh,
+    }) => {
+      const repo = await fresh()
+      const run = await callFake(
+        repo,
+        selection(
+          complete
+            .replace('labels(first: 100)', 'labels(first: 2)')
+            .replace('comments(last: 100)', 'comments(last: 1)'),
+        ),
+        {
+          labels: ['enhancement', 'ready-for-agent', 'needs-triage'],
+          comments: [comment('antes', at('11:00')), approve()],
+        },
+      )
+      expect(run.status).toBe(0)
+      const issue = JSON.parse(run.stdout).data.repository.issue
+      expect(issue.labels).toEqual({
+        totalCount: 3,
+        nodes: [{ name: 'enhancement' }, { name: 'ready-for-agent' }],
+      })
+      expect(issue.comments.totalCount).toBe(2)
+      expect(issue.comments.nodes.map((node: Comment) => node.body)).toEqual([
+        '# Owner Approve\n\nAprovado, pode seguir.',
+      ])
+    })
+
+    test.for([
+      [
+        'no page size',
+        'labels(first: 100)',
+        'labels',
+        'deve pedir first ou last',
+      ],
+      [
+        'both first and last',
+        'labels(first: 100)',
+        'labels(first: 100, last: 100)',
+        'deve pedir first ou last, e só um deles',
+      ],
+      [
+        'a page past 100',
+        'labels(first: 100)',
+        'labels(first: 101)',
+        'repository.issue.labels(first: 101) deve ser um número de 1 a 100',
+      ],
+      [
+        'a page given by a variable',
+        'comments(last: 100)',
+        'comments(last: $number)',
+        'repository.issue.comments(last: $number)',
+      ],
+    ] as const)(
+      'refuses a connection with %s',
+      async ([, from, to, named], { expect, fresh }) => {
+        const repo = await fresh()
+        const run = await callFake(repo, selection(complete.replace(from, to)))
+        expect(run.status).toBe(97)
+        expect(readFileSync(repo.log, 'utf8')).toContain(named)
+      },
+    )
 
     // The gate's own query, edited the way a careless change would: each
     // edit must make the fake refuse, and the case fail, rather than let the
@@ -2409,6 +2951,18 @@ describe.concurrent('scripts/gate.mjs', () => {
         'owner { login } issue(',
         'issue(',
         'repository.owner',
+      ],
+      [
+        'the label count',
+        '{ totalCount nodes { name } }',
+        '{ nodes { name } }',
+        'repository.issue.labels.totalCount',
+      ],
+      [
+        'a label page size',
+        'labels(first: ${page})',
+        'labels',
+        'repository.issue.labels deve pedir first ou last',
       ],
     ] as const)(
       'refuses the issue query without %s',

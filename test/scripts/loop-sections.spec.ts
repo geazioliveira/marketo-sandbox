@@ -68,6 +68,10 @@ describe('parseBranch', () => {
     'feature/1-a_b',
     'feature/1-a/b',
     'feature/x-1',
+    'feature/1-x.old',
+    'feature/1-x.',
+    'feature/1.2-x',
+    'feature/1-a.b-c',
     'claude/x',
     'claude/2-x',
     'batch/2026-09-22',
@@ -206,6 +210,98 @@ describe('parseSections', () => {
     expect(sections[0].content).toContain('## Não é seção')
   })
 
+  // The rendered issue shows no heading inside a comment, so neither does
+  // the gate: a commented-out required section is missing (#12).
+  it('ignores headings inside an HTML comment block', () => {
+    const text = [
+      '## A',
+      'a',
+      '<!--',
+      '## Critérios de aceite',
+      '- [ ] escondido',
+      '-->',
+      '<!-- ## Nem esta -->',
+      '  <!-- rascunho',
+      '# Nem esta outra',
+      'fim --> ## Nem aqui',
+      '## B',
+      'b',
+    ].join('\n')
+    expect(parseSections(text).map(({ title }) => title)).toEqual(['A', 'B'])
+    expect(criteriaSection(text)).toBe('')
+    expect(checkSections(text, 'enhancement').missing).toContain(
+      'Critérios de aceite',
+    )
+  })
+
+  it('reads a heading after a comment that closes, and none after one left open', () => {
+    expect(
+      parseSections('<!-- nota -->\n## A\n\na').map(({ title }) => title),
+    ).toEqual(['A'])
+    expect(
+      parseSections('## A\n\n<!-- rascunho\n\n## B\n\nb').map(
+        ({ title }) => title,
+      ),
+    ).toEqual(['A'])
+  })
+
+  // CommonMark fences: a closing fence is the opener's character, at least
+  // as long, with nothing after it; an opener indented four spaces is code
+  // of another kind, not a fence (#12).
+  it.each([
+    [
+      'a longer fence around a shorter one',
+      ['````md', '```md', '## Não é seção', '```', '````', '## B'],
+    ],
+    [
+      'a line with an info string inside a fence',
+      ['```', '```js', '## Não é seção', '```', '## B'],
+    ],
+    [
+      'a shorter run inside a longer fence',
+      ['~~~~', '~~~', '## Não é seção', '~~~~', '## B'],
+    ],
+    [
+      'a closer indented up to three spaces',
+      ['```', '## Não é seção', '   ```', '## B'],
+    ],
+  ])('finds only the heading after %s', (_, lines) => {
+    expect(parseSections(lines.join('\n')).map(({ title }) => title)).toEqual([
+      'B',
+    ])
+  })
+
+  it.each([
+    ['a closer with text after it', ['```', '``` fim', '## B']],
+    ['a closer indented four spaces', ['```', '    ```', '## B']],
+    ['a fence left open', ['## A', '```', '## B']],
+  ])('finds no heading after %s', (_, lines) => {
+    expect(
+      parseSections(lines.join('\n'))
+        .map(({ title }) => title)
+        .filter((title) => title === 'B'),
+    ).toEqual([])
+  })
+
+  // A fence under a list item hides the lines of the item; a heading at the
+  // margin ends the item, and the fence with it.
+  it('finds the heading at the margin after a fence left open under a list item', () => {
+    const lines = ['1. Exemplo:', '', '    ```md', '    ## Não é seção', '## B']
+    expect(parseSections(lines.join('\n')).map(({ title }) => title)).toEqual([
+      'B',
+    ])
+  })
+
+  it.each([
+    ['indented four spaces', ['    ```', '## A']],
+    ['with a backtick in its info string', ['``` a`b', '## A']],
+    ['of two backticks', ['``', '## A']],
+  ])('does not open a fence on a line %s', (_, lines) => {
+    expect(parseSections(lines.join('\n')).map(({ title }) => title)).toEqual([
+      'A',
+    ])
+  })
+
   it('reads levels 1 to 4 only, and strips closing hashes', () => {
     const sections = parseSections('#### Quatro\n\n##### Cinco\n\n## Riscos ##')
     expect(sections.map(({ title }) => title)).toEqual(['Quatro', 'Riscos'])
@@ -230,6 +326,31 @@ describe('hasContent and countCriteria', () => {
     expect(hasContent('x')).toBe(true)
   })
 
+  // GitHub shows a section that holds only a comment as empty (#12).
+  it.each([
+    ['a one-line comment', '<!-- HIGH ou NORMAL -->'],
+    ['a comment over several lines', '<!--\nHIGH ou NORMAL\n-->'],
+    ['a comment left open', '<!-- HIGH ou NORMAL'],
+    [
+      'two comments and a form answer',
+      '<!-- a -->\n\n<!-- b -->\n_No response_',
+    ],
+    ['comments on one line', '<!-- a --> <!-- b -->'],
+  ])('treats a section with only %s as empty', (_, content) => {
+    expect(hasContent(content)).toBe(false)
+  })
+
+  // Fenced code is visible content, and text beside a comment is shown.
+  it.each([
+    ['fenced code', '```\nHIGH\n```'],
+    ['a fence that holds a comment', '```html\n<!-- HIGH -->\n```'],
+    ['text after a comment block', '<!-- nota -->\n\nNORMAL'],
+    ['text before an inline comment', 'NORMAL <!-- ou HIGH -->'],
+    ['a code span that mentions a comment', '`<!--`'],
+  ])('treats a section with %s as written', (_, content) => {
+    expect(hasContent(content)).toBe(true)
+  })
+
   it('counts checklist items with text after the box', () => {
     expect(countCriteria('- [ ] a\n- [x] b\n* [X] c\n  - [ ] aninhado')).toBe(4)
   })
@@ -240,6 +361,185 @@ describe('hasContent and countCriteria', () => {
       expect(countCriteria(content)).toBe(0)
     },
   )
+
+  // What the rendered issue shows: a box in sample code or in a comment
+  // GitHub hides is no criterion.
+  it.each([
+    ['backtick fenced code', '```md\n- [ ] exemplo\n```'],
+    ['tilde fenced code', '~~~\n- [ ] exemplo\n~~~'],
+    ['a fence left open', 'Exemplo:\n\n```\n- [ ] exemplo'],
+    ['a fence with a tilde line inside', '```\n~~~\n- [ ] exemplo\n```'],
+    ['a comment over several lines', '<!--\n- [ ] escondido\n-->'],
+    ['a comment on one line', '<!-- - [ ] escondido -->'],
+    ['a comment left open', 'Nota:\n\n<!-- rascunho\n- [ ] escondido'],
+    ['a line that opens with a comment', '<!-- nota --> - [ ] escondido'],
+    ['a box with only a comment after it', '- [ ] <!-- a preencher -->'],
+    [
+      'a three-backtick sample inside a four-backtick fence',
+      '````md\nExemplo:\n\n```md\n- [ ] exemplo\n```\n````',
+    ],
+    [
+      'a three-backtick fence whose js line does not close it',
+      '```\n```js\n- [ ] exemplo\n```',
+    ],
+    ['a fence whose closer has text after it', '```\n``` fim\n- [ ] exemplo'],
+    [
+      'a fence left open after a real closer of another fence',
+      '```\n```\n~~~\n- [ ] exemplo',
+    ],
+    [
+      'a comment block over several lines, text after its close',
+      '<!-- rascunho\n- [ ] escondido\n--> - [ ] escondido também',
+    ],
+  ])('does not count a box in %s', (_, content) => {
+    expect(countCriteria(content)).toBe(0)
+  })
+
+  it('counts the boxes around fenced code and comments, and reads a code span as text', () => {
+    const content = [
+      '- [ ] antes',
+      '```',
+      '- [ ] no código',
+      '```',
+      '- [ ] depois do código <!-- com uma nota -->',
+      '<!--',
+      '- [ ] no comentário',
+      '-->',
+      '- [ ] fala de `<!--` num trecho de código',
+      '- [ ] <!-- nota --> e texto depois',
+      '~~~',
+      '- [ ] no código de novo',
+      '~~~',
+      '  - [x] aninhado',
+    ].join('\n')
+    expect(countCriteria(content)).toBe(5)
+  })
+
+  // A code example indented under a list item is fenced code: GitHub shows
+  // no box in it (#12). Erring on the side that blocks, a fence indented four
+  // spaces or more counts right under a list item or its continuation.
+  it.each([
+    [
+      'a numbered item',
+      '1. Exemplo:\n\n    ```md\n    - [ ] O gate abre.\n    ```',
+    ],
+    ['a bullet', '- Exemplo:\n\n    ```md\n    - [ ] O gate abre.\n    ```'],
+    [
+      'a star bullet',
+      '* Exemplo:\n\n    ```md\n    - [ ] O gate abre.\n    ```',
+    ],
+    [
+      'a parenthesis number',
+      '1) Exemplo:\n\n    ```md\n    - [ ] O gate abre.\n    ```',
+    ],
+    [
+      'a continuation line of an item',
+      '1. Exemplo:\n   com mais texto.\n\n    ~~~\n    - [ ] O gate abre.\n    ~~~',
+    ],
+    [
+      'a lazy continuation line of an item',
+      '1. Exemplo:\ncom mais texto.\n\n    ```\n    - [ ] O gate abre.\n    ```',
+    ],
+    [
+      'an item nested deeper',
+      '- a\n    - b\n\n        ```\n        - [ ] c\n        ```',
+    ],
+    [
+      'a tab-indented fence',
+      '1. Exemplo:\n\n\t```md\n\t- [ ] O gate abre.\n\t```',
+    ],
+  ])('does not count a box in fenced code under %s', (_, content) => {
+    expect(countCriteria(content)).toBe(0)
+  })
+
+  it('counts the boxes around fenced code under list items', () => {
+    const content = [
+      '1. Exemplo:',
+      '',
+      '    ```md',
+      '    - [ ] exemplo',
+      '    ```',
+      '',
+      '- [ ] real depois do exemplo',
+      '',
+      '2. Outro exemplo:',
+      '',
+      '    ```md',
+      '    - [ ] exemplo',
+      '    ```',
+      '    - [ ] continuação real do item',
+      '- [x] outro real',
+      '',
+      '    ```md',
+      '    - [ ] exemplo sob um item de checklist',
+      '    ```',
+    ].join('\n')
+    expect(countCriteria(content)).toBe(3)
+  })
+
+  // Inside a fence under a list item, a fence line indented more than three
+  // columns past the opening one is code, as it is to GitHub, and does not
+  // close the fence early.
+  it('does not close a fence under a list item on a deeper-indented fence line', () => {
+    const content = [
+      '1. Exemplo:',
+      '',
+      '    ```md',
+      '    - item',
+      '',
+      '        ```',
+      '        - [ ] exemplo',
+      '    ```',
+      '- [ ] real',
+    ].join('\n')
+    expect(countCriteria(content)).toBe(1)
+  })
+
+  // The item's text starts at most three columns left of its fence: a line
+  // further left ends the item and the fence in it, as it does on GitHub.
+  it('ends a fence under a list item at a line left of the item', () => {
+    expect(
+      countCriteria('1. Exemplo:\n\n    ```md\n    - [ ] exemplo\n- [ ] real'),
+    ).toBe(1)
+  })
+
+  // Away from a list, a fence indented four spaces is indented code, as
+  // before: the fence is text, so the box in it still counts.
+  it.each([
+    [
+      'after a paragraph',
+      'Exemplo:\n\n    ```md\n    - [ ] O gate abre.\n    ```',
+    ],
+    [
+      'right below a heading',
+      '### Exemplo\n    ```md\n    - [ ] O gate abre.\n    ```',
+    ],
+    [
+      'after a list that a paragraph ended',
+      '- item\n\nParágrafo.\n\n    ```md\n    - [ ] O gate abre.\n    ```',
+    ],
+    [
+      'after a list that a heading ended',
+      '- item\n### Exemplo\n\n    ```md\n    - [ ] O gate abre.\n    ```',
+    ],
+    [
+      'after a list that a fence at the margin ended',
+      '- item\n```\ncódigo\n```\n\n    ```md\n    - [ ] O gate abre.\n    ```',
+    ],
+  ])('still counts a box in a four-space fence %s', (_, content) => {
+    expect(countCriteria(content)).toBe(1)
+  })
+
+  it('counts a box after a fence that closed, and none after one left open', () => {
+    expect(countCriteria('````\n```\n````\n- [ ] depois')).toBe(1)
+    expect(countCriteria('- [ ] antes\n```\n- [ ] dentro\n- [ ] ainda')).toBe(1)
+  })
+
+  it('reads criteria from the section with its fenced sample left out', () => {
+    const plan =
+      '## Critérios de aceite\n\n- [ ] real\n\n```md\n- [ ] exemplo\n## Riscos\n```\n\n## Riscos\n\nNORMAL'
+    expect(countCriteria(criteriaSection(plan))).toBe(1)
+  })
 })
 
 describe('checkSections and criteriaSection', () => {
@@ -369,8 +669,58 @@ describe('branchSectionFor and planCitesBranch', () => {
       `## Fora de escopo\n\nNão usar ${branch}.\n\n## Plano\n\n1. Fazer.`,
     ],
     ['a mention before any section', `${branch}\n\n## Plano\n\n1. Fazer.`],
+    ['a dotted suffix', `## Plano\n\nBranch: \`${branch}.old\`.`],
+    ['a dotted number', `## Plano\n\n${branch}.2`],
+    ['a dotted accented word', `## Plano\n\n${branch}.ção`],
+    ['a dot and a hyphen', `## Plano\n\n${branch}.-x`],
+    ['a dot and a path', `## Plano\n\n${branch}./x`],
+    ['an accented prefix', `## Plano\n\nç${branch}`],
   ])('does not count %s', (_, text) => {
     expect(planCitesBranch(text, branch, 'enhancement').cited).toBe(false)
+  })
+
+  it.each([
+    ['a period that ends the plan', `## Plano\n\nBranch ${branch}.`],
+    ['a period that ends a line', `## Plano\n\nBranch ${branch}.\n\n1. Fazer.`],
+    [
+      'a period before a space',
+      `## Plano\n\nA branch ${branch}. Depois, o PR.`,
+    ],
+    ['a period inside parentheses', `## Plano\n\n(branch ${branch}.)`],
+    ['an ellipsis', `## Plano\n\nBranch ${branch}...`],
+    ['a period after code', `## Plano\n\nBranch: \`${branch}\`.`],
+    ['a period in bold', `## Plano\n\n**${branch}.**`],
+  ])('counts the branch before %s', (_, text) => {
+    expect(planCitesBranch(text, branch, 'enhancement').cited).toBe(true)
+  })
+
+  // Plano is read as GitHub shows it (#12): a name only inside an HTML
+  // comment cites nothing; fenced code and code spans are visible.
+  it.each([
+    [
+      'a comment block',
+      `## Plano\n\n<!--\nBranch: ${branch}\n-->\n\n1. Fazer.`,
+    ],
+    ['a one-line comment block', `## Plano\n\n<!-- ${branch} -->\n\n1. Fazer.`],
+    ['an inline comment', `## Plano\n\n1. Fazer. <!-- ${branch} -->`],
+    ['a comment left open', `## Plano\n\n1. Fazer.\n\n<!-- rascunho ${branch}`],
+  ])('does not count the branch only inside %s', (_, text) => {
+    expect(planCitesBranch(text, branch, 'enhancement').cited).toBe(false)
+  })
+
+  it.each([
+    ['fenced code', `## Plano\n\n\`\`\`sh\ngit switch -c ${branch}\n\`\`\``],
+    [
+      'fenced code under a list item',
+      `## Plano\n\n1. Cortar:\n\n    \`\`\`sh\n    git switch -c ${branch}\n    \`\`\``,
+    ],
+    [
+      'fenced code that holds a comment',
+      `## Plano\n\n\`\`\`html\n<!-- ${branch} -->\n\`\`\``,
+    ],
+    ['text after a comment', `## Plano\n\n<!-- nota -->\n\nBranch: ${branch}.`],
+  ])('counts the branch cited in %s', (_, text) => {
+    expect(planCitesBranch(text, branch, 'enhancement').cited).toBe(true)
   })
 
   it('reads the branch from the exact Plano, not from "Plano de testes" before it', () => {
@@ -664,6 +1014,76 @@ describe('approveState', () => {
     )
   })
 
+  // Only the acts that open the gate need the owner: the Approve (above) and
+  // the label (below). Every act that closes it counts from anyone, because
+  // in doubt the gate blocks (#12).
+  describe.each([
+    ['another user', { __typename: 'User', login: 'outra' }],
+    ['a bot with the owner’s login', { __typename: 'Bot', login: ownerLogin }],
+    ['a deleted account', null],
+  ])('an act that closes the gate, by %s', (_, author) => {
+    it.each([
+      ['the withdrawal', '# Approve retirado\n\nx', 'withdrawn'],
+      [
+        'a near-miss withdrawal',
+        '## Approve retirado\n\nx',
+        'ambiguous-approve',
+      ],
+      [
+        'a near-miss Approve',
+        '# Owner Approve retirado\n\nx',
+        'ambiguous-approve',
+      ],
+      ['a "# Plano"', '# Plano\n\nnovo', 'revised'],
+    ])('cancels the owner’s Approve: %s', (_, body, code) => {
+      expect(
+        state({
+          comments: [approve(), said(body, at('12:30'), { author })],
+        }),
+      ).toMatchObject({ ok: false, code })
+    })
+
+    it('cancels the owner’s Approve: an edit', () => {
+      expect(
+        state({
+          comments: [
+            approve(),
+            said('Uma resposta.', at('12:10'), {
+              author,
+              lastEditedAt: at('12:30'),
+            }),
+          ],
+        }).code,
+      ).toBe('comment-edited')
+    })
+
+    it('cancels the owner’s Approve: a deletion', () => {
+      expect(
+        state({
+          events: [
+            ready(),
+            {
+              __typename: 'CommentDeletedEvent',
+              createdAt: at('12:30'),
+              actor: author,
+            },
+          ],
+        }).code,
+      ).toBe('comment-deleted')
+    })
+
+    it('neither opens the gate nor cancels the owner’s Approve with a "# Owner Approve"', () => {
+      expect(state({ comments: [approve(at('12:30'), { author })] }).code).toBe(
+        'not-owner',
+      )
+      expect(
+        state({
+          comments: [approve(), approve(at('12:30'), { author })],
+        }),
+      ).toMatchObject({ ok: true, code: 'ok' })
+    })
+  })
+
   it('refuses an Approve without words below the heading', () => {
     expect(
       state({ comments: [said('# Owner Approve\n\n   ', at('12:00'))] }).code,
@@ -815,6 +1235,20 @@ describe('approveState', () => {
       }).ok,
     ).toBe(true)
   })
+
+  // The last application is the one judged, so another actor's, after the
+  // owner's, cancels whoever it came from (#12).
+  it.each([
+    ['another user', { __typename: 'User', login: 'outra' }],
+    ['a bot under the owner’s login', { __typename: 'Bot', login: ownerLogin }],
+  ])(
+    'stops counting when %s applies ready-for-agent after the owner',
+    (_, actor) => {
+      expect(
+        state({ events: [ready(at('12:05')), ready(at('12:10'), actor)] }).code,
+      ).toBe('label-not-owner')
+    },
+  )
 
   it('needs ready-for-agent applied after the Approve', () => {
     expect(state({ events: [ready(at('11:00'))] }).code).toBe(

@@ -14,6 +14,13 @@
 // selected, so a gate reading a field it never asked for sees nothing, as it
 // would on GitHub.
 //
+// Connections are paged as GitHub pages them: every field that selects
+// `nodes` must ask for `first` or `last` (one of them, a literal from 1 to
+// 100), and the answer holds only that many nodes, the first or the last ones
+// of the fixture. A fixture may hold more nodes than a page, with the true
+// `totalCount` beside them, so a gate that reads one page and judges it whole
+// is caught.
+//
 // FAKE_GH_FIXTURE names a JSON file:
 //   { owner, name, issue?: Answer, pr?: Answer }
 //   Answer = { number, mode: 'ok' | 'missing' | 'auth' | 'unreachable', data? }
@@ -26,7 +33,7 @@ const argv = process.argv.slice(2)
 const required = {
   issue: `{ repository { owner { login } issue {
     state body lastEditedAt
-    labels { nodes { name } }
+    labels { totalCount nodes { name } }
     comments { totalCount nodes { body createdAt lastEditedAt author { __typename login } } }
     timelineItems { totalCount nodes {
       __typename
@@ -200,6 +207,48 @@ function missingFrom(have, need, at = []) {
   return missing
 }
 
+/** The most nodes GitHub gives one page of a connection. */
+const maxPage = 100
+
+/**
+ * How a query pages its connections, or the problems with it: a field that
+ * selects `nodes` is a connection, and GitHub refuses one without `first` or
+ * `last`, with both, or with a size outside 1 to 100.
+ */
+function pagingProblems(set, at = []) {
+  if (set == null) return []
+  const problems = []
+  for (const [name, field] of set.fields) {
+    const path = [...at, name].join('.')
+    if (field.selection?.fields.has('nodes')) {
+      const sizes = ['first', 'last'].filter((arg) => arg in field.args)
+      if (sizes.length !== 1)
+        problems.push(`${path} deve pedir first ou last, e só um deles`)
+      for (const arg of sizes) {
+        const size = field.args[arg]
+        if (!/^[1-9]\d*$/.test(String(size)) || Number(size) > maxPage)
+          problems.push(
+            `${path}(${arg}: ${size}) deve ser um número de 1 a ${maxPage}`,
+          )
+      }
+    }
+    problems.push(...pagingProblems(field.selection, [...at, name]))
+  }
+  for (const [type, fragment] of set.fragments)
+    problems.push(...pagingProblems(fragment, [...at, `... on ${type}`]))
+  return problems
+}
+
+/** A connection's nodes cut to the page the field asked for (pagingProblems checked it). */
+function paged(value, args) {
+  if (value == null || !Array.isArray(value.nodes)) return value
+  if ('first' in args)
+    return { ...value, nodes: value.nodes.slice(0, Number(args.first)) }
+  if ('last' in args)
+    return { ...value, nodes: value.nodes.slice(-Number(args.last)) }
+  return value
+}
+
 /** The answer cut down to what the query selected, as GitHub would send it. */
 function prune(value, set) {
   if (value == null || set == null || typeof value !== 'object') return value
@@ -210,7 +259,8 @@ function prune(value, set) {
   ).fields
   const out = {}
   for (const [name, field] of fields)
-    if (name in value) out[name] = prune(value[name], field.selection)
+    if (name in value)
+      out[name] = prune(paged(value[name], field.args), field.selection)
   return out
 }
 
@@ -305,6 +355,9 @@ function answer() {
   const missing = missingFrom(tree, parseQuery(required[kind]))
   if (missing.length > 0)
     return refuse(`a query de ${kind} não pede: ${missing.join(', ')}`)
+  const paging = pagingProblems(tree)
+  if (paging.length > 0)
+    return refuse(`a query de ${kind} pagina errado: ${paging.join('; ')}`)
   if (kind === 'issue') {
     const types =
       target.selection.fields.get('timelineItems')?.args.itemTypes ?? null

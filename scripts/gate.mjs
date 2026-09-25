@@ -54,10 +54,11 @@ const originTrunk = `refs/remotes/origin/${trunk}`
 const intentDir = 'context/intent/'
 const changelogPath = 'context/evolution/changelog.md'
 // GraphQL pages are read whole or not judged: an Approve or a withdrawal on an
-// unread page would silently change the verdict.
+// unread page would silently change the verdict, and so would a state or
+// category label past the first page. 100 is the most one page may ask for.
 const page = 100
 
-const issueQuery = `query($owner: String!, $name: String!, $number: Int!) { repository(owner: $owner, name: $name) { owner { login } issue(number: $number) { number state body lastEditedAt labels(first: 50) { nodes { name } } comments(last: ${page}) { totalCount nodes { body createdAt lastEditedAt author { __typename login } } } timelineItems(last: ${page}, itemTypes: [LABELED_EVENT, REOPENED_EVENT, COMMENT_DELETED_EVENT]) { totalCount nodes { __typename ... on LabeledEvent { createdAt actor { __typename login } label { name } } ... on ReopenedEvent { createdAt } ... on CommentDeletedEvent { createdAt } } } } } }`
+const issueQuery = `query($owner: String!, $name: String!, $number: Int!) { repository(owner: $owner, name: $name) { owner { login } issue(number: $number) { number state body lastEditedAt labels(first: ${page}) { totalCount nodes { name } } comments(last: ${page}) { totalCount nodes { body createdAt lastEditedAt author { __typename login } } } timelineItems(last: ${page}, itemTypes: [LABELED_EVENT, REOPENED_EVENT, COMMENT_DELETED_EVENT]) { totalCount nodes { __typename ... on LabeledEvent { createdAt actor { __typename login } label { name } } ... on ReopenedEvent { createdAt } ... on CommentDeletedEvent { createdAt } } } } } }`
 
 const prQuery = `query($owner: String!, $name: String!, $number: Int!) { repository(owner: $owner, name: $name) { pullRequest(number: $number) { baseRefName headRefName headRefOid isDraft body closingIssuesReferences(first: 10) { totalCount nodes { number repository { nameWithOwner } } } } } }`
 
@@ -629,7 +630,13 @@ function main() {
   } else {
     facts.verified = true
     const labels = (issue.labels?.nodes ?? []).map((node) => node.name)
-    labelsRead = true
+    // The labels are judged only when all of them were read. GitHub orders
+    // them by when each was created in the repository, oldest first, so a
+    // partial page leaves out the newest ones: a state label deleted and
+    // created again, say, whatever order they were applied in. A partial page
+    // also leaves labelsRead false for the branch step.
+    const labelsTotal = issue.labels?.totalCount
+    labelsRead = Number.isInteger(labelsTotal) && labelsTotal <= labels.length
     set(
       'issue-open',
       issue.state === 'OPEN' ? 'ok' : 'no',
@@ -639,35 +646,45 @@ function main() {
       { blocks: true },
     )
 
-    const category = kindOf(labels)
-    kind = category.kind
-    set(
-      'kind',
-      kind ? 'ok' : 'no',
-      kind
-        ? kind
-        : category.found.length === 0
-          ? `nenhuma label de categoria (${categoryLabels.join(' ou ')})`
-          : `mais de uma label de categoria: ${category.found.join(', ')}`,
-      { blocks: true },
-    )
+    if (!labelsRead) {
+      const unread = labelsTotal - labels.length
+      const partial = (what) =>
+        Number.isInteger(labelsTotal)
+          ? `a issue tem ${labelsTotal} labels e o gate leu ${labels.length}: ${unread} ${unread === 1 ? 'ficou' : 'ficaram'} sem ler, e o gate não julga ${what} sem ler todas`
+          : `o GitHub não disse quantas labels a issue tem, e o gate não julga ${what} sem saber se leu todas (leu ${labels.length})`
+      set('kind', 'no', partial('a categoria'), { blocks: true })
+      set('state-label', 'no', partial('o estado'), { blocks: true })
+    } else {
+      const category = kindOf(labels)
+      kind = category.kind
+      set(
+        'kind',
+        kind ? 'ok' : 'no',
+        kind
+          ? kind
+          : category.found.length === 0
+            ? `nenhuma label de categoria (${categoryLabels.join(' ou ')})`
+            : `mais de uma label de categoria: ${category.found.join(', ')}`,
+        { blocks: true },
+      )
 
-    // Exactly one state label, and it is the ready one. Checking only for the
-    // ready label let `ready-for-human` + `ready-for-agent` open the gate
-    // (lite-campaign #103), so contradictions are named.
-    const states = stateLabels.filter((name) => labels.includes(name))
-    set(
-      'state-label',
-      states.length === 1 && states[0] === readyLabel ? 'ok' : 'no',
-      states.length === 1 && states[0] === readyLabel
-        ? readyLabel
-        : states.length === 0
-          ? `nenhuma label de estado; o build só começa em ${readyLabel}, que o dono aplica depois do Approve`
-          : states.length > 1
-            ? `labels de estado contraditórias: ${states.join(', ')}; deve haver só ${readyLabel}`
-            : `${states[0]}: o build só começa em ${readyLabel}, que o dono aplica depois do Approve`,
-      { blocks: true },
-    )
+      // Exactly one state label, and it is the ready one. Checking only for
+      // the ready label let `ready-for-human` + `ready-for-agent` open the
+      // gate (lite-campaign #103), so contradictions are named.
+      const states = stateLabels.filter((name) => labels.includes(name))
+      set(
+        'state-label',
+        states.length === 1 && states[0] === readyLabel ? 'ok' : 'no',
+        states.length === 1 && states[0] === readyLabel
+          ? readyLabel
+          : states.length === 0
+            ? `nenhuma label de estado; o build só começa em ${readyLabel}, que o dono aplica depois do Approve`
+            : states.length > 1
+              ? `labels de estado contraditórias: ${states.join(', ')}; deve haver só ${readyLabel}`
+              : `${states[0]}: o build só começa em ${readyLabel}, que o dono aplica depois do Approve`,
+        { blocks: true },
+      )
+    }
 
     const comments = issue.comments?.nodes ?? []
     const events = issue.timelineItems?.nodes ?? []
@@ -900,7 +917,19 @@ function main() {
     // ahead of origin/main and a branch cut from claude/* both land here, and
     // so does a ref that points exactly at HEAD: right after
     // `git switch -c feature/N-x main`, main is HEAD, and that is when the
-    // gate must already refuse. Only two kinds of ref are exempt:
+    // gate must already refuse. Only this branch and its copy on origin are
+    // not foreign: refs/heads/<branch> and refs/remotes/origin/<branch>, the
+    // refs `pushed` and ownCopyMerge read too. A ref of the same name under
+    // another remote is someone else's copy, and is judged like any other.
+    // Any other ref named for issue #N is foreign too: one issue has one
+    // branch (ADR 0001), and since the commits on both sides cite #N, git
+    // cannot tell which one was cut from the other, so neither exemption below
+    // applies to it. That covers a branch cut from another branch of #N, the
+    // one it was cut from, and a leftover under an old name (`git branch -m`
+    // after a push). The remedy depends on the direction: another branch of
+    // #N that HEAD already contains is deleted with `git branch -d`, and one
+    // that holds commits HEAD lacks is first brought into a single branch.
+    // Only two kinds of the remaining refs are exempt:
     // (a) another issue's branch strictly ahead of HEAD, once every commit
     //     HEAD holds outside origin/main cites #N: it was built on top of this
     //     one, and its own gate run is the one that blocks. Before that,
@@ -929,7 +958,16 @@ function main() {
         mine.length > 0 && mine.every((commit) => cites.test(commit.message))
       return headCites
     }
+    const refName = (ref) =>
+      ref.startsWith('refs/heads/')
+        ? ref.slice('refs/heads/'.length)
+        : ref.slice('refs/remotes/'.length).replace(/^[^/]+\//, '')
+    const ownRefs = new Set([
+      `refs/heads/${branch}`,
+      `refs/remotes/origin/${branch}`,
+    ])
     const sharing = []
+    const shaOf = new Map()
     const candidates = (
       gitOut(
         'for-each-ref',
@@ -947,14 +985,12 @@ function main() {
         return { sha: line.slice(0, space), ref: line.slice(space + 1) }
       })
     for (const { sha, ref } of candidates) {
-      if (ref.endsWith('/HEAD') || ref === originTrunk) continue
-      const name = ref.startsWith('refs/heads/')
-        ? ref.slice('refs/heads/'.length)
-        : ref.slice('refs/remotes/'.length).replace(/^[^/]+\//, '')
-      const other = parseBranch(name)
-      // Same-issue refs (this branch, its pushed copy) are not foreign.
-      if (other?.issue === number) continue
+      if (ref.endsWith('/HEAD') || ref === originTrunk || ownRefs.has(ref))
+        continue
+      const other = parseBranch(refName(ref))
+      const sameIssue = other?.issue === number
       if (
+        !sameIssue &&
         other !== null &&
         sha !== facts.headSha &&
         isAncestor(facts.headSha, sha) &&
@@ -965,12 +1001,14 @@ function main() {
       if (shared === null || isAncestor(shared, originMain)) continue
       const below = commitsIn([shared, `^${originMain}`])
       if (
+        !sameIssue &&
         below !== null &&
         below.length > 0 &&
         below.every((commit) => cites.test(commit.message))
       )
         continue
       sharing.push(ref)
+      shaOf.set(ref, sha)
     }
     // This branch's own commits: first-parent from HEAD, minus origin/main and
     // minus every ref it shares history with, so a stacked branch is judged by
@@ -1002,10 +1040,55 @@ function main() {
           ),
       )
     const shortRef = (ref) => ref.replace(/^refs\/(?:heads|remotes)\//, '')
+    // Another branch of #N, local or on origin, gets its own remedy, one per
+    // name: its local branch and its copy on origin are one branch. A ref
+    // under another remote is left to the recut below, since `git branch -d`
+    // does not reach it.
+    const ofThisIssue = sharing.filter(
+      (ref) =>
+        /^refs\/(?:heads|remotes\/origin)\//.test(ref) &&
+        parseBranch(refName(ref))?.issue === number,
+    )
+    const foreign = sharing.filter((ref) => !ofThisIssue.includes(ref))
+    const otherNames = [...new Set(ofThisIssue.map(refName))]
+    // A name whose refs HEAD all contains holds nothing HEAD lacks, so
+    // deleting it loses nothing, and `git branch -d` agrees. Any other holds
+    // work of its own: it is never to be deleted first, and never with -D.
+    const holdsMore = (name) =>
+      ofThisIssue.some(
+        (ref) =>
+          refName(ref) === name && !isAncestor(shaOf.get(ref), facts.headSha),
+      )
+    // The delete names only the commands for the refs found: `git branch -d`
+    // for a local branch, `git push origin --delete` for a copy on origin. A
+    // leftover old name after `git branch -m` and a push is on origin alone,
+    // and `git branch -d` would fail on it. The tracking ref may outlive the
+    // branch on GitHub, so the push comes with the prune that clears it.
+    const deleteCommands = (name) => {
+      const local = ofThisIssue.includes(`refs/heads/${name}`)
+      const published = ofThisIssue.includes(`refs/remotes/origin/${name}`)
+      const push = `git push origin --delete ${name}`
+      const prune =
+        'se ela já não existe no GitHub, com git fetch --prune origin'
+      if (local && published)
+        return `git branch -d ${name} e com ${push} (${prune})`
+      if (published) return `${push} (${prune})`
+      return `git branch -d ${name}`
+    }
+    const sameIssueRemedy = (name) =>
+      holdsMore(name)
+        ? `a outra branch da #${number}, ${name}, tem commits que esta não tem: fique com uma só, traga para ela o trabalho da outra, e só então apague a outra (git branch -d recusa apagar trabalho não mergeado)`
+        : `apague a outra branch da #${number} com ${deleteCommands(name)}`
     const stackProblems = [
-      ...(sharing.length > 0
+      ...(foreign.length > 0
         ? [
-            `compartilha commits que origin/${trunk} não tem com ${sharing.map(shortRef).join(', ')}`,
+            `compartilha commits que origin/${trunk} não tem com ${foreign.map(shortRef).join(', ')}`,
+          ]
+        : []),
+      ...(ofThisIssue.length > 0
+        ? [
+            `compartilha commits que origin/${trunk} não tem com outra branch da #${number} (${ofThisIssue.map(shortRef).join(', ')}); uma issue tem uma branch só`,
+            ...otherNames.map(sameIssueRemedy),
           ]
         : []),
       ...(foreignMerges.length > 0
@@ -1014,14 +1097,19 @@ function main() {
           ]
         : []),
     ]
+    // Another branch of #N carries its own remedy above; a recut is for
+    // anything else, and a rebase for a merge of this branch's own copy.
+    const remedy = ownCopyMerge
+      ? 'o merge trouxe a cópia publicada desta própria branch: desfaça-o e traga essa cópia com git pull --rebase (ou --ff-only)'
+      : foreign.length > 0 || foreignMerges.length > 0
+        ? `corte a branch de origin/${trunk} atualizado e traga para ela só o origin/${trunk}`
+        : null
     set(
       'stacked',
       stackProblems.length === 0 ? 'ok' : 'no',
       stackProblems.length === 0
         ? `nenhuma outra ref compartilha commits que origin/${trunk} não tem, e nenhum merge traz commits de fora dele`
-        : ownCopyMerge
-          ? `${stackProblems.join('; ')}; o merge trouxe a cópia publicada desta própria branch: desfaça-o e traga essa cópia com git pull --rebase (ou --ff-only)`
-          : `${stackProblems.join('; ')}; corte a branch de origin/${trunk} atualizado e traga para ela só o origin/${trunk}`,
+        : [...stackProblems, ...(remedy === null ? [] : [remedy])].join('; '),
       { blocks: true },
     )
 
