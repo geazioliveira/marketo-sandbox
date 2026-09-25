@@ -1,3 +1,4 @@
+import { spawnSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import * as loop from '../../scripts/loop-sections.mjs'
@@ -43,6 +44,7 @@ import {
   planCitesBranch,
   refreshPrCommand,
   reviewRuleSince,
+  shellWord,
   sectionsFor,
   stepIds,
   type GateCache,
@@ -1791,6 +1793,67 @@ describe('the commands a message and the docs give', () => {
     expect(gateCiCommand(14, 'feature/13-review-gate')).toBe(
       'node scripts/gate.mjs --pr 14 --branch feature/13-review-gate',
     )
+  })
+
+  it('quotes for the shell a branch or a PR a command would otherwise run as syntax', () => {
+    expect(gateCiCommand(14, 'feature/1-$(touch pwned)')).toBe(
+      "node scripts/gate.mjs --pr 14 --branch 'feature/1-$(touch pwned)'",
+    )
+    expect(gateCiCommand('14; id', 'feature/1-x')).toBe(
+      "node scripts/gate.mjs --pr '14; id' --branch feature/1-x",
+    )
+    expect(copilotRequestCommand('1`id`')).toBe(
+      "gh pr edit '1`id`' --add-reviewer @copilot",
+    )
+    expect(refreshPrCommand("1'x")).toBe(
+      "gh workflow run issue-link-refresh.yml --ref main -f pr='1'\\''x'",
+    )
+  })
+})
+
+describe('shellWord', () => {
+  it.each([
+    ['feature/13-review-gate', 'feature/13-review-gate'],
+    [14, '14'],
+    ['a.b_c:d@e%f+g=h,i-j', 'a.b_c:d@e%f+g=h,i-j'],
+    ['', "''"],
+    ['a b', "'a b'"],
+    ["a'b", "'a'\\''b'"],
+    ['$(id)', "'$(id)'"],
+    ['<n>', "'<n>'"],
+  ] as const)('shellWord(%j) is %s', (word, expected) => {
+    expect(shellWord(word)).toBe(expected)
+  })
+
+  // What a person pastes is what a shell reads back: every word, however
+  // hostile, comes back unchanged and runs nothing.
+  it.each([
+    'feature/13-review-gate',
+    'feature/1-$(touch pwned)',
+    'feature/1-`touch pwned`',
+    'a;touch pwned',
+    'a && touch pwned',
+    'a | cat',
+    "it's",
+    "''",
+    '"double"',
+    'a\\b',
+    'new\nline',
+    'tab\there',
+    '*',
+    '~',
+    '#comment',
+    '!bang',
+    '$HOME',
+    '',
+    '-n',
+  ])('a POSIX shell reads shellWord(%j) back unchanged', (word) => {
+    const run = spawnSync('sh', ['-c', `printf '%s' ${shellWord(word)}`], {
+      encoding: 'utf8',
+      env: { PATH: process.env.PATH ?? '' },
+    })
+    expect(run.status).toBe(0)
+    expect(run.stdout).toBe(word)
   })
 })
 

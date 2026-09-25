@@ -220,6 +220,7 @@ export interface ReviewThread {
 export declare const copilotReviewer: CopilotReviewer
 export declare const copilotRequestLogin: string
 export declare const copilotHandle: string
+export declare function shellWord(word: number | string): string
 export declare function copilotRequestCommand(pr: number | string): string
 export declare const copilotReviewStates: readonly string[]
 export declare const reviewRuleSince: string

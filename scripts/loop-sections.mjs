@@ -849,9 +849,25 @@ export const copilotRequestLogin = 'copilot-pull-request-reviewer[bot]'
 /** The handle gh takes for Copilot: `gh pr edit <n> --add-reviewer @copilot`. */
 export const copilotHandle = '@copilot'
 
+/**
+ * `word` as one word a POSIX shell reads back unchanged, for a command a
+ * person copies from a message: bare when it holds only characters no shell
+ * treats specially, else single-quoted, with a quote inside written '\''.
+ * The gate only reaches its review steps with a branch branchPattern accepts,
+ * all of whose characters are safe; the quoting keeps a command built from
+ * any other value (a fork's branch, a caller that did not check it) from
+ * running shell syntax once pasted (Copilot review on PR #15).
+ */
+export function shellWord(word) {
+  const text = String(word)
+  return /^[A-Za-z0-9_./:@%+=,-]+$/.test(text)
+    ? text
+    : `'${text.replaceAll("'", "'\\''")}'`
+}
+
 /** The command that requests a Copilot review (again) on PR `pr`. */
 export function copilotRequestCommand(pr) {
-  return `gh pr edit ${pr} --add-reviewer ${copilotHandle}`
+  return `gh pr edit ${shellWord(pr)} --add-reviewer ${copilotHandle}`
 }
 
 /**
@@ -1366,7 +1382,7 @@ export const issueLinkRefreshWorkflowFile = 'issue-link-refresh.yml'
  * (gateCiCommand, or a re-run of the issue-link watched to its end, is).
  */
 export function refreshPrCommand(pr) {
-  return `gh workflow run ${issueLinkRefreshWorkflowFile} --ref main -f pr=${pr}`
+  return `gh workflow run ${issueLinkRefreshWorkflowFile} --ref main -f pr=${shellWord(pr)}`
 }
 
 /**
@@ -1376,7 +1392,7 @@ export function refreshPrCommand(pr) {
  * PR's issue-link run followed by `gh run watch <id> --exit-status`.
  */
 export function gateCiCommand(pr, branch) {
-  return `node scripts/gate.mjs --pr ${pr} --branch ${branch}`
+  return `node scripts/gate.mjs --pr ${shellWord(pr)} --branch ${shellWord(branch)}`
 }
 
 /**

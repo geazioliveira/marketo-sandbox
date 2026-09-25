@@ -14,7 +14,7 @@ Uma entrada por mudança mergeada, da mais nova para a mais antiga, escrita no p
 - **Gate, dois passos novos em modo CI** (`copilot-review` e `review-threads`). Eles bloqueiam fora de draft.
   - `copilot-review` exige uma revisão do Copilot no commit que é a cabeça da PR. A identidade é o `Bot` com `databaseId` 175728472, nunca só o login, porque existe uma organização com esse nome. Os estados aceitos são `COMMENTED` e `APPROVED`, e uma revisão que falhou não conta. Outra revisão do Copilot pedida e ainda a caminho (`reviewRequests`) também bloqueia, mesmo com uma revisão na cabeça.
   - `review-threads` exige zero threads abertas, de qualquer autor, inclusive as desatualizadas.
-  - As mensagens dizem como pedir a revisão de novo e como renovar o veredito.
+  - As mensagens dizem como pedir a revisão de novo e como renovar o veredito. Os comandos delas põem entre aspas simples, para o shell, um valor que ele leria como sintaxe (`shellWord`).
 - **Re-disparo em duas etapas:**
   - o `Sinal de revisão` (`review-signal.yml`) roda o YAML da PR, não tem permissão nenhuma e só avisa;
   - o refresh roda de `main` via `workflow_run` e `workflow_dispatch` (com `--ref main`) e re-executa o `issue-link` da cabeça.
@@ -23,7 +23,7 @@ Uma entrada por mudança mergeada, da mais nova para a mais antiga, escrita no p
 
 ### Números medidos
 
-- `npm run check`: 1.263 testes em 8 arquivos verdes; `check:context` sem problemas; build OK.
+- `npm run check`: 1.291 testes em 8 arquivos verdes; `check:context` sem problemas; build OK.
 - 160 regras revertidas uma a uma numa cópia fora do worktree nas rodadas de construção, e mais 57 na de correção. Cada reversão fez algum teste falhar.
 - O gate novo, rodado sobre os dados reais: a PR #14 fica verde (revisão na cabeça `2f02ce0`, 0 de 3 threads abertas), e as PRs #10 e #11 ficariam bloqueadas.
 

@@ -44,7 +44,7 @@ Uma PR só é mergeada com uma revisão do Copilot no commit que é a cabeça de
    - `copilotReviewer`, `copilotRequestLogin`, `copilotReviewStates` e `copilotFailedReview`;
    - `reviewRuleSince`, a data a partir da qual a auditoria aplica a regra;
    - as funções puras `copilotReviewOn`, `copilotRequested` e `openThreads`;
-   - os comandos `copilotRequestCommand`, `refreshPrCommand` e `gateCiCommand`.
+   - os comandos `copilotRequestCommand`, `refreshPrCommand` e `gateCiCommand`, que passam cada valor pela `shellWord` e põem entre aspas simples o que o shell leria como sintaxe.
 
    O gate, a auditoria e os testes leem dali, e os hooks da #5 vão ler dali quando existirem.
 4. **O re-disparo tem duas etapas.** O `issue-link` só roda com eventos da PR, e uma revisão não é um deles.

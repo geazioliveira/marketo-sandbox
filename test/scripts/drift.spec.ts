@@ -724,6 +724,14 @@ describe('docs against the skip tokens', () => {
   })
 })
 
+// The docs write a command with placeholders (`<n>`, `<branch>`), which the
+// builders would quote (shellWord), so the builders run on sample values that
+// need no quoting and the placeholders are put back in their place.
+const SAMPLE_PR = 424242
+const SAMPLE_BRANCH = 'feature/1-sample-branch'
+const asDocs = (command: string, pr: string, branch = '<branch>') =>
+  command.replace(SAMPLE_BRANCH, branch).replace(String(SAMPLE_PR), pr)
+
 describe('docs against the review gate’s contract values (#13)', () => {
   const gate = read('scripts/gate.mjs')
   const reviewSignal = `.github/workflows/${reviewSignalWorkflowFile}`
@@ -821,7 +829,9 @@ describe('docs against the review gate’s contract values (#13)', () => {
     (file) => {
       expect(gate).toContain('copilotRequestCommand(options.pr)')
       const text = read(file)
-      expect(text).toContain(`\`${copilotRequestCommand('<n>')}\``)
+      expect(text).toContain(
+        `\`${asDocs(copilotRequestCommand(SAMPLE_PR), '<n>')}\``,
+      )
       const handles = [...text.matchAll(/--add-reviewer ([^\s`]+)/g)].map(
         (match) => match[1],
       )
@@ -839,9 +849,11 @@ describe('docs against the review gate’s contract values (#13)', () => {
         read(refresh),
       )?.[1]
       expect(input).toBeDefined()
-      expect(refreshPrCommand('<n>')).toContain(` -f ${input}=<n>`)
+      expect(refreshPrCommand(SAMPLE_PR)).toContain(` -f ${input}=${SAMPLE_PR}`)
       const text = read(file)
-      expect(text).toContain(`\`${refreshPrCommand('<n>')}\``)
+      expect(text).toContain(
+        `\`${asDocs(refreshPrCommand(SAMPLE_PR), '<n>')}\``,
+      )
       const runs = [
         ...text.matchAll(
           /gh workflow run (issue-link-refresh[\w.-]*)([^`\n]*)/g,
@@ -1051,7 +1063,9 @@ describe('docs against the review gate after the #13 reviews', () => {
       ]
       expect(gateRuns.length, file).toBeGreaterThan(0)
       for (const [command, pr, branch] of gateRuns)
-        expect(command, file).toBe(gateCiCommand(pr, branch))
+        expect(command, file).toBe(
+          asDocs(gateCiCommand(SAMPLE_PR, SAMPLE_BRANCH), pr, branch),
+        )
       expect(text, file).toMatch(/gh run rerun <run-id>/)
       expect(text, file).toMatch(
         /gh run watch <run-id>(?: --repo \S+)? --exit-status/,
@@ -1150,7 +1164,9 @@ describe('docs against the review gate after the #13 reviews', () => {
       )
       expect(text, file).toContain('`review_requested`')
       expect(text, file).toMatch(/uns 10 min/)
-      expect(text, file).toContain(`\`${copilotRequestCommand('<n>')}\``)
+      expect(text, file).toContain(
+        `\`${asDocs(copilotRequestCommand(SAMPLE_PR), '<n>')}\``,
+      )
       expect(text, file).not.toMatch(
         /(?:[Ee]nquanto|[Cc]om) "Review new pushes" (?:não )?(?:estiver )?ligad/,
       )
