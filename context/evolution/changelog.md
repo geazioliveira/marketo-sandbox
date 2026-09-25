@@ -4,7 +4,7 @@ Uma entrada por mudança mergeada, da mais nova para a mais antiga, escrita no p
 
 ---
 
-## 2026-09-24: Loop issue-first com gate e vínculo PR↔issue (#2)
+## 2026-09-24: Loop issue-first com gate e vínculo PR↔issue (#2, PR #10)
 
 **Fase**: Learn
 **Tipo**: Process
@@ -27,6 +27,7 @@ Uma entrada por mudança mergeada, da mais nova para a mais antiga, escrita no p
 ### Números medidos
 
 - `npx vitest run`: 418 testes em 5 arquivos, todos verdes.
+- CI `Qualidade / check` na PR #10: verde em 46 s num runner limpo (`npm ci`, lint, 418 testes, árvore limpa).
 - `node scripts/gate.mjs --json --no-cache` na branch `feature/2-loop-minimo`: `open: true`, `verified: true`, `blocked: []`. O Approve do dono (2026-09-24T22:08:39Z) e a label aplicada depois dele (22:08:53Z) foram lidos ao vivo.
 - Cada correção feita depois das revisões tem um teste de regressão que falha quando ela é revertida. Isso foi medido revertendo cada correção numa cópia fora do worktree.
 

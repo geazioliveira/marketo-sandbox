@@ -40,11 +40,11 @@ Esta é a primeira fatia do harness acompanhado na #1. As próximas são o CI de
   - usa o gate de `main` por caminho absoluto;
   - trata a PR só como dados;
   - tem permissões só de leitura.
-- [ ] `check.yml` tem o job `check` (`npm ci`, `lint`, `test`, árvore limpa) e fica verde na PR.
+- [x] `check.yml` tem o job `check` (`npm ci`, `lint`, `test`, árvore limpa) e fica verde na PR.
 - [x] Existem `AGENTS.md`, `CLAUDE.md` (exatamente `@AGENTS.md`) e `docs/development/workflow.md`.
 - [x] `.gitignore`, `.nvmrc` = 24, o `exclude` de `.claude/**` no vitest e o `lint` cobrindo `scripts/`.
 - [x] `npm run lint`, `npx tsc --noEmit` e `npm test` passam, e nada em `src/`, `scripts/*.py` ou `README.md` é tocado.
-- [ ] A PR abre com `Closes #2.` e traz em "Verificação" a saída do modo CI local do gate.
+- [x] A PR abre com `Closes #2.` e traz em "Verificação" a saída do modo CI local do gate.
 
 ## Abordagem técnica
 
@@ -94,5 +94,5 @@ O que foi construído está na [entrada do changelog](../evolution/changelog.md)
 ## Status
 
 - **Criado**: 2026-09-24 (Fase: Intent), do pedido do dono e do plano aprovado na #2 (#2)
-- **Status**: In Progress
-- **Atualizado**: 2026-09-24 (Fase: Learn), Resultados escritos antes da PR; os dois critérios que dependem da PR são marcados depois do CI dela (#2)
+- **Status**: Completed
+- **Atualizado**: 2026-09-24 (Fase: Learn), todos os critérios provados; CI `Qualidade / check` verde e gate em modo CI com exit 0 na PR #10 (#2)
