@@ -11,5 +11,11 @@ Uma escolha relevante por arquivo. Nome, template e vocabulário de status estã
 | [0001](0001-context-mesh-in-the-repository.md) | Context Mesh no repositório e loop issue-first | Accepted |
 | [0002](0002-soft-enforcement-on-github-free.md) | Enforcement soft do loop no GitHub Free | Accepted |
 | [0003](0003-copilot-review-and-no-open-threads-before-merge.md) | Revisão do Copilot na cabeça e nenhuma thread aberta antes do merge | Accepted |
+| [0004](0004-swagger-as-single-source-with-committed-generated-code.md) | O Swagger como fonte única, com o código gerado commitado | Accepted |
+| [0005](0005-nestjs-express-one-module-per-tag.md) | NestJS sobre Express, com um módulo por tag | Accepted |
+| [0006](0006-dtos-as-typescript-interfaces.md) | DTOs como interfaces TypeScript | Accepted |
+| [0007](0007-faker-factories-with-overrides-and-seed.md) | Factories faker com overrides e seed | Accepted |
+| [0008](0008-toolchain.md) | A toolchain | Accepted |
+| [0009](0009-behaviour-beside-generated-code.md) | Comportamento ao lado do código gerado, nunca dentro | Proposed |
 
-A 0003 foi tomada pela #13. As seis decisões retroativas da #4 ficam com os próximos números livres, a partir da 0004: o Swagger como fonte única com o código gerado commitado, NestJS com um módulo por tag, DTOs como interfaces, factories faker com overrides e seed, a toolchain e o comportamento com estado ao lado do código gerado.
+As decisões de 0004 a 0009 são o registro retroativo dos commits anteriores ao loop (#4). O racional que o histórico não registra está marcado "(inferido; confirmar)". A 0009 fica `Proposed` até a primeira sub-issue da Track A que construir comportamento.
