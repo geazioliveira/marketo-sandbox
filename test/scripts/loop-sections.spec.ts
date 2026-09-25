@@ -1821,6 +1821,30 @@ describe('shellWord', () => {
     ["a'b", "'a'\\''b'"],
     ['$(id)', "'$(id)'"],
     ['<n>', "'<n>'"],
+    ['=ls', "'=ls'"],
+    ['a=b', 'a=b'],
+    // One character a shell reads as syntax, and nothing else that would
+    // force the quoting, so each is pinned on its own; ! and ^ only some
+    // shells read (history, the old pipe), and the quoting covers them too.
+    ...[
+      ';',
+      '&',
+      '|',
+      '(',
+      ')',
+      '<',
+      '>',
+      '{',
+      '}',
+      '?',
+      '[',
+      ']',
+      '!',
+      '^',
+    ].map((character) => [`a${character}b`, `'a${character}b'`] as const),
+    ['~', "'~'"],
+    ['*', "'*'"],
+    ['#', "'#'"],
   ] as const)('shellWord(%j) is %s', (word, expected) => {
     expect(shellWord(word)).toBe(expected)
   })
@@ -1847,10 +1871,25 @@ describe('shellWord', () => {
     '$HOME',
     '',
     '-n',
+    'a;id',
+    'a&id',
+    'a|id',
+    'a(b)',
+    'a{b,c}',
+    'a<b',
+    'a>b',
+    // Globs that match a file in the shell's directory, so a bare one would
+    // come back as that file's name.
+    'package.jso?',
+    'package.jso[n]',
+    'package.*',
   ])('a POSIX shell reads shellWord(%j) back unchanged', (word) => {
+    // HOME is set, so a bare ~ expands under any sh (dash on CI included),
+    // and the shell runs in the repository, where the globs above match.
     const run = spawnSync('sh', ['-c', `printf '%s' ${shellWord(word)}`], {
+      cwd: root,
       encoding: 'utf8',
-      env: { PATH: process.env.PATH ?? '' },
+      env: { PATH: process.env.PATH ?? '', HOME: '/nonexistent-home' },
     })
     expect(run.status).toBe(0)
     expect(run.stdout).toBe(word)

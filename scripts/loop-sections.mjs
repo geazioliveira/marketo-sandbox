@@ -852,7 +852,9 @@ export const copilotHandle = '@copilot'
 /**
  * `word` as one word a POSIX shell reads back unchanged, for a command a
  * person copies from a message: bare when it holds only characters no shell
- * treats specially, else single-quoted, with a quote inside written '\''.
+ * treats specially and does not start with `=` (which zsh, the macOS shell,
+ * expands to a command's path), else single-quoted, with a quote inside
+ * written '\''.
  * The gate only reaches its review steps with a branch branchPattern accepts,
  * all of whose characters are safe; the quoting keeps a command built from
  * any other value (a fork's branch, a caller that did not check it) from
@@ -860,7 +862,7 @@ export const copilotHandle = '@copilot'
  */
 export function shellWord(word) {
   const text = String(word)
-  return /^[A-Za-z0-9_./:@%+=,-]+$/.test(text)
+  return /^[A-Za-z0-9_./:@%+,-][A-Za-z0-9_./:@%+=,-]*$/.test(text)
     ? text
     : `'${text.replaceAll("'", "'\\''")}'`
 }

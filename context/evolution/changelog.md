@@ -23,7 +23,7 @@ Uma entrada por mudança mergeada, da mais nova para a mais antiga, escrita no p
 
 ### Números medidos
 
-- `npm run check`: 1.291 testes em 8 arquivos verdes; `check:context` sem problemas; build OK.
+- `npm run check`: 1.320 testes em 8 arquivos verdes; `check:context` sem problemas; build OK.
 - 160 regras revertidas uma a uma numa cópia fora do worktree nas rodadas de construção, e mais 57 na de correção. Cada reversão fez algum teste falhar.
 - O gate novo, rodado sobre os dados reais: a PR #14 fica verde (revisão na cabeça `2f02ce0`, 0 de 3 threads abertas), e as PRs #10 e #11 ficariam bloqueadas.
 
