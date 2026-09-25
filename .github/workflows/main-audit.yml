@@ -1,0 +1,97 @@
+# The audit of main (#3): every change that reaches main is judged after the
+# fact. Every commit that did not come in through a PR closing an issue,
+# merged with the required checks green, gets an issue (bug + needs-triage,
+# "Mudança em main fora do loop: <sha7>") and a red run; past ten such commits
+# in one audit, one issue on the audited tip lists them all.
+# scripts/audit-main.mjs holds the rules; scripts/loop-sections.mjs holds the
+# title, the labels, the caps, the baseline, the schedule and the step names.
+#
+# Why after the fact: on GitHub Free nothing on the server blocks a direct
+# push, a web edit or a merge outside the loop (ADR 0002). The audit cannot
+# stop any of them; it makes sure none goes unrecorded.
+#
+# Two steps. Julgar judges the range, opens or comments the issues and leaves
+# the count of commits out of the loop for Veredito; it fails only when it was
+# interrupted (a gh or git failure), and then the remedy is to re-run this
+# run. Veredito turns the count into the run's color. So a red run whose
+# Julgar succeeded judged its range, and one whose Julgar failed did not.
+#
+# The range runs from the head of the newest run of this workflow on main that
+# is older than this one (a re-run keeps its id) and whose Julgar succeeded,
+# to the tip. So a push that started no run of its own (a skip token in its
+# message, a push made with GITHUB_TOKEN, a run cancelled in the queue) and a
+# run interrupted halfway are judged by the next audit. When main was
+# rewritten since that head, the tip gets an issue saying so, and the range
+# starts where the two histories part (git merge-base, or GitHub's compare
+# when a force-push left that head out of this clone). When older runs exist
+# and none of the latest 20 finished Julgar, the range restarts at the
+# baseline. The daily schedule is that next audit
+# when no push comes, and a dispatch runs one on demand; both audit main's
+# HEAD. Commits up to 8d4662f (the merge of #2) are never audited: before
+# fb4a804 there was no loop, and #2's merge is the bootstrap exception. The
+# first run audits the merge of #3's own PR, the first push to main with this
+# file in it, and must open no issue.
+#
+# What it cannot see: a push runs this file as that push left it, so a direct
+# push that edits or deletes this workflow is judged by its own copy, and a
+# run of that copy counts as audited when the next audit picks its start. That
+# push still shows in `git log`.
+name: Auditoria de main
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: '17 6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: read
+  issues: write
+  actions: read
+  checks: read
+
+# One audit at a time, and none dropped: with the default queue a third push
+# would cancel the second push's pending run. queue: max keeps up to 100
+# waiting, in order, and a run cancelled past that is covered by the next one.
+concurrency:
+  group: main-audit
+  cancel-in-progress: false
+  queue: max
+
+jobs:
+  audit:
+    name: audit
+    # A dispatch may name any branch; the audit judges main only.
+    if: ${{ github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      # The whole history: the range is walked locally along first parents,
+      # and its start must be in the clone. On a schedule or a dispatch the
+      # checked-out HEAD is the tip the audit judges up to.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      # Nothing is installed: the audit uses only Node's own modules.
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          package-manager-cache: false
+      # Event data reaches the script only through env, never interpolated
+      # into the shell. BEFORE, AFTER and FORCED are empty outside a push;
+      # GITHUB_EVENT_NAME, GITHUB_RUN_ID and RUNNER_TEMP come from the runner.
+      # The next audit reads this step's conclusion by its name.
+      - name: Julgar
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BEFORE: ${{ github.event.before }}
+          AFTER: ${{ github.event.after }}
+          FORCED: ${{ github.event.forced }}
+        run: node scripts/audit-main.mjs --judge
+      # Runs only after Julgar succeeded: red when it counted a change out of
+      # the loop, or left no count.
+      - name: Veredito
+        run: node scripts/audit-main.mjs --verdict
