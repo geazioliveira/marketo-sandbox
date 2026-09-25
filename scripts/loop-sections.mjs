@@ -945,6 +945,24 @@ export function copilotReviewOn({ reviews, headRefOid }) {
 }
 
 /**
+ * Whether a Copilot review is requested and still to come, from the PR's
+ * review requests as GraphQL gives them (`reviewRequests` nodes). GitHub drops
+ * a request once its review is submitted, so a pending one is a review on its
+ * way, whose threads are not there yet. The reviewer is matched as a review's
+ * author is (isCopilotReviewer), never by login. Measured on PR #15: GraphQL
+ * lists Copilot's pending request as the Bot with its database id, while
+ * REST's `requested_reviewers` lists nothing.
+ * @param {object[] | null | undefined} requests
+ * @returns {boolean}
+ */
+export function copilotRequested(requests) {
+  return (requests ?? []).some(
+    (request) =>
+      request != null && isCopilotReviewer(request.requestedReviewer),
+  )
+}
+
+/**
  * The review threads still open: every thread not resolved, whoever opened
  * it, outdated ones included. A thread that does not say it is resolved is
  * open, so a misread lands on the side that blocks.

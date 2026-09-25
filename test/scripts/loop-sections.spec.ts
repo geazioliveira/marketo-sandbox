@@ -17,6 +17,7 @@ import {
   copilotHandle,
   copilotRequestCommand,
   copilotRequestLogin,
+  copilotRequested,
   copilotReviewer,
   copilotReviewOn,
   copilotReviewStates,
@@ -1790,6 +1791,70 @@ describe('the commands a message and the docs give', () => {
     expect(gateCiCommand(14, 'feature/13-review-gate')).toBe(
       'node scripts/gate.mjs --pr 14 --branch feature/13-review-gate',
     )
+  })
+})
+
+describe('copilotRequested', () => {
+  const copilot = {
+    __typename: 'Bot',
+    login: 'copilot-pull-request-reviewer',
+    databaseId: 175728472,
+  }
+  const person = { __typename: 'User', login: 'geazioliveira' }
+
+  it.each([
+    ['Copilot requested', [{ requestedReviewer: copilot }], true],
+    [
+      'Copilot among other reviewers',
+      [
+        { requestedReviewer: person },
+        null,
+        { requestedReviewer: null },
+        { requestedReviewer: copilot },
+      ],
+      true,
+    ],
+    [
+      'Copilot as GitHub gives it when only __typename and databaseId are asked',
+      [{ requestedReviewer: { __typename: 'Bot', databaseId: 175728472 } }],
+      true,
+    ],
+    ['only a person', [{ requestedReviewer: person }], false],
+    [
+      'a person with Copilot’s login',
+      [
+        {
+          requestedReviewer: {
+            __typename: 'User',
+            login: 'copilot-pull-request-reviewer',
+          },
+        },
+      ],
+      false,
+    ],
+    [
+      'an Organization named like Copilot, with its id',
+      [{ requestedReviewer: { ...copilot, __typename: 'Organization' } }],
+      false,
+    ],
+    [
+      'another bot with Copilot’s login',
+      [{ requestedReviewer: { ...copilot, databaseId: 1 } }],
+      false,
+    ],
+    [
+      'a Bot without its database id',
+      [{ requestedReviewer: { __typename: 'Bot' } }],
+      false,
+    ],
+    ['a team', [{ requestedReviewer: { __typename: 'Team' } }], false],
+    ['a reviewer GitHub did not give', [{ requestedReviewer: null }], false],
+    ['a request GitHub gave as null', [null], false],
+    ['no request', [], false],
+    ['requests GitHub did not give (null)', null, false],
+    ['requests GitHub did not give (undefined)', undefined, false],
+  ])('copilotRequested: %s is %s', (_, requests, expected) => {
+    expect(copilotRequested(requests)).toBe(expected)
   })
 })
 

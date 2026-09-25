@@ -12,7 +12,7 @@ Uma entrada por mudança mergeada, da mais nova para a mais antiga, escrita no p
 ### O que foi construído / corrigido
 
 - **Gate, dois passos novos em modo CI** (`copilot-review` e `review-threads`). Eles bloqueiam fora de draft.
-  - `copilot-review` exige uma revisão do Copilot no commit que é a cabeça da PR. A identidade é o `Bot` com `databaseId` 175728472, nunca só o login, porque existe uma organização com esse nome. Os estados aceitos são `COMMENTED` e `APPROVED`, e uma revisão que falhou não conta.
+  - `copilot-review` exige uma revisão do Copilot no commit que é a cabeça da PR. A identidade é o `Bot` com `databaseId` 175728472, nunca só o login, porque existe uma organização com esse nome. Os estados aceitos são `COMMENTED` e `APPROVED`, e uma revisão que falhou não conta. Outra revisão do Copilot pedida e ainda a caminho (`reviewRequests`) também bloqueia, mesmo com uma revisão na cabeça.
   - `review-threads` exige zero threads abertas, de qualquer autor, inclusive as desatualizadas.
   - As mensagens dizem como pedir a revisão de novo e como renovar o veredito.
 - **Re-disparo em duas etapas:**
@@ -23,7 +23,7 @@ Uma entrada por mudança mergeada, da mais nova para a mais antiga, escrita no p
 
 ### Números medidos
 
-- `npm run check`: 1.220 testes em 8 arquivos verdes; `check:context` sem problemas; build OK.
+- `npm run check`: 1.263 testes em 8 arquivos verdes; `check:context` sem problemas; build OK.
 - 160 regras revertidas uma a uma numa cópia fora do worktree nas rodadas de construção, e mais 57 na de correção. Cada reversão fez algum teste falhar.
 - O gate novo, rodado sobre os dados reais: a PR #14 fica verde (revisão na cabeça `2f02ce0`, 0 de 3 threads abertas), e as PRs #10 e #11 ficariam bloqueadas.
 
@@ -42,6 +42,7 @@ Uma entrada por mudança mergeada, da mais nova para a mais antiga, escrita no p
 - **Responder numa thread também é uma revisão.** Isso conta no limite de página e dispara o sinal.
 - **"Pedir o refresh" não é "ter o veredito".** Um comando assíncrono retorna antes do resultado. Em regra de merge, só vale o que se espera terminar.
 - **Todo push depois da revisão exige outra revisão.** O Learn tem de estar commitado antes de a PR sair de draft.
+- **O REST não mostra o pedido de revisão ao Copilot.** Com a revisão pedida e pendente na PR #15, o `requested_reviewers` do REST veio vazio. Só o `reviewRequests` do GraphQL o mostra, como `Bot` com o `databaseId` 175728472.
 - **O Copilot resolve sozinho uma thread que um push deixou desatualizada.** Na PR #15, a thread do corpo vazio foi resolvida pelo Copilot, sem resposta, logo depois do push que a corrigia. O gate a vê resolvida; a resposta com o SHA continua sendo do agente.
 - **Num `run:` de uma linha só, o YAML corta o comando no ` #`.** A primeira execução do `Sinal de revisão`, na PR #15, recebeu `echo "Revisão na PR` e falhou. O teste de paridade lia a linha crua e não viu. Agora o passo usa um bloco literal, e um teste recusa ` #` em qualquer `run:` de uma linha só.
 

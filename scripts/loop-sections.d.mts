@@ -199,6 +199,11 @@ export interface PullRequestReview {
   body?: string | null
 }
 
+/** A review request as GraphQL gives it; the reviewer's databaseId only on a Bot. */
+export interface ReviewRequest {
+  requestedReviewer?: ReviewAuthor | null
+}
+
 export interface ReviewThread {
   isResolved?: boolean | null
   isOutdated?: boolean | null
@@ -226,6 +231,9 @@ export declare function copilotReviewOn<R extends PullRequestReview>(input: {
   reviews?: readonly (R | null)[] | null
   headRefOid: string | null | undefined
 }): { ok: boolean; review: R | null; latest: R | null; failed: boolean }
+export declare function copilotRequested(
+  requests: readonly (ReviewRequest | null)[] | null | undefined,
+): boolean
 export declare function openThreads<T extends ReviewThread | null>(
   threads: readonly T[] | null | undefined,
 ): T[]

@@ -36,6 +36,7 @@ import {
   checkSections,
   closesLine,
   copilotRequestCommand,
+  copilotRequested,
   copilotReviewOn,
   copilotReviewStates,
   countCriteria,
@@ -69,10 +70,11 @@ const issueQuery = `query($owner: String!, $name: String!, $number: Int!) { repo
 
 // The reviews come newest last, so the last page holds the newest; a Copilot
 // review is told apart by its author's type and database id, which only a Bot
-// carries, and a failed one by its body (copilotFailedReview). The threads
-// are read first to last, each with its first comment, for the link a
-// message gives.
-const prQuery = `query($owner: String!, $name: String!, $number: Int!) { repository(owner: $owner, name: $name) { pullRequest(number: $number) { baseRefName headRefName headRefOid isDraft body closingIssuesReferences(first: 10) { totalCount nodes { number repository { nameWithOwner } } } reviews(last: ${page}) { totalCount nodes { state submittedAt commit { oid } author { __typename login ... on Bot { databaseId } } body } } reviewThreads(first: ${page}) { totalCount nodes { isResolved isOutdated path line comments(first: 1) { nodes { url author { login } } } } } } } }`
+// carries, and a failed one by its body (copilotFailedReview). The review
+// requests say whether a Copilot review is still on its way, its reviewer
+// told apart the same way (copilotRequested). The threads are read first to
+// last, each with its first comment, for the link a message gives.
+const prQuery = `query($owner: String!, $name: String!, $number: Int!) { repository(owner: $owner, name: $name) { pullRequest(number: $number) { baseRefName headRefName headRefOid isDraft body closingIssuesReferences(first: 10) { totalCount nodes { number repository { nameWithOwner } } } reviews(last: ${page}) { totalCount nodes { state submittedAt commit { oid } author { __typename login ... on Bot { databaseId } } body } } reviewRequests(first: ${page}) { totalCount nodes { requestedReviewer { __typename ... on Bot { databaseId } } } } reviewThreads(first: ${page}) { totalCount nodes { isResolved isOutdated path line comments(first: 1) { nodes { url author { login } } } } } } } }`
 
 /** How many open threads the review-threads step names; the rest are counted. */
 const threadsShown = 10
@@ -915,6 +917,15 @@ function main() {
         reviews,
         headRefOid: pr.headRefOid,
       })
+      // A Copilot review requested and still to come (copilotRequested) holds
+      // the merge even over a review of the head: its threads are not there
+      // yet, and a merge before a review lands is how #10 and #11 went. With
+      // the requests not all read and Copilot's not among them, one might be
+      // pending among the unread, and a review of the head is not judged.
+      const requests = pr.reviewRequests?.nodes ?? []
+      const requested = copilotRequested(requests)
+      const coming = (which) =>
+        `${which} revisão do Copilot foi pedida e ainda não chegou (leva uns 6 min): espere-a e trate as threads dela; se ela não chegar em uns 10 min, peça de novo com ${request}`
       // The page is the newest reviews, so a review that counts among them is
       // enough: the older ones left unread cannot undo it. With none among
       // them, an unread one might count, and the step is not judged. A page
@@ -927,7 +938,7 @@ function main() {
           'copilot-review',
           'unchecked',
           Number.isInteger(pr.reviews?.totalCount)
-            ? `a PR tem ${pr.reviews.totalCount} revisões, o gate leu as ${reviews.length} mais recentes e nenhuma delas é uma revisão do Copilot que conta na cabeça ${short(pr.headRefOid)}; as mais antigas ficam sem julgar; peça de novo com ${request}; ${renew}`
+            ? `a PR tem ${pr.reviews.totalCount} revisões, o gate leu as ${reviews.length} mais recentes e nenhuma delas é uma revisão do Copilot que conta na cabeça ${short(pr.headRefOid)}; as mais antigas ficam sem julgar; ${requested ? coming('uma') : `peça de novo com ${request}`}; ${renew}`
             : `${partialPage(
                 pr.reviews?.totalCount,
                 reviews.length,
@@ -936,23 +947,45 @@ function main() {
               )}; ${renew}`,
           { blocks: reviewBlocks },
         )
-      else
+      else if (review !== null) {
+        const reviewed = `revisão do Copilot na cabeça ${short(pr.headRefOid)} (${review.state} em ${review.submittedAt})${readWhole(pr.reviews) ? '' : `, entre as ${reviews.length} mais recentes de ${pr.reviews.totalCount} revisões`}`
+        if (!requested && !readWhole(pr.reviewRequests))
+          set(
+            'copilot-review',
+            'unchecked',
+            Number.isInteger(pr.reviewRequests?.totalCount)
+              ? `${reviewed}, mas a PR tem ${pr.reviewRequests.totalCount} pedidos de revisão e o gate leu ${requests.length}; sem ler todos, o gate não sabe se outra revisão do Copilot está a caminho; ${renew}`
+              : `${reviewed}, mas o GitHub não disse quantos pedidos de revisão a PR tem (o gate leu ${requests.length}), e sem ler todos o gate não sabe se outra revisão do Copilot está a caminho; ${renew}`,
+            { blocks: reviewBlocks },
+          )
+        else
+          set(
+            'copilot-review',
+            requested ? 'no' : 'ok',
+            requested
+              ? `há uma ${reviewed}, mas ${coming('outra')}; ${renew}`
+              : reviewed,
+            { blocks: reviewBlocks },
+          )
+      } else {
+        const next = requested ? coming('uma') : `peça de novo com ${request}`
         set(
           'copilot-review',
-          review !== null ? 'ok' : 'no',
-          review !== null
-            ? `revisão do Copilot na cabeça ${short(pr.headRefOid)} (${review.state} em ${review.submittedAt})${readWhole(pr.reviews) ? '' : `, entre as ${reviews.length} mais recentes de ${pr.reviews.totalCount} revisões`}`
-            : latest === null
-              ? `nenhuma revisão do Copilot nesta PR; ela é pedida automaticamente quando a PR sai de draft e leva uns 6 min, ou peça com ${request}; ${renew}`
-              : failed
-                ? latest.commit?.oid === pr.headRefOid
-                  ? `a revisão do Copilot na cabeça ${short(pr.headRefOid)} falhou${failure(latest)}, e uma revisão que falhou não conta; peça de novo com ${request}; ${renew}`
-                  : `a última revisão do Copilot, de ${reviewedSha(latest)}, falhou${failure(latest)}; nenhuma cobre a cabeça ${short(pr.headRefOid)}; peça de novo com ${request}; ${renew}`
-                : !copilotReviewStates.includes(latest.state)
-                  ? `a última revisão do Copilot, de ${reviewedSha(latest)}, está ${latest.state} e não conta (contam ${copilotReviewStates.join(' e ')}); nenhuma cobre a cabeça ${short(pr.headRefOid)}; peça de novo com ${request}; ${renew}`
-                  : `a última revisão do Copilot é de ${reviewedSha(latest)}, não da cabeça ${short(pr.headRefOid)}; peça de novo com ${request}; ${renew}`,
+          'no',
+          latest === null
+            ? requested
+              ? `nenhuma revisão do Copilot nesta PR ainda; ${coming('uma')}; ${renew}`
+              : `nenhuma revisão do Copilot nesta PR; ela é pedida automaticamente quando a PR sai de draft e leva uns 6 min, ou peça com ${request}; ${renew}`
+            : failed
+              ? latest.commit?.oid === pr.headRefOid
+                ? `a revisão do Copilot na cabeça ${short(pr.headRefOid)} falhou${failure(latest)}, e uma revisão que falhou não conta; ${next}; ${renew}`
+                : `a última revisão do Copilot, de ${reviewedSha(latest)}, falhou${failure(latest)}; nenhuma cobre a cabeça ${short(pr.headRefOid)}; ${next}; ${renew}`
+              : !copilotReviewStates.includes(latest.state)
+                ? `a última revisão do Copilot, de ${reviewedSha(latest)}, está ${latest.state} e não conta (contam ${copilotReviewStates.join(' e ')}); nenhuma cobre a cabeça ${short(pr.headRefOid)}; ${next}; ${renew}`
+                : `a última revisão do Copilot é de ${reviewedSha(latest)}, não da cabeça ${short(pr.headRefOid)}; ${next}; ${renew}`,
           { blocks: reviewBlocks },
         )
+      }
 
       if (!readWhole(pr.reviewThreads))
         set(

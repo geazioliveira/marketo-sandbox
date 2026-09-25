@@ -35,15 +35,15 @@
 Uma PR só é mergeada com uma revisão do Copilot no commit que é a cabeça dela e nenhuma thread de revisão aberta.
 
 1. **Duas condições de merge, no gate.** O modo CI do gate ganha dois passos, logo depois de `pr-first-line`:
-   - **`copilot-review`** exige uma revisão do Copilot no estado `COMMENTED` ou `APPROVED`, cujo `commit.oid` é o `headRefOid` da PR. Uma revisão de um commit anterior não conta, e uma revisão `DISMISSED`, `PENDING` ou `CHANGES_REQUESTED` também não. Uma revisão que falhou também não conta: o gate a reconhece pelo começo do corpo (`copilotFailedReview`), e as duas falhas medidas bloqueiam, "any files" inclusive, porque não há bypass (item 6). O gate lê as 100 revisões mais recentes: uma que conta entre elas basta, porque as mais antigas não a desfazem; sem nenhuma entre elas, numa PR com mais revisões do que isso, o passo fica não conferido e bloqueia, como na auditoria.
+   - **`copilot-review`** exige uma revisão do Copilot no estado `COMMENTED` ou `APPROVED`, cujo `commit.oid` é o `headRefOid` da PR. Uma revisão de um commit anterior não conta, e uma revisão `DISMISSED`, `PENDING` ou `CHANGES_REQUESTED` também não. Uma revisão que falhou também não conta: o gate a reconhece pelo começo do corpo (`copilotFailedReview`), e as duas falhas medidas bloqueiam, "any files" inclusive, porque não há bypass (item 6). O gate lê as 100 revisões mais recentes: uma que conta entre elas basta, porque as mais antigas não a desfazem; sem nenhuma entre elas, numa PR com mais revisões do que isso, o passo fica não conferido e bloqueia, como na auditoria. Outra revisão do Copilot pedida e ainda a caminho (`reviewRequests`) também bloqueia, mesmo com uma revisão na cabeça: as threads dela ainda não existem, e mergear antes de uma revisão chegar foi o que aconteceu nas PRs #10 e #11.
    - **`review-threads`** exige nenhuma thread de revisão não resolvida. Contam as threads de qualquer autor (o Copilot, o dono ou outra pessoa), inclusive as desatualizadas.
 
    Os dois bloqueiam no CI, fora de draft. Numa PR em draft, que não pode ser mergeada, eles só relatam. No terminal, onde o gate não lê a PR, dizem "só no modo CI". Uma página de threads que o gate não leu inteira fica não conferida e bloqueia. Quando um dos dois dá não, a mensagem termina com o jeito de renovar o veredito: o gate em modo CI na cabeça da PR. O [gate do loop](../knowledge/patterns/loop-gate.md#a-revisão-do-copilot-e-as-threads) dá as regras e as mensagens.
-2. **O Copilot é casado pelo tipo e pelo `databaseId`.** O autor precisa ser `Bot` com `databaseId` 175728472. O login legível (`copilot-pull-request-reviewer`) só aparece nas mensagens, e o login de pedido (`copilot-pull-request-reviewer[bot]`) só serve para pedir a revisão pelo REST ou pelo GraphQL.
+2. **O Copilot é casado pelo tipo e pelo `databaseId`.** O autor de uma revisão, e o revisor de um pedido de revisão, precisa ser `Bot` com `databaseId` 175728472. O login legível (`copilot-pull-request-reviewer`) só aparece nas mensagens, e o login de pedido (`copilot-pull-request-reviewer[bot]`) só serve para pedir a revisão pelo REST ou pelo GraphQL.
 3. **Uma fonte só.** Os contratos ficam em `scripts/loop-sections.mjs`:
    - `copilotReviewer`, `copilotRequestLogin`, `copilotReviewStates` e `copilotFailedReview`;
    - `reviewRuleSince`, a data a partir da qual a auditoria aplica a regra;
-   - as funções puras `copilotReviewOn` e `openThreads`;
+   - as funções puras `copilotReviewOn`, `copilotRequested` e `openThreads`;
    - os comandos `copilotRequestCommand`, `refreshPrCommand` e `gateCiCommand`.
 
    O gate, a auditoria e os testes leem dali, e os hooks da #5 vão ler dali quando existirem.

@@ -50,6 +50,9 @@ const required = {
       author { __typename login ... on Bot { databaseId } }
       body
     } }
+    reviewRequests { totalCount nodes {
+      requestedReviewer { __typename ... on Bot { databaseId } }
+    } }
     reviewThreads { totalCount nodes {
       isResolved isOutdated path line
       comments { nodes { url author { login } } }
