@@ -4,6 +4,47 @@ Uma entrada por mudança mergeada, da mais nova para a mais antiga, escrita no p
 
 ---
 
+## 2026-09-25: Revisão do Copilot na cabeça e nenhuma thread aberta antes do merge (#13)
+
+**Fase**: Learn
+**Tipo**: Feature
+
+### O que foi construído / corrigido
+
+- **Gate, dois passos novos em modo CI** (`copilot-review` e `review-threads`). Eles bloqueiam fora de draft.
+  - `copilot-review` exige uma revisão do Copilot no commit que é a cabeça da PR. A identidade é o `Bot` com `databaseId` 175728472, nunca só o login, porque existe uma organização com esse nome. Os estados aceitos são `COMMENTED` e `APPROVED`, e uma revisão que falhou não conta.
+  - `review-threads` exige zero threads abertas, de qualquer autor, inclusive as desatualizadas.
+  - As mensagens dizem como pedir a revisão de novo e como renovar o veredito.
+- **Re-disparo em duas etapas:**
+  - o `Sinal de revisão` (`review-signal.yml`) roda o YAML da PR, não tem permissão nenhuma e só avisa;
+  - o refresh roda de `main` via `workflow_run` e `workflow_dispatch` (com `--ref main`) e re-executa o `issue-link` da cabeça.
+- **Auditoria de `main`:** a partir de 25/09 às 12:00 UTC, um merge sem revisão do Copilot na cabeça antes do merge, ou com thread aberta até o merge, fica fora do loop.
+- **Decisão e docs:** a nova [ADR 0003](../decisions/0003-copilot-review-and-no-open-threads-before-merge.md); o fluxo da PR em `workflow.md` e no `AGENTS.md` (draft, monitor de CI ligado, sair de draft só com o Learn, esperar o Copilot, responder e só então resolver, renovar o veredito); e o template de PR pedindo essa evidência.
+
+### Números medidos
+
+- `npm run check`: 1.220 testes em 8 arquivos verdes; `check:context` sem problemas; build OK.
+- 160 regras revertidas uma a uma numa cópia fora do worktree nas rodadas de construção, e mais 57 na de correção. Cada reversão fez algum teste falhar.
+- O gate novo, rodado sobre os dados reais: a PR #14 fica verde (revisão na cabeça `2f02ce0`, 0 de 3 threads abertas), e as PRs #10 e #11 ficariam bloqueadas.
+
+### Decisões tomadas
+
+- [0003: Revisão do Copilot na cabeça e nenhuma thread aberta antes do merge](../decisions/0003-copilot-review-and-no-open-threads-before-merge.md) (Accepted).
+- [0002: Enforcement soft do loop no GitHub Free](../decisions/0002-soft-enforcement-on-github-free.md): as camadas e os limites novos (resolver uma thread não dispara evento; o sinal pode ser removido por uma PR; cada resposta numa thread é uma revisão).
+
+### Patterns aplicados ou criados
+
+- [O gate do loop](../knowledge/patterns/loop-gate.md) e [Ciclo de vida de issue e branch](../knowledge/patterns/issue-branch-lifecycle.md) (atualizados)
+
+### Aprendizados / surpresas
+
+- **Um revisor que falha continua "revisando".** O Copilot posta uma revisão `COMMENTED` na cabeça quando dá erro, quando a cota acaba ou quando não consegue ler os arquivos. Só o texto diz que nada foi revisado, e isso só apareceu procurando revisões reais em outros repositórios.
+- **Responder numa thread também é uma revisão.** Isso conta no limite de página e dispara o sinal.
+- **"Pedir o refresh" não é "ter o veredito".** Um comando assíncrono retorna antes do resultado. Em regra de merge, só vale o que se espera terminar.
+- **Todo push depois da revisão exige outra revisão.** O Learn tem de estar commitado antes de a PR sair de draft.
+
+---
+
 ## 2026-09-25: Os comentários abertos do Copilot nas PRs #10 e #11 (#12)
 
 **Fase**: Learn
