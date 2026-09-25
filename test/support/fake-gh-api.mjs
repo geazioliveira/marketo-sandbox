@@ -17,8 +17,9 @@
 //   pulls:<sha>     api repos/<repo>/commits/<sha>/pulls?per_page=100
 //   pr:<n>          api graphql -F owner=… -F name=… -F number=<n>
 //                     -f head=<sha> -f query=<prQuery>
-//                   answered with pr:<n> as the pullRequest and checks:<sha>
-//                   as the head commit (null: no commit by that SHA)
+//                   answered with pr:<n> as the pullRequest (its reviews and
+//                   review threads too, #13) and checks:<sha> as the head
+//                   commit (null: no commit by that SHA)
 //   issueRef:<n>    api repos/<repo>/issues/<n>
 //   compare:<sha>   api repos/<repo>/compare/<sha>...<tip> (the last audited head)
 //   search:<title>  issue list --repo <repo> --state all
@@ -28,6 +29,11 @@
 //                     --label bug --label needs-triage --body-file <file>
 //   comment:<n>     issue comment <n> --repo <repo> --body-file <file>
 //   issue:<n>       api graphql -F owner=… -F name=… -F number=<n> -f query=<issueQuery>
+//   pull:<n>        api graphql -F owner=… -F name=… -F number=<n> -f query=<pullQuery>
+//                   (the refresh's PR mode: the PR as it is now)
+//   branch:<name>   api graphql -F owner=… -F name=… -f branch=<name> -f query=<branchQuery>
+//                   (the refresh's PR mode with no PR number), answered with
+//                   the pullRequests connection
 //   runs:<sha>      api repos/<repo>/actions/workflows/issue-link.yml/runs
 //                     ?head_sha=<sha>&event=pull_request_target&per_page=1
 //                   answered as GitHub filters: of the fixture's workflow_runs,
@@ -51,7 +57,8 @@
 // (context/knowledge/anti-patterns/test-double-strict-on-the-wrong-layer.md).
 // They are written here, not read from the scripts: a copy taken from the
 // script would bless any change to it. Each connection in an answer is also
-// cut to the `first:` its query asks for, as GitHub cuts it, and a case whose
+// cut to the `first:` (the first nodes) or `last:` (the last nodes) its query
+// asks for, as GitHub cuts it, and a case whose
 // fixture gives a connection no integer totalCount, or one below its own
 // nodes, is refused: the scripts judge whether a page is the whole list by
 // that count, so a case must not leave it out
@@ -64,9 +71,12 @@ import { appendFileSync, existsSync, readFileSync } from 'node:fs'
 const argv = process.argv.slice(2)
 
 const queries = {
-  pr: 'query($owner: String!, $name: String!, $number: Int!, $head: GitObjectID!) { repository(owner: $owner, name: $name) { pullRequest(number: $number) { number body closingIssuesReferences(first: 100) { totalCount nodes { number repository { nameWithOwner } } } } object(oid: $head) { ... on Commit { checkSuites(first: 100) { totalCount nodes { workflowRun { event file { path } workflow { name } } checkRuns(first: 100, filterBy: { checkType: ALL }) { totalCount nodes { name conclusion startedAt completedAt } } } } } } } }',
+  pr: 'query($owner: String!, $name: String!, $number: Int!, $head: GitObjectID!) { repository(owner: $owner, name: $name) { pullRequest(number: $number) { number body mergedAt headRefOid closingIssuesReferences(first: 100) { totalCount nodes { number repository { nameWithOwner } } } reviews(last: 100) { totalCount nodes { state submittedAt commit { oid } author { __typename ... on Bot { databaseId } } body } } reviewThreads(first: 100) { totalCount nodes { isResolved comments(first: 1) { nodes { createdAt } } } } } object(oid: $head) { ... on Commit { checkSuites(first: 100) { totalCount nodes { workflowRun { event file { path } workflow { name } } checkRuns(first: 100, filterBy: { checkType: ALL }) { totalCount nodes { name conclusion startedAt completedAt } } } } } } } }',
   issue:
     'query($owner: String!, $name: String!, $number: Int!) { repository(owner: $owner, name: $name) { issue(number: $number) { closedByPullRequestsReferences(first: 10, includeClosedPrs: false) { totalCount nodes { number state headRefOid } } } } }',
+  pull: 'query($owner: String!, $name: String!, $number: Int!) { repository(owner: $owner, name: $name) { pullRequest(number: $number) { number state headRefOid } } }',
+  branch:
+    'query($owner: String!, $name: String!, $branch: String!) { repository(owner: $owner, name: $name) { pullRequests(first: 10, headRefName: $branch, states: [OPEN]) { totalCount nodes { number state headRefOid headRepository { nameWithOwner } } } } }',
 }
 
 /** What each query selects, for cutting an answer down to it. */
@@ -74,9 +84,28 @@ const selections = {
   pr: {
     number: true,
     body: true,
+    mergedAt: true,
+    headRefOid: true,
     closingIssuesReferences: {
       totalCount: true,
       nodes: { number: true, repository: { nameWithOwner: true } },
+    },
+    reviews: {
+      totalCount: true,
+      nodes: {
+        state: true,
+        submittedAt: true,
+        commit: { oid: true },
+        // `... on Bot { databaseId }`: a fixture gives databaseId only to a
+        // Bot, as GitHub does, unless a case means to test the type guard.
+        author: { __typename: true, databaseId: true },
+        // A failed Copilot review is told by its body (copilotFailedReview).
+        body: true,
+      },
+    },
+    reviewThreads: {
+      totalCount: true,
+      nodes: { isResolved: true, comments: { nodes: { createdAt: true } } },
     },
   },
   commit: {
@@ -106,15 +135,29 @@ const selections = {
       nodes: { number: true, state: true, headRefOid: true },
     },
   },
+  pull: { number: true, state: true, headRefOid: true },
+  branch: {
+    pullRequests: {
+      totalCount: true,
+      nodes: {
+        number: true,
+        state: true,
+        headRefOid: true,
+        headRepository: { nameWithOwner: true },
+      },
+    },
+  },
 }
 
-/** The page each connection of the queries above asks for, by field. */
+/**
+ * The page each connection of the queries above asks for, by field: its
+ * size, and whether it holds the first nodes or the last.
+ */
 const pageSizes = new Map(
   Object.values(queries).flatMap((query) =>
-    [...query.matchAll(/(\w+)\(first: (\d+)/g)].map(([, field, first]) => [
-      field,
-      Number(first),
-    ]),
+    [...query.matchAll(/(\w+)\((first|last): (\d+)/g)].map(
+      ([, field, end, size]) => [field, { end, size: Number(size) }],
+    ),
   ),
 )
 
@@ -137,7 +180,10 @@ function prune(value, selection, field) {
     if (inner in value) out[inner] = prune(value[inner], sub, inner)
   const page = pageSizes.get(field)
   if (page !== undefined && Array.isArray(out.nodes))
-    out.nodes = out.nodes.slice(0, page)
+    out.nodes =
+      page.end === 'last'
+        ? out.nodes.slice(Math.max(0, out.nodes.length - page.size))
+        : out.nodes.slice(0, page.size)
   return out
 }
 
@@ -253,6 +299,30 @@ function classify(repo) {
   if (matches(['api', '-X', 'POST', (t) => rerun.test(t)]))
     return { key: `rerun:${rerun.exec(argv[3])[1]}`, kind: 'rerun' }
 
+  const byBranch = [
+    'api',
+    'graphql',
+    '-F',
+    any,
+    '-F',
+    any,
+    '-f',
+    (t) => t.startsWith('branch='),
+    '-f',
+    any,
+  ]
+  if (matches(byBranch)) {
+    if (argv[3] !== `owner=${owner}`) return `owner inesperado: ${argv[3]}`
+    if (argv[5] !== `name=${name}`) return `name inesperado: ${argv[5]}`
+    const branch = argv[7].slice('branch='.length)
+    if (branch === '') return 'branch vazia'
+    if (!argv[9].startsWith('query=')) return 'o último argumento não é query='
+    const query = fold(argv[9].slice('query='.length))
+    if (query !== fold(queries.branch))
+      return `query diferente da branch: ${query}`
+    return { key: `branch:${branch}`, kind: 'graphql-branch' }
+  }
+
   const graphql = ['api', 'graphql', '-F', any, '-F', any, '-F', any]
   const withHead = matches([...graphql, '-f', any, '-f', any])
   if (withHead || matches([...graphql, '-f', any])) {
@@ -265,7 +335,9 @@ function classify(repo) {
     const last = argv.at(-1)
     if (!last.startsWith('query=')) return 'o último argumento não é query='
     const query = fold(last.slice('query='.length))
-    const kind = Object.keys(queries).find((k) => fold(queries[k]) === query)
+    const kind = Object.keys(queries).find(
+      (k) => k !== 'branch' && fold(queries[k]) === query,
+    )
     if (kind === undefined)
       return `query diferente das que o fake conhece: ${query}`
     if ((kind === 'pr') !== withHead)
@@ -411,7 +483,9 @@ function answer() {
         uncounted(answers[checks], selections.commit, 'object'))
       : kind === 'graphql-issue'
         ? uncounted(value, selections.issue, 'issue')
-        : null
+        : kind === 'graphql-branch'
+          ? uncounted({ pullRequests: value }, selections.branch, 'repository')
+          : null
   if (missing !== null)
     return refuse(
       `${key}: a fixture dá ${missing} sem um totalCount inteiro e não menor que os nodes`,
@@ -434,6 +508,25 @@ function answer() {
     return
   }
   record({ key, ...withBody })
+
+  if (kind === 'graphql-pull') {
+    if (value === null) return notResolved('pullRequest', key)
+    process.stdout.write(
+      `${JSON.stringify({ data: { repository: { pullRequest: prune(value, selections.pull) } } })}\n`,
+    )
+    return
+  }
+  if (kind === 'graphql-branch') {
+    const { pullRequests } = prune(
+      { pullRequests: value },
+      selections.branch,
+      'repository',
+    )
+    process.stdout.write(
+      `${JSON.stringify({ data: { repository: { pullRequests } } })}\n`,
+    )
+    return
+  }
 
   if (kind === 'rest') {
     process.stdout.write(

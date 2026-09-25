@@ -46,13 +46,26 @@
 //   before the merge, finished with success before it. The issue-link check
 //   counts only from a suite of issueLinkWorkflowPath run on issueLinkEvent,
 //   which takes the YAML from main; the quality check runs the PR's own
-//   check.yml by design, so its names are all there is to match.
+//   check.yml by design, so its names are all there is to match;
+// - when it merged at or after reviewRuleSince (#13): had a Copilot review
+//   (copilotReviewOn: the bot by type and database id, a counting state, the
+//   commit the PR's head, a body that is no failure: copilotFailedReview)
+//   submitted at or before the merge, and has no review thread, of any
+//   author, outdated ones included (openThreads), whose first comment came
+//   at or before the merge and that is still unresolved. GitHub
+//   records no time a thread was resolved, so threads are judged as they are
+//   when the audit runs, seconds after the merge's push; one opened after the
+//   merge is the next PR's business. A review dismissed after the merge no
+//   longer counts either. #10 and #11 merged before that instant: their
+//   threads were handled in #12, and they are not judged again.
 // A page GitHub sends incomplete is not judged either way: more than
 // auditClosingPage closing references with none of this repository's issues
 // among those read, or more than auditChecksPage check suites on the head, or
-// check runs in one suite. Such a merge is out of the loop with that reason,
-// and its issue goes to the owner: a re-run would read the same page, so this
-// is no interruption.
+// check runs in one suite; more than auditReviewPage reviews with no Copilot
+// review on the head before the merge among the newest read, or more than
+// auditReviewPage review threads. Such a merge is out of the loop with that
+// reason, and its issue goes to the owner: a re-run would read the same page,
+// so this is no interruption.
 // GitHub links a merge commit to its PR a moment after the push, so a merge
 // commit it names no PR for yet is asked about again, auditLinkRetries times
 // with AUDIT_RETRY_DELAY_MS before each, and only then judged a direct commit.
@@ -91,16 +104,20 @@ import {
   auditLabels,
   auditLinkRetries,
   auditRetryDelayMs,
+  auditReviewPage,
   auditRunsRead,
   auditTitleFor,
   auditVerdictFile,
   auditVerdictStep,
   closesLine,
+  copilotReviewOn,
   headAndRest,
   issueLinkEvent,
   issueLinkWorkflowPath,
   mainAuditWorkflowFile,
+  openThreads,
   requiredChecks,
+  reviewRuleSince,
 } from './loop-sections.mjs'
 
 const trunk = 'main'
@@ -118,7 +135,11 @@ const pinnedOrigins = new Map([
   ['issue-link', { event: issueLinkEvent, path: issueLinkWorkflowPath }],
 ])
 
-const prQuery = `query($owner: String!, $name: String!, $number: Int!, $head: GitObjectID!) { repository(owner: $owner, name: $name) { pullRequest(number: $number) { number body closingIssuesReferences(first: ${auditClosingPage}) { totalCount nodes { number repository { nameWithOwner } } } } object(oid: $head) { ... on Commit { checkSuites(first: ${auditChecksPage}) { totalCount nodes { workflowRun { event file { path } workflow { name } } checkRuns(first: ${auditChecksPage}, filterBy: { checkType: ALL }) { totalCount nodes { name conclusion startedAt completedAt } } } } } } } }`
+// The reviews are the newest page (last:): a Copilot review of the head is
+// among the latest. `... on Bot { databaseId }`: Copilot is matched by type
+// and database id, never by login (copilotReviewer); `body`: a review that
+// failed (copilotFailedReview) is no review.
+const prQuery = `query($owner: String!, $name: String!, $number: Int!, $head: GitObjectID!) { repository(owner: $owner, name: $name) { pullRequest(number: $number) { number body mergedAt headRefOid closingIssuesReferences(first: ${auditClosingPage}) { totalCount nodes { number repository { nameWithOwner } } } reviews(last: ${auditReviewPage}) { totalCount nodes { state submittedAt commit { oid } author { __typename ... on Bot { databaseId } } body } } reviewThreads(first: ${auditReviewPage}) { totalCount nodes { isResolved comments(first: 1) { nodes { createdAt } } } } } object(oid: $head) { ... on Commit { checkSuites(first: ${auditChecksPage}) { totalCount nodes { workflowRun { event file { path } workflow { name } } checkRuns(first: ${auditChecksPage}, filterBy: { checkType: ALL }) { totalCount nodes { name conclusion startedAt completedAt } } } } } } } }`
 
 /** A failure that ends the audit red, with a reason a person can act on. */
 class AuditError extends Error {}
@@ -520,6 +541,60 @@ function greenAtMerge(suites, check, mergedAt) {
     .every((run) => run.conclusion === 'SUCCESS' && run.completed <= mergedAt)
 }
 
+/** A connection's nodes, and whether GitHub's count says more were left unread. */
+function page(connection) {
+  const nodes = Array.isArray(connection?.nodes) ? connection.nodes : []
+  return { nodes, unread: Number(connection?.totalCount ?? 0) > nodes.length }
+}
+
+/**
+ * The review rule of a PR merged at or after reviewRuleSince (#13): the
+ * reasons its merge is out of the loop, none when it keeps to the rule. The
+ * PR's head and merge time come from the same GraphQL answer as its reviews
+ * and threads.
+ * @returns {string[]}
+ */
+function reviewReasons(number, node, headRefOid, mergedAt) {
+  // A connection GitHub did not send is no empty list: say so, red.
+  for (const [field, what] of [
+    ['reviews', 'as revisões'],
+    ['reviewThreads', 'as threads de revisão'],
+  ])
+    if (!Number.isInteger(node[field]?.totalCount))
+      throw new AuditError(`a consulta da PR #${number} veio sem ${what}`)
+  const reasons = []
+  const reviews = page(node.reviews)
+  // Only a review submitted by the merge counts: one after it reviewed
+  // nothing that was merged. A review with no submittedAt (PENDING) is none.
+  const beforeMerge = reviews.nodes.filter(
+    (review) => Date.parse(String(review?.submittedAt ?? '')) <= mergedAt,
+  )
+  if (!copilotReviewOn({ reviews: beforeMerge, headRefOid }).ok)
+    reasons.push(
+      reviews.unread
+        ? `PR #${number}: mais de ${auditReviewPage} revisões, não lidas todas, e nenhuma das ${reviews.nodes.length} mais recentes é do Copilot na cabeça ${short(headRefOid)} antes do merge`
+        : `PR #${number} mergeada sem revisão do Copilot na cabeça ${short(headRefOid)}`,
+    )
+  const threads = page(node.reviewThreads)
+  // A thread opened after the merge is not this merge's. One whose opening
+  // cannot be read is counted: a misread lands on the side that reports.
+  const open = openThreads(threads.nodes).filter((thread) => {
+    const opened = Date.parse(
+      String(thread?.comments?.nodes?.[0]?.createdAt ?? ''),
+    )
+    return Number.isNaN(opened) || opened <= mergedAt
+  })
+  if (open.length > 0)
+    reasons.push(
+      `PR #${number} mergeada com ${open.length} thread(s) de revisão aberta(s)`,
+    )
+  if (threads.unread)
+    reasons.push(
+      `PR #${number}: mais de ${auditReviewPage} threads de revisão, não lidas todas`,
+    )
+  return reasons
+}
+
 /**
  * Whether a merged PR into main keeps its merge in the loop.
  * @returns {{ ok: true, text: string } | { ok: false, reasons: string[] }}
@@ -627,8 +702,25 @@ function judgePull(input, sha, pr) {
         reasons.push(
           `PR #${number} mergeada sem ${check.workflow} / ${check.job} verde`,
         )
+  // The review rule (#13) holds from reviewRuleSince on, by the merge time
+  // GitHub gives with the reviews.
+  const reviewMergedAt = Date.parse(String(node.mergedAt ?? ''))
+  if (Number.isNaN(reviewMergedAt))
+    throw new AuditError(`a consulta da PR #${number} veio sem a data do merge`)
+  const reviewed = reviewMergedAt >= Date.parse(reviewRuleSince)
+  const headRefOid = String(node.headRefOid ?? '')
+  if (reviewed) {
+    if (!hexSha.test(headRefOid))
+      throw new AuditError(`a consulta da PR #${number} veio sem a head`)
+    reasons.push(...reviewReasons(number, node, headRefOid, reviewMergedAt))
+  }
   if (reasons.length > 0) return { ok: false, reasons }
-  return { ok: true, text: `PR #${number}, ${closes}, checks exigidos verdes` }
+  return {
+    ok: true,
+    text: reviewed
+      ? `PR #${number}, ${closes}, checks exigidos verdes, revisão do Copilot na cabeça ${short(headRefOid)} e nenhuma thread de revisão aberta`
+      : `PR #${number}, ${closes}, checks exigidos verdes; mergeada antes da regra de revisão (${reviewRuleSince})`,
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -899,7 +991,7 @@ function issueBody(input, sha, listed, range) {
     '',
     '## A regra',
     '',
-    `Toda mudança em \`main\` vem de uma PR que fecha uma issue, mergeada por merge commit com os checks exigidos verdes ([fluxo de desenvolvimento](${base}/blob/main/docs/development/workflow.md#pull-requests-e-merge)). No plano Free o GitHub não bloqueia um push direto, uma edição pela web nem um merge fora do loop, então a auditoria de \`main\` deixa este registro ([ADR 0002](${base}/blob/main/context/decisions/0002-soft-enforcement-on-github-free.md)).`,
+    `Toda mudança em \`main\` vem de uma PR que fecha uma issue, mergeada por merge commit com os checks exigidos verdes ([fluxo de desenvolvimento](${base}/blob/main/docs/development/workflow.md#pull-requests-e-merge)). Desde ${reviewRuleSince}, a PR também precisa de uma revisão do Copilot no commit da cabeça antes do merge e de nenhuma thread de revisão aberta, de qualquer autor. No plano Free o GitHub não bloqueia um push direto, uma edição pela web nem um merge fora do loop, então a auditoria de \`main\` deixa este registro ([ADR 0002](${base}/blob/main/context/decisions/0002-soft-enforcement-on-github-free.md)).`,
     '',
     '## O que o dono decide',
     '',
@@ -1074,7 +1166,7 @@ function judge() {
   rmSync(input.verdictFile, { force: true })
   const lines = [
     header(input),
-    'Regra: toda mudança em main vem de uma PR que fecha uma issue, mergeada com os checks exigidos verdes.',
+    `Regra: toda mudança em main vem de uma PR que fecha uma issue, mergeada com os checks exigidos verdes; desde ${reviewRuleSince}, também com uma revisão do Copilot na cabeça antes do merge e nenhuma thread de revisão aberta.`,
     '',
   ]
   const done = (count) => {

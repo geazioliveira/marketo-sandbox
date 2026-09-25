@@ -23,15 +23,18 @@ import {
   auditLabels,
   auditLinkRetries,
   auditRetryDelayMs,
+  auditReviewPage,
   auditRunsRead,
   auditTitleFor,
   auditVerdictFile,
   auditVerdictStep,
   categoryLabels,
+  copilotReviewer,
   issueLinkEvent,
   issueLinkWorkflowPath,
   mainAuditWorkflowFile,
   requiredChecks,
+  reviewRuleSince,
   skipCiTokens,
 } from '../../scripts/loop-sections.mjs'
 import { cleanEnv } from '../support/clean-env'
@@ -464,6 +467,29 @@ const pullsOf = (sha: string, ...prs: unknown[]) => ({
   [`pulls:${sha}`]: prs,
 })
 
+/**
+ * What the GraphQL query gives of a merge: when, at which head, and the
+ * reviews and review threads (#13). By default merged at MERGED_AT, before
+ * reviewRuleSince, with no review and no thread.
+ */
+const mergeFields = (
+  number: number,
+  {
+    mergedAt = MERGED_AT,
+    reviews = [],
+    threads = [],
+  }: {
+    mergedAt?: string
+    reviews?: unknown[]
+    threads?: unknown[]
+  } = {},
+) => ({
+  mergedAt,
+  headRefOid: headOf(number),
+  reviews: { totalCount: reviews.length, nodes: reviews },
+  reviewThreads: { totalCount: threads.length, nodes: threads },
+})
+
 /** A PR as the GraphQL query sees it, closing `closes` in this repository. */
 const prAnswer = (
   number: number,
@@ -471,9 +497,15 @@ const prAnswer = (
     closes = [5],
     body = 'Closes #5.\n\n## Risco\n\nNORMAL.',
     repo = REPO,
-  }: { closes?: number[]; body?: string; repo?: string } = {},
+    ...merge
+  }: {
+    closes?: number[]
+    body?: string
+    repo?: string
+  } & Parameters<typeof mergeFields>[1] = {},
 ) => ({
   [`pr:${number}`]: {
+    ...mergeFields(number, merge),
     number,
     body,
     closingIssuesReferences: {
@@ -587,6 +619,65 @@ const filed = (sha: string, number = 901) => ({
 
 const keys = (calls: Call[]): (string | undefined)[] =>
   calls.map((call) => call.key)
+
+// ---------------------------------------------------------------------------
+// The review rule (#13)
+
+/** A merge after reviewRuleSince, so the review rule holds for it. */
+const RULED_AT = '2026-09-26T01:00:00Z'
+
+/** An instant `seconds` away from `time`, as GitHub writes one. */
+const shift = (time: string, seconds: number): string =>
+  new Date(Date.parse(time) + seconds * 1000).toISOString().replace('.000', '')
+
+/** Copilot as GraphQL gives a review's author: a Bot, with its database id. */
+const COPILOT = {
+  __typename: copilotReviewer.typename,
+  databaseId: copilotReviewer.databaseId,
+}
+
+/** A review body as Copilot writes one when it reviewed. */
+const REVIEWED =
+  '## Pull request overview\n\nCopilot reviewed 2 out of 2 changed files in this pull request and generated 1 comment.'
+
+/** A review as the audit's query reads it: by Copilot on the head, by default. */
+const review = (
+  number: number,
+  {
+    on = headOf(number),
+    at = shift(RULED_AT, -60),
+    state = 'COMMENTED',
+    author = COPILOT as Record<string, unknown> | null,
+    body = REVIEWED as string | null,
+  } = {},
+) => ({ state, submittedAt: at, commit: { oid: on }, author, body })
+
+/** A review thread as the audit's query reads it: its state and its opening. */
+const thread = ({
+  resolved = false,
+  openedAt = shift(RULED_AT, -120) as string | null,
+} = {}) => ({
+  isResolved: resolved,
+  comments: { nodes: openedAt === null ? [] : [{ createdAt: openedAt }] },
+})
+
+/**
+ * A merge commit of PR `number`, closing issue 5, its checks green, merged at
+ * `mergedAt` (RULED_AT by default) with these reviews and threads.
+ */
+const reviewedMerge = (
+  sha: string,
+  number: number,
+  {
+    mergedAt = RULED_AT,
+    reviews = [review(number)],
+    threads = [] as unknown[],
+  }: { mergedAt?: string; reviews?: unknown[]; threads?: unknown[] } = {},
+) => ({
+  ...pullsOf(sha, pull(number, sha, { merged_at: mergedAt })),
+  ...prAnswer(number, { mergedAt, reviews, threads }),
+  ...greenOn(headOf(number)),
+})
 
 const created = (calls: Call[]): Call[] =>
   calls.filter((call) => call.argv[0] === 'issue' && call.argv[1] === 'create')
@@ -926,6 +1017,7 @@ describe.concurrent('scripts/audit-main.mjs', () => {
           answers: {
             ...pullsOf(merge, pull(11, merge)),
             'pr:11': {
+              ...mergeFields(11),
               number: 11,
               body: 'Resumo.',
               closingIssuesReferences: {
@@ -1079,6 +1171,7 @@ describe.concurrent('scripts/audit-main.mjs', () => {
             answers: {
               ...pullsOf(merge, pull(11, merge)),
               'pr:11': {
+                ...mergeFields(11),
                 number: 11,
                 body,
                 closingIssuesReferences: {
@@ -1130,6 +1223,7 @@ describe.concurrent('scripts/audit-main.mjs', () => {
               answers: {
                 ...pullsOf(merge, pull(11, merge)),
                 'pr:11': {
+                  ...mergeFields(11),
                   number: 11,
                   body: 'Closes #5.',
                   closingIssuesReferences,
@@ -3098,6 +3192,387 @@ describe.concurrent('scripts/audit-main.mjs', () => {
   // -------------------------------------------------------------------------
   // Fail-closed
 
+  // -------------------------------------------------------------------------
+  // The Copilot review on the head and the open review threads (#13)
+
+  describe.concurrent('the review rule', () => {
+    /** One merge of PR 11 on the baseline, audited with this fixture. */
+    async function auditOne(
+      fresh: () => Promise<History>,
+      options: Parameters<typeof reviewedMerge>[2] = {},
+      extra: Record<string, unknown> = {},
+    ) {
+      const history = await fresh()
+      const { baseline } = await preLoop(history)
+      const merge = await history.merge(baseline, 11)
+      const run = await history.audit({
+        before: baseline,
+        after: merge,
+        baseline,
+        fixture: {
+          answers: {
+            ...reviewedMerge(merge, 11, options),
+            ...filed(merge),
+            ...extra,
+          },
+        },
+      })
+      return { run, merge, body: created(run.calls)[0]?.body ?? '' }
+    }
+
+    const noReview = `- PR #11 mergeada sem revisão do Copilot na cabeça ${sha7(headOf(11))}.`
+
+    test('passes a Copilot review of the head before the merge, with every thread resolved', async ({
+      expect,
+      fresh,
+    }) => {
+      const { run, merge } = await auditOne(fresh, {
+        threads: [thread({ resolved: true }), thread({ resolved: true })],
+      })
+      expect(run.status, run.out).toBe(0)
+      expect(keys(run.calls)).toEqual(['audits', `pulls:${merge}`, 'pr:11'])
+      expect(run.stdout).toContain(
+        `- ${sha7(merge)}: PR #11, fecha #5, checks exigidos verdes, revisão do Copilot na cabeça ${sha7(headOf(11))} e nenhuma thread de revisão aberta`,
+      )
+      expect(created(run.calls)).toEqual([])
+    })
+
+    test.for<[string, string]>([
+      ['a second before it', shift(reviewRuleSince, -1)],
+      ['long before it, as #11 was', '2026-09-25T04:43:52Z'],
+    ])(
+      'does not judge the review rule on a PR merged before reviewRuleSince: %s',
+      async ([, mergedAt], { expect, fresh }) => {
+        const { run, merge } = await auditOne(fresh, {
+          mergedAt,
+          reviews: [],
+          threads: [thread({ openedAt: shift(mergedAt, -60) })],
+        })
+        expect(run.status, run.out).toBe(0)
+        expect(run.stdout).toContain(
+          `- ${sha7(merge)}: PR #11, fecha #5, checks exigidos verdes; mergeada antes da regra de revisão (${reviewRuleSince})`,
+        )
+        expect(created(run.calls)).toEqual([])
+      },
+    )
+
+    test('judges a PR merged at reviewRuleSince itself', async ({
+      expect,
+      fresh,
+    }) => {
+      const { run, body } = await auditOne(fresh, {
+        mergedAt: reviewRuleSince,
+        reviews: [],
+      })
+      expect(run.status, run.out).toBe(1)
+      expect(body).toContain(noReview)
+    })
+
+    test('files an issue when there is no review at all, and says the head', async ({
+      expect,
+      fresh,
+    }) => {
+      const { run, merge, body } = await auditOne(fresh, { reviews: [] })
+      expect(run.judge, run.out).toBe(0)
+      expect(run.status).toBe(1)
+      expect(run.count).toBe('1\n')
+      expect(keys(run.calls)).toEqual([
+        'audits',
+        `pulls:${merge}`,
+        'pr:11',
+        `search:${auditTitleFor(merge)}`,
+        `create:${auditTitleFor(merge)}`,
+      ])
+      expect(body).toContain(noReview)
+    })
+
+    test('files an issue when Copilot reviewed only an older commit', async ({
+      expect,
+      fresh,
+    }) => {
+      const { run, body } = await auditOne(fresh, {
+        reviews: [review(11, { on: 'b'.repeat(40) })],
+      })
+      expect(run.status, run.out).toBe(1)
+      expect(body).toContain(noReview)
+    })
+
+    test('files an issue when Copilot reviewed the head only after the merge', async ({
+      expect,
+      fresh,
+    }) => {
+      const { run, body } = await auditOne(fresh, {
+        reviews: [review(11, { at: shift(RULED_AT, 1) })],
+      })
+      expect(run.status, run.out).toBe(1)
+      expect(body).toContain(noReview)
+    })
+
+    test('counts a review submitted at the very instant of the merge', async ({
+      expect,
+      fresh,
+    }) => {
+      const { run } = await auditOne(fresh, {
+        reviews: [review(11, { at: RULED_AT })],
+      })
+      expect(run.status, run.out).toBe(0)
+    })
+
+    test('keeps an earlier review of the head when a later one came after the merge', async ({
+      expect,
+      fresh,
+    }) => {
+      const { run } = await auditOne(fresh, {
+        reviews: [review(11), review(11, { at: shift(RULED_AT, 300) })],
+      })
+      expect(run.status, run.out).toBe(0)
+    })
+
+    test.for<[string, Record<string, unknown> | null]>([
+      [
+        'a User with the bot login',
+        { __typename: 'User', login: copilotReviewer.login },
+      ],
+      [
+        "a User carrying the bot's database id",
+        { __typename: 'User', databaseId: copilotReviewer.databaseId },
+      ],
+      [
+        'an Organization, which holds that login on GitHub',
+        { __typename: 'Organization', login: copilotReviewer.login },
+      ],
+      ['another Bot', { __typename: 'Bot', databaseId: 41898282 }],
+      ['a deleted account', null],
+    ])(
+      'files an issue when the review on the head is by %s, not by Copilot',
+      async ([, author], { expect, fresh }) => {
+        const { run, body } = await auditOne(fresh, {
+          reviews: [review(11, { author })],
+        })
+        expect(run.status, run.out).toBe(1)
+        expect(body).toContain(noReview)
+      },
+    )
+
+    test.for(['DISMISSED', 'CHANGES_REQUESTED', 'PENDING'])(
+      'files an issue when the Copilot review of the head is %s',
+      async (state, { expect, fresh }) => {
+        const { run, body } = await auditOne(fresh, {
+          reviews: [review(11, { state })],
+        })
+        expect(run.status, run.out).toBe(1)
+        expect(body).toContain(noReview)
+      },
+    )
+
+    // The bodies of two failed Copilot reviews, as GitHub gives them
+    // (keycloak/keycloak#52793 and Azure/azure-powershell#30106).
+    test.for([
+      'Copilot encountered an error and was unable to review this pull request. You can try again by re-requesting a review.',
+      "Copilot wasn't able to review any files in this pull request.\n\n\n\n",
+    ])(
+      'files an issue when the only Copilot review of the head failed: %j',
+      async (body, { expect, fresh }) => {
+        const { run, body: issue } = await auditOne(fresh, {
+          reviews: [review(11, { body })],
+        })
+        expect(run.status, run.out).toBe(1)
+        expect(issue).toContain(noReview)
+      },
+    )
+
+    test('passes a good Copilot review of the head when a later one of it failed', async ({
+      expect,
+      fresh,
+    }) => {
+      const { run } = await auditOne(fresh, {
+        reviews: [
+          review(11, { at: shift(RULED_AT, -120) }),
+          review(11, {
+            body: 'Copilot encountered an error and was unable to review this pull request.',
+          }),
+        ],
+      })
+      expect(run.status, run.out).toBe(0)
+    })
+
+    test('passes an APPROVED Copilot review of the head', async ({
+      expect,
+      fresh,
+    }) => {
+      const { run } = await auditOne(fresh, {
+        reviews: [review(11, { state: 'APPROVED' })],
+      })
+      expect(run.status, run.out).toBe(0)
+    })
+
+    test('files an issue with the count of threads opened by the merge and still unresolved, outdated or not, whoever opened them', async ({
+      expect,
+      fresh,
+    }) => {
+      const { run, merge, body } = await auditOne(fresh, {
+        threads: [
+          thread(),
+          thread({ resolved: true }),
+          { ...thread(), isOutdated: true },
+        ],
+      })
+      expect(run.status, run.out).toBe(1)
+      expect(body).toContain(
+        '- PR #11 mergeada com 2 thread(s) de revisão aberta(s).',
+      )
+      expect(body).not.toContain('sem revisão do Copilot')
+      expect(run.stdout).toContain(
+        `- ${sha7(merge)}: PR #11 mergeada com 2 thread(s) de revisão aberta(s)`,
+      )
+    })
+
+    test('counts a thread opened at the very instant of the merge', async ({
+      expect,
+      fresh,
+    }) => {
+      const { run, body } = await auditOne(fresh, {
+        threads: [thread({ openedAt: RULED_AT })],
+      })
+      expect(run.status, run.out).toBe(1)
+      expect(body).toContain('mergeada com 1 thread(s) de revisão aberta(s)')
+    })
+
+    test('ignores a thread opened after the merge, still unresolved', async ({
+      expect,
+      fresh,
+    }) => {
+      const { run } = await auditOne(fresh, {
+        threads: [thread({ openedAt: shift(RULED_AT, 1) })],
+      })
+      expect(run.status, run.out).toBe(0)
+    })
+
+    test('counts an unresolved thread whose opening it cannot read', async ({
+      expect,
+      fresh,
+    }) => {
+      const { run, body } = await auditOne(fresh, {
+        threads: [thread({ openedAt: null })],
+      })
+      expect(run.status, run.out).toBe(1)
+      expect(body).toContain('mergeada com 1 thread(s) de revisão aberta(s)')
+    })
+
+    test('gives both reasons when the review is missing and a thread is open', async ({
+      expect,
+      fresh,
+    }) => {
+      const { run, body } = await auditOne(fresh, {
+        reviews: [],
+        threads: [thread()],
+      })
+      expect(run.status, run.out).toBe(1)
+      expect(body).toContain(noReview)
+      expect(body).toContain('mergeada com 1 thread(s) de revisão aberta(s)')
+    })
+
+    // Pages read whole or not judged: a re-run would read the same page, so
+    // this is no interruption, and the reason is the page (as #12 did for
+    // the closing references).
+    test('files an issue with the true reason when the newest page of reviews holds no Copilot review of the head', async ({
+      expect,
+      fresh,
+    }) => {
+      // The Copilot review is the oldest of 101: past the page of the newest.
+      const others = Array.from({ length: auditReviewPage }, (_, i) =>
+        review(11, {
+          author: { __typename: 'User' },
+          at: shift(RULED_AT, -3600 + i),
+        }),
+      )
+      const { run, body } = await auditOne(fresh, {
+        reviews: [review(11, { at: shift(RULED_AT, -7200) }), ...others],
+      })
+      expect(run.judge, run.out).toBe(0)
+      expect(run.status).toBe(1)
+      expect(body).toContain(
+        `- PR #11: mais de ${auditReviewPage} revisões, não lidas todas, e nenhuma das ${auditReviewPage} mais recentes é do Copilot na cabeça ${sha7(headOf(11))} antes do merge.`,
+      )
+      expect(body).not.toContain('sem revisão do Copilot')
+      expect(run.stdout).not.toContain('Auditoria interrompida')
+    })
+
+    test('passes when a Copilot review of the head is among the newest page, whatever the unread', async ({
+      expect,
+      fresh,
+    }) => {
+      const others = Array.from({ length: auditReviewPage }, (_, i) =>
+        review(11, {
+          author: { __typename: 'User' },
+          at: shift(RULED_AT, -3600 + i),
+        }),
+      )
+      const { run } = await auditOne(fresh, {
+        reviews: [...others, review(11)],
+      })
+      expect(run.status, run.out).toBe(0)
+    })
+
+    test('files an issue with the true reason when the threads pass one page', async ({
+      expect,
+      fresh,
+    }) => {
+      const { run, body } = await auditOne(fresh, {
+        threads: Array.from({ length: auditReviewPage + 1 }, () =>
+          thread({ resolved: true }),
+        ),
+      })
+      expect(run.judge, run.out).toBe(0)
+      expect(run.status).toBe(1)
+      expect(body).toContain(
+        `- PR #11: mais de ${auditReviewPage} threads de revisão, não lidas todas.`,
+      )
+      expect(body).not.toContain('thread(s) de revisão aberta(s)')
+    })
+
+    test.for<[string, string, string]>([
+      ['mergedAt', 'mergedAt', 'veio sem a data do merge'],
+      ['headRefOid', 'headRefOid', 'veio sem a head'],
+      ['the reviews', 'reviews', 'veio sem as revisões'],
+      ['the review threads', 'reviewThreads', 'veio sem as threads de revisão'],
+    ])(
+      'goes red, and opens nothing, when the PR comes without %s',
+      async ([, field, reason], { expect, fresh }) => {
+        const history = await fresh()
+        const { baseline } = await preLoop(history)
+        const merge = await history.merge(baseline, 11)
+        const answer = reviewedMerge(merge, 11)
+        const node = answer['pr:11'] as Record<string, unknown>
+        delete node[field]
+        const run = await history.audit({
+          before: baseline,
+          after: merge,
+          baseline,
+          fixture: { answers: { ...answer, ...filed(merge) } },
+        })
+        expect(run.judge).toBe(1)
+        expect(run.stdout).toContain(
+          `Auditoria interrompida: a consulta da PR #11 ${reason}.`,
+        )
+        expect(created(run.calls)).toEqual([])
+      },
+    )
+
+    test('states the rule, with its date, in the output and in the issue', async ({
+      expect,
+      fresh,
+    }) => {
+      const { run, body } = await auditOne(fresh, { reviews: [] })
+      expect(run.stdout).toContain(
+        `Regra: toda mudança em main vem de uma PR que fecha uma issue, mergeada com os checks exigidos verdes; desde ${reviewRuleSince}, também com uma revisão do Copilot na cabeça antes do merge e nenhuma thread de revisão aberta.`,
+      )
+      expect(body).toContain(
+        `Desde ${reviewRuleSince}, a PR também precisa de uma revisão do Copilot no commit da cabeça antes do merge e de nenhuma thread de revisão aberta, de qualquer autor.`,
+      )
+    })
+  })
+
   describe.concurrent('gh failures', () => {
     test.for<
       [
@@ -3321,6 +3796,17 @@ describe('the audit contract', () => {
     expect(issueLink).toMatch(new RegExp(`^on:\\n {2}${issueLinkEvent}:$`, 'm'))
     expect(issueLink).toMatch(new RegExp(`^name: ${ISSUE_LINK.workflow}$`, 'm'))
     expect(requiredChecks).toContainEqual(ISSUE_LINK)
+  })
+
+  it('holds the review rule from after the merges of #10 and #11 and before that of #14', () => {
+    // Measured on GitHub: #10 and #11 merged before Copilot reviewed them
+    // (their threads went to #12); #14 met the rule.
+    const since = Date.parse(reviewRuleSince)
+    expect(reviewRuleSince).toBe('2026-09-25T12:00:00Z')
+    expect(Date.parse('2026-09-25T00:46:02Z')).toBeLessThan(since)
+    expect(Date.parse('2026-09-25T04:43:52Z')).toBeLessThan(since)
+    expect(Date.parse('2026-09-25T14:01:35Z')).toBeGreaterThanOrEqual(since)
+    expect(auditReviewPage).toBe(100)
   })
 
   it('files one issue per commit up to ten, and reads the runs of its own workflow', () => {
