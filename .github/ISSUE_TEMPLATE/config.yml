@@ -1,0 +1,7 @@
+# Every issue starts from a form, so its body carries the sections the gate
+# reads. A blank issue would carry none of them.
+blank_issues_enabled: false
+contact_links:
+  - name: Como o loop funciona
+    url: https://github.com/geazioliveira/marketo-sandbox/blob/main/docs/development/workflow.md
+    about: O caminho de uma mudança, da issue ao merge, com os comandos gh de cada passo.
