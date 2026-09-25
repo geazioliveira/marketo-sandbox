@@ -609,6 +609,155 @@ export const changelogHeading =
   /^## \d{4}-\d{2}-\d{2}: .+ \(#[1-9]\d*(?:, PR #[1-9]\d*)?\)$/
 
 // ---------------------------------------------------------------------------
+// Context files, for the context checker (#3)
+//
+// context/README.md states these for people ("Layout", "Vocabulário de
+// status" and "O bloco Status"); scripts/check-context.mjs holds every file to
+// them, and its spec holds the README to these lists.
+
+/** Status tokens of the project intent and of a feature. */
+export const intentStatuses = [
+  'Draft',
+  'In Progress',
+  'Completed',
+  'Deprecated',
+]
+
+/** Status tokens of a bug: a bug ends Resolved, never Completed. */
+export const bugStatuses = ['Draft', 'In Progress', 'Resolved', 'Deprecated']
+
+/** Status tokens of a decision (ADR). */
+export const decisionStatuses = [
+  'Proposed',
+  'Accepted',
+  'Superseded',
+  'Deprecated',
+]
+
+/** Status tokens of a pattern, of an anti-pattern and of an agent. */
+export const knowledgeStatuses = ['Active', 'Superseded', 'Deprecated']
+
+/**
+ * Each kind of file under context/: the path it lives at (relative to
+ * context/), as a pattern and as the shape the guide's Layout table writes,
+ * the kind its title declares (`# <kind>: <título>`) and the statuses its
+ * Status block may hold. A decision's title carries its number too:
+ * decisions/0001-*.md declares `ADR 0001`.
+ */
+export const contextKinds = [
+  {
+    kind: 'Project intent',
+    file: /^intent\/project-intent\.md$/,
+    shape: 'intent/project-intent.md',
+    statuses: intentStatuses,
+  },
+  {
+    kind: 'Feature',
+    file: /^intent\/feature-[^/]+\.md$/,
+    shape: 'intent/feature-<slug>.md',
+    statuses: intentStatuses,
+  },
+  {
+    kind: 'Bug',
+    file: /^intent\/bug-[^/]+\.md$/,
+    shape: 'intent/bug-<slug>.md',
+    statuses: bugStatuses,
+  },
+  {
+    kind: 'ADR',
+    file: /^decisions\/(\d{4})-[^/]+\.md$/,
+    shape: 'decisions/NNNN-<slug>.md',
+    statuses: decisionStatuses,
+  },
+  {
+    kind: 'Pattern',
+    file: /^knowledge\/patterns\/[^/]+\.md$/,
+    shape: 'knowledge/patterns/<nome>.md',
+    statuses: knowledgeStatuses,
+  },
+  {
+    kind: 'Anti-pattern',
+    file: /^knowledge\/anti-patterns\/[^/]+\.md$/,
+    shape: 'knowledge/anti-patterns/<nome>.md',
+    statuses: knowledgeStatuses,
+  },
+  {
+    kind: 'Agent',
+    file: /^agents\/agent-[^/]+\.md$/,
+    shape: 'agents/agent-<nome>.md',
+    statuses: knowledgeStatuses,
+  },
+]
+
+/**
+ * The paths under context/ (relative to it) that have no title kind and no
+ * Status block: every index (a README.md in any folder), the glossary, the
+ * changelog, and evolution/'s archived history and learning notes. Any other
+ * file under context/ is outside the layout, and the checker refuses it.
+ */
+export const untypedContextPaths = [
+  { file: /^(?:[^/]+\/)*README\.md$/, shape: 'README.md' },
+  { file: /^knowledge\/glossary\.md$/, shape: 'knowledge/glossary.md' },
+  { file: /^evolution\/changelog\.md$/, shape: 'evolution/changelog.md' },
+  { file: /^evolution\/history\/[^/]+\.md$/, shape: 'evolution/history/' },
+  {
+    file: /^evolution\/learning-[^/]+\.md$/,
+    shape: 'evolution/learning-<slug>.md',
+  },
+]
+
+/** Whether a path under context/ (relative to it) is one of untypedContextPaths. */
+export function isUntypedContextFile(file) {
+  const relative = String(file ?? '')
+  return untypedContextPaths.some(({ file: pattern }) => pattern.test(relative))
+}
+
+/**
+ * What a file under context/ must declare, from its path relative to
+ * context/: the title kind (`ADR 0001` for a decision) and its statuses. Null
+ * for a path that is no kind: an untyped file (an index wins over its folder:
+ * knowledge/patterns/README.md is no pattern), or one outside the layout.
+ * @returns {{ kind: string, title: string, statuses: string[] } | null}
+ */
+export function contextKindOf(file) {
+  const relative = String(file ?? '')
+  if (isUntypedContextFile(relative)) return null
+  for (const { kind, file: pattern, statuses } of contextKinds) {
+    const matched = pattern.exec(relative)
+    if (matched !== null)
+      return {
+        kind,
+        title: matched[1] === undefined ? kind : `${kind} ${matched[1]}`,
+        statuses,
+      }
+  }
+  return null
+}
+
+/** The heading of the one Status block every typed context file carries, as its last section. */
+export const statusHeading = /^## Status[ \t]*$/
+
+/** The line of the Status block that declares the status: `- **Status**: <token>`. */
+export const statusLine = /^- \*\*Status\*\*:[ \t]*(.*?)[ \t]*$/
+
+/**
+ * Any line that declares a status: quoted (`>`) or not, in a bulleted or an
+ * ordered list or not, bold with `**` or with `__`, the colon inside the bold
+ * or after it. Only the Status block's one statusLine may: anywhere else a
+ * second status would contradict the block.
+ */
+export const statusDeclaration =
+  /^[ \t]*(?:>[ \t]*|(?:[-*+]|\d{1,9}[.)])[ \t]+)*(\*\*|__)Status(?:\1[ \t]*:|:\1)/
+
+/**
+ * Where a link in the PR template must point. The template becomes a PR body,
+ * where a relative link resolves against the PR's page and 404s, so a link
+ * there is to a file of main on GitHub, or there is no link.
+ */
+export const repositoryFileUrl =
+  'https://github.com/geazioliveira/marketo-sandbox/blob/main/'
+
+// ---------------------------------------------------------------------------
 // The gate's steps and its cache
 
 /** Every step the gate reports, in order. A test pins this list. */
@@ -682,3 +831,128 @@ export function gateStatus(
   if (cache.verified !== true) return { state: 'unverified', cache }
   return { state: cache.open === true ? 'open' : 'closed', cache }
 }
+
+// ---------------------------------------------------------------------------
+// The audit of main and the issue-link refresh (#3)
+
+/**
+ * The audit's baseline: 8d4662f, the merge of #2's PR (#10). Commits reachable
+ * from it are never audited by scripts/audit-main.mjs. Up to fb4a804 there was
+ * no loop, and #2's merge is the bootstrap exception: it brought the
+ * server-side issue-link check, so no such check could be green on it. A range
+ * that reaches back past it (a force-push, a first audit with no run before
+ * it) does not open one issue per old commit.
+ */
+export const auditBaseline = '8d4662fa54b217d6471e8b197a8d15cf897f65e1'
+
+/**
+ * The workflow file of `Auditoria de main`. The head of its newest run on
+ * main older than the current one whose auditJudgeStep succeeded is where the
+ * current audit's range starts.
+ */
+export const mainAuditWorkflowFile = 'main-audit.yml'
+
+/** The title of an audit issue, before the commit's short SHA. */
+export const auditTitlePrefix = 'Mudança em main fora do loop: '
+
+/** The audit issue's title for a commit: the prefix and the first seven characters of its SHA. */
+export function auditTitleFor(sha) {
+  return `${auditTitlePrefix}${String(sha ?? '').slice(0, 7)}`
+}
+
+/**
+ * The labels an audit issue opens with: its category, and needs-triage, the
+ * one state label a report may carry at creation (agentCreateStateLabels).
+ */
+export const auditLabels = ['bug', 'needs-triage']
+
+/**
+ * The most first-parent commits one audit may find in its range and still
+ * judge one by one. A merge adds one commit to main's first-parent chain, so a
+ * range past this is out of the loop as a whole, and the audit records it once
+ * instead of asking GitHub about every commit.
+ */
+export const auditCommitCap = 200
+
+/**
+ * The most commits out of the loop one audit opens an issue for each. Past
+ * this, one issue on the audited tip lists them all, so a burst of direct
+ * commits neither floods the tracker nor runs into GitHub's limit on content
+ * creation.
+ */
+export const auditIssueCap = 10
+
+/**
+ * How many more times the audit asks GitHub about a merge commit it links to
+ * no PR yet, before judging it a direct commit.
+ */
+export const auditLinkRetries = 3
+
+/** The wait before each of those asks, in ms (AUDIT_RETRY_DELAY_MS replaces it). */
+export const auditRetryDelayMs = 10_000
+
+/**
+ * The step of main-audit.yml that judges the range and files the issues. A
+ * run counts as audited, and the next audit's range starts at its head, only
+ * when this step concluded success in it: a run that stopped halfway judged
+ * nothing to rely on, whatever the run's own conclusion.
+ */
+export const auditJudgeStep = 'Julgar'
+
+/** The step after it, which turns the count Julgar left into the run's color. */
+export const auditVerdictStep = 'Veredito'
+
+/** The file, under RUNNER_TEMP, where Julgar leaves that count for Veredito. */
+export const auditVerdictFile = 'audit-verdict'
+
+/**
+ * How many of main-audit.yml's latest completed runs on main the audit reads,
+ * looking for the newest older than itself whose Julgar succeeded.
+ */
+export const auditRunsRead = 20
+
+/** When the daily audit runs: 06:17 UTC, as main-audit.yml's schedule. */
+export const auditCron = '17 6 * * *'
+
+/** The workflow file of `Vínculo com issue`, whose runs the refresh re-runs. */
+export const issueLinkWorkflowFile = 'issue-link.yml'
+
+/**
+ * The event the issue-link check must run on to count, and the file it must
+ * run from. Only pull_request_target takes the YAML from main: a PR can add a
+ * workflow of the same name, or give issue-link.yml a pull_request trigger,
+ * and that run would judge the PR with the PR's own copy. The audit accepts,
+ * and the refresh re-runs, only a run of this event from this file.
+ */
+export const issueLinkEvent = 'pull_request_target'
+export const issueLinkWorkflowPath = `.github/workflows/${issueLinkWorkflowFile}`
+
+/**
+ * How often the refresh asks about an issue-link run still in progress, and
+ * how long it waits for it, in ms, inside the job's five minutes
+ * (REFRESH_POLL_MS and REFRESH_WAIT_MS replace them).
+ */
+export const refreshPollMs = 15_000
+export const refreshWaitMs = 240_000
+
+/**
+ * The strings that make GitHub skip every push and pull_request run of a
+ * commit whose message holds one. A merge commit's message is the PR's title
+ * and body, so none may appear there nor in any commit message: a merge
+ * carrying one gets neither its audit run nor its Qualidade run, and a PR
+ * head carrying one gets no Qualidade check. The hooks of #5 refuse them.
+ */
+export const skipCiTokens = [
+  '[skip ci]',
+  '[ci skip]',
+  '[no ci]',
+  '[skip actions]',
+  '[actions skip]',
+]
+
+/**
+ * The trailer that also makes GitHub skip a push's runs: a last paragraph
+ * `skip-checks: true`, after two empty lines. Forbidden in PR titles, bodies
+ * and commit messages for the same reason as skipCiTokens.
+ */
+export const skipChecksTrailer = 'skip-checks: true'

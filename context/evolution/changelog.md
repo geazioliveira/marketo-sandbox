@@ -4,6 +4,58 @@ Uma entrada por mudança mergeada, da mais nova para a mais antiga, escrita no p
 
 ---
 
+## 2026-09-25: CI de qualidade, auditoria de main e refresh do vínculo (#3, PR #11)
+
+**Fase**: Learn
+**Tipo**: Process
+
+### O que foi construído / corrigido
+
+- **`npm run check`** agrega lint, `typecheck` (script novo), testes, `check:context` e build. O `Qualidade / check` roda esse agregado e, num passo à parte, o e2e com `OBSERVE_ENDPOINT` apontado para loopback, para que o `ObserveModule` não mande telemetria do runner (#9). No `main`, cada SHA tem o seu grupo de concorrência, então nenhum commit de `main` fica sem veredito por cancelamento.
+- **`npm run check:context`** (`scripts/check-context.mjs`) recusa:
+  - link relativo ou âncora quebrados, inclusive âncora no próprio arquivo;
+  - arquivo fora do layout;
+  - título sem o tipo e os dois-pontos;
+  - bloco Status ausente, fora do fim ou com token inválido, e status declarado fora dele;
+  - índice de decisões que diverge dos arquivos;
+  - título de entrada do changelog fora do formato;
+  - caminho absoluto de máquina.
+
+  O formato vem de `scripts/loop-sections.mjs`, não de uma segunda cópia.
+- **Auditoria de `main`** (`Auditoria de main`, `scripts/audit-main.mjs`). Roda a cada push em `main`, uma vez por dia e à mão. O job tem dois passos: `Julgar` julga o intervalo e abre as issues; `Veredito` deixa a run vermelha.
+  - **O intervalo** vai do topo da última run cujo `Julgar` terminou até o topo atual. Quando o topo antigo saiu do clone, a reescrita é detectada pelo compare do GitHub.
+  - **Um merge está no loop** quando vem de uma PR que fecha uma issue e teve `Vínculo com issue / issue-link` (do evento `pull_request_target`) e `Qualidade / check` verdes antes do merge.
+  - **O resto abre sozinho uma issue** `bug` + `needs-triage` chamada "Mudança em main fora do loop: <sha7>", ou comenta na issue de mesmo título, e a run fica vermelha (resposta 2 do dono na #3).
+  - **A linha de base é `8d4662f`**, o merge da #2 e a exceção de bootstrap.
+- **Refresh do `issue-link`** (`Atualiza vínculo com issue`, `scripts/refresh-issue-link.mjs`). Eventos de label, comentário, fechamento e reabertura na issue re-executam o `issue-link` das PRs abertas que a fecham. Uma run em andamento é esperada antes do re-run.
+- **Tokens de pular CI** (`skipCiTokens` e o trailer `skip-checks: true`) passaram a ser proibidos no título, no corpo e nos commits de uma PR, porque a mensagem do merge é o título mais o corpo da PR.
+
+### Números medidos
+
+- `npm run check`: 737 testes em 8 arquivos verdes; `check:context` sem problemas em 16 arquivos, com 106 links internos; build OK.
+- `OBSERVE_ENDPOINT=http://127.0.0.1:9 npm run test:e2e`: 1 teste verde, cerca de 1 s.
+- **Na PR #11, a primeira execução real do `Vínculo com issue / issue-link`:** evento `pull_request_target`, gate de `main` rodando contra a cabeça da PR, verde em 8 s. O `Qualidade / check` ficou verde em 1 min num runner limpo, com o e2e incluído.
+- Cada correção das revisões tem um teste de regressão que falha quando ela é revertida. Foram mais de 100 mutações, todas capturadas, feitas numa cópia fora do worktree.
+
+### Decisões tomadas
+
+- [0002: Enforcement soft do loop no GitHub Free](../decisions/0002-soft-enforcement-on-github-free.md): a camada 1 ficou completa (qualidade e refresh) e a camada 6 existe, com os limites medidos.
+- [0001: Context Mesh no repositório e loop issue-first](../decisions/0001-context-mesh-in-the-repository.md): o que a auditoria lê foi corrigido, e as pastas `agents/` e `evolution/history/` passaram a ter regra de layout.
+
+### Patterns aplicados ou criados
+
+- [O gate do loop](../knowledge/patterns/loop-gate.md) e [Ciclo de vida de issue e branch](../knowledge/patterns/issue-branch-lifecycle.md) (atualizados)
+- [Limite da auditoria tirado do evento](../knowledge/anti-patterns/audit-bound-from-the-event.md) (anti-pattern criado)
+
+### Aprendizados / surpresas
+
+- **O limite de uma auditoria sai do último estado julgado, não do evento.** Foram necessárias três rodadas para fechar as variações: push sem run, run interrompida, reescrita fora do clone e sequência longa de runs sem julgamento.
+- **Um check casado só pelo nome pode ser falsificado pela própria PR.** Um workflow `pull_request` com o mesmo nome produzia um verde falso. O `issue-link` agora só vale vindo de `pull_request_target` e do arquivo `.github/workflows/issue-link.yml`.
+- **A mensagem do merge carrega o título e o corpo da PR.** Um `[skip ci]` citado ao documentar a regra desligaria a auditoria do próprio merge.
+- **Ainda não verificado ao vivo:** a consulta GraphQL de checks da auditoria, e se o `GITHUB_TOKEN` consegue re-rodar uma run de `pull_request_target`. A primeira execução real deles é a PR e o merge desta issue.
+
+---
+
 ## 2026-09-24: Loop issue-first com gate e vínculo PR↔issue (#2, PR #10)
 
 **Fase**: Learn

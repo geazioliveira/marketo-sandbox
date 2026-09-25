@@ -4,16 +4,23 @@ Esta pasta é o Context Mesh do marketo-sandbox. Ela guarda o que o mock precisa
 
 A [ADR 0001](decisions/0001-context-mesh-in-the-repository.md) registra essa escolha e cada ponto em que este layout se afasta da árvore canônica do Context Mesh. O [fluxo de desenvolvimento](../docs/development/workflow.md) dá os passos do loop e diz onde vai um documento novo.
 
+Os formatos desta página não são só orientação: o `npm run check:context`, que roda dentro do `npm run check` e do CI, confere em todo `context/` o layout abaixo, os links relativos, o título e o bloco Status de cada arquivo, o índice de decisões e os títulos de entrada do changelog ([Check](../docs/development/workflow.md#check)).
+
 ## Layout
 
 | Pasta ou arquivo | O que guarda |
 | --- | --- |
-| [intent/](intent/) | O que está sendo construído e por quê, com critérios de aceite: `project-intent.md`, um `feature-<slug>.md` por feature e um `bug-<slug>.md` por bug |
-| [decisions/](decisions/) | Uma escolha relevante por arquivo, `NNNN-<slug>.md`, indexadas com o status em [decisions/README.md](decisions/README.md) |
-| [knowledge/patterns/](knowledge/patterns/) | Regras que o trabalho segue e que a revisão confere |
-| `knowledge/anti-patterns/` | Erros cometidos aqui e o que fazer em vez disso. O primeiro chegou com a #2; a #4 traz os do histórico |
+| [intent/](intent/) | O que está sendo construído e por quê, com critérios de aceite: `intent/project-intent.md`, um `intent/feature-<slug>.md` por feature e um `intent/bug-<slug>.md` por bug |
+| [decisions/](decisions/) | Uma escolha relevante por arquivo, `decisions/NNNN-<slug>.md`, indexadas com o status em [decisions/README.md](decisions/README.md) |
+| [knowledge/patterns/](knowledge/patterns/) | Regras que o trabalho segue e que a revisão confere, uma por `knowledge/patterns/<nome>.md` |
+| [knowledge/anti-patterns/](knowledge/anti-patterns/) | Erros cometidos aqui e o que fazer em vez disso, um por `knowledge/anti-patterns/<nome>.md`. O primeiro chegou com a #2; a #4 traz os do histórico |
+| `agents/` | Agentes de execução reutilizáveis, um por `agents/agent-<nome>.md`, com o título `# Agent: <nome>` e o bloco Status. A pasta chega com o primeiro agente |
 | `knowledge/glossary.md` | O vocabulário do projeto, com as palavras a evitar. Chega com a #4 |
-| [evolution/changelog.md](evolution/changelog.md) | Uma entrada por mudança mergeada, escrita no passo Learn |
+| [`evolution/changelog.md`](evolution/changelog.md) | Uma entrada por mudança mergeada, escrita no passo Learn |
+| `evolution/history/` e `evolution/learning-<slug>.md` | O registro arquivado e as notas de aprendizado longas demais para uma entrada do changelog. Chegam com o primeiro arquivo |
+| `README.md`, em qualquer pasta | O índice da pasta, como este e o de [decisões](decisions/README.md) |
+
+Esta tabela é fechada: um arquivo fora destas pastas faz o check:context recusar a árvore com "arquivo fora do layout", e dentro delas vale o nome da tabela (um `intent/notes.md` também é recusado). Só um arquivo oculto que não é markdown fica de fora dessa regra, como o `.DS_Store` que o Finder cria ou a pasta `.obsidian/` de um vault; o `.DS_Store` também está no `.gitignore`. Uma pasta ou uma forma nova entra primeiro em `contextKinds` ou `untypedContextPaths`, em [scripts/loop-sections.mjs](../scripts/loop-sections.mjs), e nesta tabela, na mesma PR.
 
 ## Idioma e tokens
 
@@ -55,7 +62,7 @@ A gramática completa e o que o gate não consegue ver estão no [gate do loop](
 | Project intent ou feature | `Draft`, `In Progress`, `Completed`, `Deprecated` |
 | Bug | `Draft`, `In Progress`, `Resolved`, `Deprecated` |
 | Decisão | `Proposed`, `Accepted`, `Superseded`, `Deprecated` |
-| Pattern ou anti-pattern | `Active`, `Superseded`, `Deprecated` |
+| Pattern, anti-pattern ou agente | `Active`, `Superseded`, `Deprecated` |
 
 - **Mesmo escopo, mesmo arquivo.** Uma mudança numa feature que já existe atualiza o intent dela. Um escopo novo ganha um arquivo novo.
 - **Arquivos de contexto nunca são apagados.** Um arquivo substituído vira `Superseded` ou `Deprecated` e aponta para o substituto.
@@ -64,7 +71,7 @@ A gramática completa e o que o gate não consegue ver estão no [gate do loop](
 
 ## O bloco Status
 
-Todo intent, decisão, pattern e anti-pattern termina com um único bloco Status, e nenhum outro lugar do arquivo declara o status. Os índices (`README.md`), o glossário e o changelog não têm bloco Status.
+Todo intent, decisão, pattern, anti-pattern e agente termina com um único bloco Status, que é a última seção `##` do arquivo, com uma única linha `- **Status**:`. Depois dele não vem nenhuma seção, nem com `#` ou `##`, nem com um título sublinhado por `===` ou `---`. Nenhum outro lugar do arquivo declara o status: nem numa lista, com marcador ou numerada, nem numa citação (`>`), nem em negrito solto, com `**` ou com `__`; um exemplo num bloco de código ou num comentário HTML não conta. Os índices (`README.md`, em qualquer pasta), o glossário, o changelog, `evolution/history/` e `evolution/learning-<slug>.md` não têm tipo nem bloco Status.
 
 ```markdown
 ## Status
@@ -76,7 +83,7 @@ Todo intent, decisão, pattern e anti-pattern termina com um único bloco Status
 
 - Uma decisão mantém todas as linhas `Atualizado`, da mais antiga para a mais nova, porque uma emenda faz parte do registro. Os outros arquivos mantêm só a última; o `git log` guarda o resto.
 - Uma decisão `Superseded` acrescenta, depois de `Status`, a linha `- **Substituída por**: [NNNN: <título>](NNNN-<slug>.md)`.
-- O título diz o tipo do arquivo em inglês e o assunto em pt-BR, separados por dois-pontos: `# Project intent: marketo-sandbox`, `# Feature: <título>`, `# Bug: <título>`, `# ADR 0001: <título>`, `# Pattern: <nome>`, `# Anti-pattern: <nome>`.
+- O título diz o tipo do arquivo em inglês e o assunto em pt-BR, separados por dois-pontos: `# Project intent: marketo-sandbox`, `# Feature: <título>`, `# Bug: <título>`, `# ADR 0001: <título>`, `# Pattern: <nome>`, `# Anti-pattern: <nome>`, `# Agent: <nome>`.
 
 ## Templates
 
@@ -266,6 +273,38 @@ As decisões são numeradas com quatro dígitos, a partir da maior que existe.
 ## Exemplo do erro
 
 <um trecho curto do código ou da decisão que deu errado>
+```
+
+### Agente
+
+Um agente é uma tarefa repetível que um agente de IA executa sempre do mesmo jeito. Ele aponta para o contexto em vez de repeti-lo.
+
+```markdown
+# Agent: <nome>
+
+## Propósito
+
+<a tarefa repetível que este agente faz>
+
+## Quando usar
+
+<o que dispara o agente, e quando ele não serve>
+
+## Contexto a carregar
+
+- [<intent, decisão ou pattern>](../<caminho>)
+
+## Passos
+
+1. <passo>
+
+## Saídas
+
+- <o que o agente produz>
+
+## Definição de pronto
+
+- [ ] <um critério>
 ```
 
 ### Entrada do changelog

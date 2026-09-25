@@ -1,11 +1,14 @@
-# Lint and unit tests on every pull request and on main.
+# The quality check on every pull request and on main (#3).
 #
-# Deliberately minimal for #2; the full quality CI comes in #3. Left out, and why:
-# - no e2e: test/app.e2e-spec.ts boots ObserveModule, which sends telemetry
-#   from the runner (#9);
-# - no check:all, and so no Python: the generators still write to the old
-#   layout, so it cannot pass today (#7);
-# - no build: nothing here ships an artifact yet.
+# One job, so the required check keeps its name (`Qualidade / check`, pinned in
+# scripts/loop-sections.mjs as requiredChecks). `npm run check` is what a
+# person runs before the PR: lint, typecheck, unit tests, check:context and the
+# build, in that order. The e2e is a step of its own, because it boots the app.
+# Should it fail on a clean runner, it leaves this job as a known failure and
+# the fix goes to #9 (the owner's answer 1 on #3).
+#
+# Still left out: check:all, and with it Python. The generators still write to
+# the old layout, so it cannot pass today (#7).
 name: Qualidade
 
 on:
@@ -20,10 +23,15 @@ on:
 permissions:
   contents: read
 
-# Supersede a stale run on a branch. Runs on main are never cancelled: every
-# commit on main needs a verdict, and a cancelled run is neither pass nor fail.
+# On a pull request or a branch, a new push supersedes the stale run. On main,
+# no run is ever cancelled or replaced: every commit on main needs a verdict,
+# and a cancelled run is neither pass nor fail. cancel-in-progress alone is not
+# enough there, because a group keeps one pending run and a third push would
+# replace the second push's waiting run. So each commit of main gets a group
+# of its own, its SHA; only two runs of that same commit (a push and a manual
+# re-run) ever share one, and the later waits for the earlier.
 concurrency:
-  group: check-${{ github.ref }}
+  group: check-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
@@ -40,8 +48,13 @@ jobs:
           node-version-file: .nvmrc
           cache: npm
       - run: npm ci
-      - run: npm run lint
-      - run: npm test
+      - run: npm run check
+      - name: e2e
+        env:
+          # ObserveModule sends telemetry by default; #9 tracks making it
+          # opt-in. A closed loopback port keeps the runner from calling out.
+          OBSERVE_ENDPOINT: http://127.0.0.1:9
+        run: npm run test:e2e
       # A step that rewrote a tracked file, or left a file that is not ignored,
       # passes on its own. `git diff` sees only tracked files, so read the status.
       - name: Árvore limpa

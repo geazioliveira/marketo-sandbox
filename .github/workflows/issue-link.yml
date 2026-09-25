@@ -17,7 +17,10 @@
 # workflow is not on main yet. The first real run is on the PR of #3.
 #
 # What does not trigger a run: an Approve, a label move or a plan comment on the
-# issue. After one of those, re-run this job (or push) to refresh the verdict.
+# issue. Since #3, issue-link-refresh.yml re-runs this job for every open pull
+# request that closes the issue when one of those happens. Until that re-run is
+# seen working live, re-run this job (or push) right before a merge to refresh
+# the verdict.
 name: Vínculo com issue
 
 on:
