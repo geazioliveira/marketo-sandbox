@@ -14,6 +14,8 @@ import { test as base } from 'vitest'
 import {
   agentCreateStateLabels,
   auditBaseline,
+  auditChecksPage,
+  auditClosingPage,
   auditCommitCap,
   auditCron,
   auditIssueCap,
@@ -484,6 +486,19 @@ const prAnswer = (
   },
 })
 
+/** Closing references to issues of another repository, numbered from 1. */
+const foreignRefs = (count: number) =>
+  Array.from({ length: count }, (_, i) => ({
+    number: i + 1,
+    repository: { nameWithOwner: 'geazioliveira/lite-campaign' },
+  }))
+
+/** A reference to issue `number` of this repository. */
+const ownRef = (number: number) => ({
+  number,
+  repository: { nameWithOwner: REPO },
+})
+
 interface Origin {
   /** The event of the suite's workflow run. */
   event?: string
@@ -553,6 +568,9 @@ const greenOn = (head: string) =>
     head,
     requiredChecks.map((check) => ({ ...check, conclusion: 'SUCCESS' })),
   )
+
+/** The head's checks, as greenOn gives them. */
+type HeadChecks = ReturnType<typeof greenOn>[string]
 
 /** A merge commit of PR `number`, closing issue 5, its checks green. */
 const mergedAndClosing = (sha: string, number: number) => ({
@@ -892,6 +910,38 @@ describe.concurrent('scripts/audit-main.mjs', () => {
         expect(created(run.calls)).toEqual([])
       },
     )
+
+    test('passes a PR whose closing references pass one page when the page holds an issue of this repository', async ({
+      expect,
+      fresh,
+    }) => {
+      const history = await fresh()
+      const { baseline } = await preLoop(history)
+      const merge = await history.merge(baseline, 11)
+      const run = await history.audit({
+        before: baseline,
+        after: merge,
+        baseline,
+        fixture: {
+          answers: {
+            ...pullsOf(merge, pull(11, merge)),
+            'pr:11': {
+              number: 11,
+              body: 'Resumo.',
+              closingIssuesReferences: {
+                totalCount: 101,
+                nodes: [...foreignRefs(50), ownRef(5), ...foreignRefs(50)],
+              },
+            },
+            ...greenOn(headOf(11)),
+          },
+        },
+      })
+      expect(run.status, run.out).toBe(0)
+      expect(keys(run.calls)).toEqual(['audits', `pulls:${merge}`, 'pr:11'])
+      expect(run.stdout).toContain('PR #11, fecha #5, checks exigidos verdes')
+      expect(created(run.calls)).toEqual([])
+    })
   })
 
   // -------------------------------------------------------------------------
@@ -1004,6 +1054,95 @@ describe.concurrent('scripts/audit-main.mjs', () => {
       expect(run.status, run.out).toBe(1)
       expect(run.stdout).toContain('PR #11 não fecha issue')
     })
+
+    // 100 references of another repository fill the page GitHub sends, and
+    // #5 of this one is the 101st, which it does not send: the page is not
+    // the whole list, so the audit cannot say the PR closes an issue. A
+    // re-run would read the same page, so this is no interruption (#12): the
+    // merge is out of the loop with that reason, Julgar succeeds, and the
+    // next audit starts after it. The first body line is not asked, as it
+    // only counts when the references hold none.
+    test.for<[string, string]>([
+      ['no closing line', 'Resumo.'],
+      ['a closing line', 'Closes #5.'],
+    ])(
+      'files an issue when the closing references pass one page and none read is this repository (%s)',
+      async ([, body], { expect, fresh }) => {
+        const history = await fresh()
+        const { baseline } = await preLoop(history)
+        const merge = await history.merge(baseline, 11)
+        const run = await history.audit({
+          before: baseline,
+          after: merge,
+          baseline,
+          fixture: {
+            answers: {
+              ...pullsOf(merge, pull(11, merge)),
+              'pr:11': {
+                number: 11,
+                body,
+                closingIssuesReferences: {
+                  totalCount: 101,
+                  nodes: [...foreignRefs(100), ownRef(5)],
+                },
+              },
+              ...greenOn(headOf(11)),
+              'issueRef:5': { number: 5, title: 'Uma issue', state: 'open' },
+              ...filed(merge),
+            },
+          },
+        })
+        expect(run.judge, run.out).toBe(0)
+        expect(run.status).toBe(1)
+        expect(run.count).toBe('1\n')
+        expect(keys(run.calls)).toEqual([
+          'audits',
+          `pulls:${merge}`,
+          'pr:11',
+          `search:${auditTitleFor(merge)}`,
+          `create:${auditTitleFor(merge)}`,
+        ])
+        expect(run.stdout).not.toContain('Auditoria interrompida')
+        const [issue] = created(run.calls)
+        expect(issue.body).toContain(
+          `- PR #11: mais de ${auditClosingPage} referências de fechamento, não lidas todas, e nenhuma das lidas é issue deste repositório.`,
+        )
+        expect(issue.body).not.toContain('não fecha issue')
+        expect(issue.body).not.toContain('mergeada sem')
+      },
+    )
+
+    test.for<[string, Record<string, unknown>]>([
+      ['no totalCount', { nodes: [ownRef(5)] }],
+      ['a totalCount below its nodes', { totalCount: 0, nodes: [ownRef(5)] }],
+    ])(
+      'the fake gh refuses closing references with %s',
+      async ([, closingIssuesReferences], { expect, fresh }) => {
+        const history = await fresh()
+        const { baseline } = await preLoop(history)
+        const merge = await history.merge(baseline, 11)
+        await expect(
+          history.audit({
+            before: baseline,
+            after: merge,
+            baseline,
+            fixture: {
+              answers: {
+                ...pullsOf(merge, pull(11, merge)),
+                'pr:11': {
+                  number: 11,
+                  body: 'Closes #5.',
+                  closingIssuesReferences,
+                },
+                ...greenOn(headOf(11)),
+              },
+            },
+          }),
+        ).rejects.toThrow(
+          'pr:11: a fixture dá pullRequest.closingIssuesReferences sem um totalCount',
+        )
+      },
+    )
 
     test.for<[string, (sha: string, other: string) => unknown[]]>([
       ['no PR at all', () => []],
@@ -1558,33 +1697,73 @@ describe.concurrent('scripts/audit-main.mjs', () => {
       )
     })
 
-    test('goes red and opens nothing when the head holds more checks than one page', async ({
-      expect,
-      fresh,
-    }) => {
-      const history = await fresh()
-      const { baseline } = await preLoop(history)
-      const merge = await history.merge(baseline, 11)
-      const checks = greenOn(headOf(11))[`checks:${headOf(11)}`]
-      const run = await history.audit({
-        before: baseline,
-        after: merge,
-        baseline,
-        fixture: {
-          answers: {
-            ...pullsOf(merge, pull(11, merge)),
-            ...prAnswer(11),
-            [`checks:${headOf(11)}`]: {
-              checkSuites: { ...checks.checkSuites, totalCount: 101 },
+    // A check on an unread page may be the latest run of a required job, so
+    // a partial page is judged neither green nor red: the page read here has
+    // the issue-link red, and still no "mergeada sem" reason comes of it. The
+    // merge is out of the loop for the unread page alone, and the next audit
+    // starts after it (#12).
+    test.for<[string, (checks: HeadChecks) => unknown, string]>([
+      [
+        'check suites',
+        ({ checkSuites }) => ({
+          checkSuites: { ...checkSuites, totalCount: auditChecksPage + 1 },
+        }),
+        `- PR #11: mais de ${auditChecksPage} check suites na head ${sha7(headOf(11))}, não lidas todas.`,
+      ],
+      [
+        'check runs in one suite',
+        ({ checkSuites }) => ({
+          checkSuites: {
+            ...checkSuites,
+            nodes: checkSuites.nodes.map((node, i) =>
+              i === 0
+                ? {
+                    ...node,
+                    checkRuns: {
+                      ...node.checkRuns,
+                      totalCount: auditChecksPage + 1,
+                    },
+                  }
+                : node,
+            ),
+          },
+        }),
+        `- PR #11: mais de ${auditChecksPage} check runs numa check suite da head ${sha7(headOf(11))}, não lidos todos.`,
+      ],
+    ])(
+      'files an issue, judging no check, when the head holds more %s than one page',
+      async ([, grow, reason], { expect, fresh }) => {
+        const history = await fresh()
+        const { baseline } = await preLoop(history)
+        const merge = await history.merge(baseline, 11)
+        const checks = checksOn(headOf(11), [
+          { ...ISSUE_LINK, conclusion: 'FAILURE' },
+          { ...QUALITY, conclusion: 'SUCCESS' },
+        ])[`checks:${headOf(11)}`]
+        const run = await history.audit({
+          before: baseline,
+          after: merge,
+          baseline,
+          fixture: {
+            answers: {
+              ...pullsOf(merge, pull(11, merge)),
+              ...prAnswer(11),
+              [`checks:${headOf(11)}`]: grow(checks),
+              ...filed(merge),
             },
           },
-        },
-      })
-      expect(run.status).toBe(1)
-      expect(run.stdout).toContain('Auditoria interrompida')
-      expect(run.stdout).toContain('não foram lidos todos')
-      expect(created(run.calls)).toEqual([])
-    })
+        })
+        expect(run.judge, run.out).toBe(0)
+        expect(run.status).toBe(1)
+        expect(run.count).toBe('1\n')
+        expect(run.stdout).not.toContain('Auditoria interrompida')
+        const issues = created(run.calls)
+        expect(issues).toHaveLength(1)
+        expect(issues[0].body).toContain(reason)
+        expect(issues[0].body).not.toContain('mergeada sem')
+        expect(issues[0].body).not.toContain('não fecha issue')
+      },
+    )
   })
 
   // -------------------------------------------------------------------------

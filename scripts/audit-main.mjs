@@ -47,6 +47,12 @@
 //   counts only from a suite of issueLinkWorkflowPath run on issueLinkEvent,
 //   which takes the YAML from main; the quality check runs the PR's own
 //   check.yml by design, so its names are all there is to match.
+// A page GitHub sends incomplete is not judged either way: more than
+// auditClosingPage closing references with none of this repository's issues
+// among those read, or more than auditChecksPage check suites on the head, or
+// check runs in one suite. Such a merge is out of the loop with that reason,
+// and its issue goes to the owner: a re-run would read the same page, so this
+// is no interruption.
 // GitHub links a merge commit to its PR a moment after the push, so a merge
 // commit it names no PR for yet is asked about again, auditLinkRetries times
 // with AUDIT_RETRY_DELAY_MS before each, and only then judged a direct commit.
@@ -77,6 +83,8 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import {
   auditBaseline,
+  auditChecksPage,
+  auditClosingPage,
   auditCommitCap,
   auditIssueCap,
   auditJudgeStep,
@@ -102,8 +110,6 @@ const zeroSha = /^0+$/
 const repoPattern = /^([A-Za-z0-9-]+)\/([A-Za-z0-9._-]+)$/
 const timeoutMs = 30_000
 const maxBuffer = 64 * 1024 * 1024
-/** Page size of the check suites, and of each suite's runs, on a PR's head. */
-const checksPage = 100
 /**
  * Where a required check's run must come from, by job: only the issue-link
  * check has a source a PR cannot choose.
@@ -112,7 +118,7 @@ const pinnedOrigins = new Map([
   ['issue-link', { event: issueLinkEvent, path: issueLinkWorkflowPath }],
 ])
 
-const prQuery = `query($owner: String!, $name: String!, $number: Int!, $head: GitObjectID!) { repository(owner: $owner, name: $name) { pullRequest(number: $number) { number body closingIssuesReferences(first: 10) { totalCount nodes { number repository { nameWithOwner } } } } object(oid: $head) { ... on Commit { checkSuites(first: ${checksPage}) { totalCount nodes { workflowRun { event file { path } workflow { name } } checkRuns(first: ${checksPage}, filterBy: { checkType: ALL }) { totalCount nodes { name conclusion startedAt completedAt } } } } } } } }`
+const prQuery = `query($owner: String!, $name: String!, $number: Int!, $head: GitObjectID!) { repository(owner: $owner, name: $name) { pullRequest(number: $number) { number body closingIssuesReferences(first: ${auditClosingPage}) { totalCount nodes { number repository { nameWithOwner } } } } object(oid: $head) { ... on Commit { checkSuites(first: ${auditChecksPage}) { totalCount nodes { workflowRun { event file { path } workflow { name } } checkRuns(first: ${auditChecksPage}, filterBy: { checkType: ALL }) { totalCount nodes { name conclusion startedAt completedAt } } } } } } } }`
 
 /** A failure that ends the audit red, with a reason a person can act on. */
 class AuditError extends Error {}
@@ -553,30 +559,35 @@ function judgePull(input, sha, pr) {
   // No commit behind the head (null) holds no check at all.
   const suites = payload.data.repository.object?.checkSuites
   const suiteNodes = Array.isArray(suites?.nodes) ? suites.nodes : []
-  if (
-    Number(suites?.totalCount ?? 0) > suiteNodes.length ||
-    suiteNodes.some(
-      (suite) =>
-        Number(suite?.checkRuns?.totalCount ?? 0) >
-        (Array.isArray(suite?.checkRuns?.nodes) ? suite.checkRuns.nodes : [])
-          .length,
-    )
-  )
-    throw new AuditError(
-      `os checks da head ${short(head)} da PR #${number} passam de ${checksPage} por página e não foram lidos todos`,
-    )
 
   const reasons = []
   // An issue of another repository closes nothing here.
-  const closing = (node.closingIssuesReferences?.nodes ?? [])
+  const references = node.closingIssuesReferences
+  const referenceNodes = Array.isArray(references?.nodes)
+    ? references.nodes
+    : []
+  const closing = referenceNodes
     .filter(
       (issue) =>
         String(issue?.repository?.nameWithOwner ?? '').toLowerCase() ===
         repo.toLowerCase(),
     )
     .map((issue) => `#${issue.number}`)
+  // One issue of this repository on the page is enough to close one, and the
+  // unread references cannot undo that. A page with none that is not the
+  // whole list says nothing about the rest, and a re-run would read the same
+  // page: the merge is out of the loop for that reason, and its issue goes to
+  // the owner. The first body line is not asked then, as it only counts when
+  // the references hold none.
+  const referenceTotal = Number(references?.totalCount ?? 0)
+  const referencesUnread =
+    closing.length === 0 && referenceTotal > referenceNodes.length
   let closes = closing.length > 0 ? `fecha ${closing.join(', ')}` : null
-  if (closes === null) {
+  if (referencesUnread)
+    reasons.push(
+      `PR #${number}: mais de ${auditClosingPage} referências de fechamento, não lidas todas, e nenhuma das lidas é issue deste repositório`,
+    )
+  else if (closes === null) {
     const line = closesLine.exec(headAndRest(node.body).head)
     if (line === null) reasons.push(`PR #${number} não fecha issue`)
     else {
@@ -592,11 +603,30 @@ function judgePull(input, sha, pr) {
         )
     }
   }
-  for (const check of requiredChecks)
-    if (!greenAtMerge(suiteNodes, check, mergedAt))
-      reasons.push(
-        `PR #${number} mergeada sem ${check.workflow} / ${check.job} verde`,
-      )
+  // Checks on an unread page may hold the latest run of a required job, so a
+  // partial page is judged neither green nor red: the merge is out of the
+  // loop for that reason alone, like the references above.
+  const suitesUnread = Number(suites?.totalCount ?? 0) > suiteNodes.length
+  const runsUnread = suiteNodes.some(
+    (suite) =>
+      Number(suite?.checkRuns?.totalCount ?? 0) >
+      (Array.isArray(suite?.checkRuns?.nodes) ? suite.checkRuns.nodes : [])
+        .length,
+  )
+  if (suitesUnread)
+    reasons.push(
+      `PR #${number}: mais de ${auditChecksPage} check suites na head ${short(head)}, não lidas todas`,
+    )
+  if (runsUnread)
+    reasons.push(
+      `PR #${number}: mais de ${auditChecksPage} check runs numa check suite da head ${short(head)}, não lidos todos`,
+    )
+  if (!suitesUnread && !runsUnread)
+    for (const check of requiredChecks)
+      if (!greenAtMerge(suiteNodes, check, mergedAt))
+        reasons.push(
+          `PR #${number} mergeada sem ${check.workflow} / ${check.job} verde`,
+        )
   if (reasons.length > 0) return { ok: false, reasons }
   return { ok: true, text: `PR #${number}, ${closes}, checks exigidos verdes` }
 }

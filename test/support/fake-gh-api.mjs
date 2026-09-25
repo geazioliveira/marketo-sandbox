@@ -50,7 +50,12 @@
 // not read the field from the fixture anyway
 // (context/knowledge/anti-patterns/test-double-strict-on-the-wrong-layer.md).
 // They are written here, not read from the scripts: a copy taken from the
-// script would bless any change to it.
+// script would bless any change to it. Each connection in an answer is also
+// cut to the `first:` its query asks for, as GitHub cuts it, and a case whose
+// fixture gives a connection no integer totalCount, or one below its own
+// nodes, is refused: the scripts judge whether a page is the whole list by
+// that count, so a case must not leave it out
+// (scripts/audit-main.mjs, closingIssuesReferences).
 //
 // FAKE_GH_FIXTURE names a JSON file:
 // { repo, answers: { <key>: … }, sequences?: { <key>: […] }, fail?: { <key>: mode } }
@@ -59,7 +64,7 @@ import { appendFileSync, existsSync, readFileSync } from 'node:fs'
 const argv = process.argv.slice(2)
 
 const queries = {
-  pr: 'query($owner: String!, $name: String!, $number: Int!, $head: GitObjectID!) { repository(owner: $owner, name: $name) { pullRequest(number: $number) { number body closingIssuesReferences(first: 10) { totalCount nodes { number repository { nameWithOwner } } } } object(oid: $head) { ... on Commit { checkSuites(first: 100) { totalCount nodes { workflowRun { event file { path } workflow { name } } checkRuns(first: 100, filterBy: { checkType: ALL }) { totalCount nodes { name conclusion startedAt completedAt } } } } } } } }',
+  pr: 'query($owner: String!, $name: String!, $number: Int!, $head: GitObjectID!) { repository(owner: $owner, name: $name) { pullRequest(number: $number) { number body closingIssuesReferences(first: 100) { totalCount nodes { number repository { nameWithOwner } } } } object(oid: $head) { ... on Commit { checkSuites(first: 100) { totalCount nodes { workflowRun { event file { path } workflow { name } } checkRuns(first: 100, filterBy: { checkType: ALL }) { totalCount nodes { name conclusion startedAt completedAt } } } } } } } }',
   issue:
     'query($owner: String!, $name: String!, $number: Int!) { repository(owner: $owner, name: $name) { issue(number: $number) { closedByPullRequestsReferences(first: 10, includeClosedPrs: false) { totalCount nodes { number state headRefOid } } } } }',
 }
@@ -103,17 +108,68 @@ const selections = {
   },
 }
 
+/** The page each connection of the queries above asks for, by field. */
+const pageSizes = new Map(
+  Object.values(queries).flatMap((query) =>
+    [...query.matchAll(/(\w+)\(first: (\d+)/g)].map(([, field, first]) => [
+      field,
+      Number(first),
+    ]),
+  ),
+)
+
 const fold = (text) => String(text).replace(/\s+/g, ' ').trim()
 
-/** An answer holding only the selected fields, as GitHub would send it. */
-function prune(value, selection) {
+/** Whether a selection reads a connection's count and nodes. */
+const isConnection = (selection) =>
+  selection !== true && selection.totalCount === true && 'nodes' in selection
+
+/**
+ * An answer holding only the selected fields, as GitHub would send it: each
+ * connection keeps no more nodes than its page, and its totalCount.
+ */
+function prune(value, selection, field) {
   if (selection === true || value == null || typeof value !== 'object')
     return value
   if (Array.isArray(value)) return value.map((item) => prune(item, selection))
   const out = {}
-  for (const [field, inner] of Object.entries(selection))
-    if (field in value) out[field] = prune(value[field], inner)
+  for (const [inner, sub] of Object.entries(selection))
+    if (inner in value) out[inner] = prune(value[inner], sub, inner)
+  const page = pageSizes.get(field)
+  if (page !== undefined && Array.isArray(out.nodes))
+    out.nodes = out.nodes.slice(0, page)
   return out
+}
+
+/**
+ * The first connection in a fixture's answer without a count GitHub could
+ * send (an integer, no fewer than the nodes given), by path; or null.
+ */
+function uncounted(value, selection, at) {
+  if (selection === true || value == null || typeof value !== 'object')
+    return null
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const found = uncounted(item, selection, at)
+      if (found !== null) return found
+    }
+    return null
+  }
+  for (const [field, inner] of Object.entries(selection)) {
+    const here = `${at}.${field}`
+    const connection = value[field]
+    if (isConnection(inner) && connection != null) {
+      const nodes = Array.isArray(connection.nodes) ? connection.nodes : []
+      if (
+        !Number.isInteger(connection.totalCount) ||
+        connection.totalCount < nodes.length
+      )
+        return here
+    }
+    const found = uncounted(connection, inner, here)
+    if (found !== null) return found
+  }
+  return null
 }
 
 /** The calls already logged, before this one. */
@@ -346,10 +402,22 @@ function answer() {
   } else if (key in answers) value = answers[key]
   else return refuse(`nenhuma resposta para ${key}`)
 
+  const checks = `checks:${call.head}`
+  if (kind === 'graphql-pr' && value !== null && !(checks in answers))
+    return refuse(`nenhuma resposta para ${checks}`)
+  const missing =
+    kind === 'graphql-pr'
+      ? (uncounted(value, selections.pr, 'pullRequest') ??
+        uncounted(answers[checks], selections.commit, 'object'))
+      : kind === 'graphql-issue'
+        ? uncounted(value, selections.issue, 'issue')
+        : null
+  if (missing !== null)
+    return refuse(
+      `${key}: a fixture dá ${missing} sem um totalCount inteiro e não menor que os nodes`,
+    )
+
   if (kind === 'graphql-pr') {
-    const checks = `checks:${call.head}`
-    if (value !== null && !(checks in answers))
-      return refuse(`nenhuma resposta para ${checks}`)
     record({ key, head: call.head })
     if (value === null) return notResolved('pullRequest', key)
     const commit = answers[checks]
