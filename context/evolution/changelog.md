@@ -1,6 +1,61 @@
 # Changelog
 
-Uma entrada por mudança mergeada, da mais nova para a mais antiga, escrita no passo Learn da branch que fez a mudança. O formato está no [guia do Context Mesh](../README.md). O que veio antes do loop (de `0c8e760` a `fb4a804`) ganha uma entrada retroativa com a #4.
+Uma entrada por mudança mergeada, da mais nova para a mais antiga, escrita no passo Learn da branch que fez a mudança. O formato está no [guia do Context Mesh](../README.md). O que veio antes do loop (de `0c8e760` a `fb4a804`) está na entrada retroativa do fim, escrita pela #4.
+
+---
+
+## 2026-09-25: Registro retroativo das decisões, dos padrões e dos erros de antes do loop (#4)
+
+**Fase**: Learn
+**Tipo**: Decision
+
+### O que foi construído / corrigido
+
+- **Seis ADRs retroativas.** As ADRs de 0004 a 0008 são `Accepted`, porque o código já é a decisão, e a 0009 fica `Proposed` até a primeira sub-issue da Track A que construir comportamento. Todo racional que o histórico não registra está marcado "(inferido; confirmar)", para o dono confirmar ou corrigir.
+- **Seis patterns novos:** gerar e conferir, a fronteira do código gerado, a forma de um módulo de recurso, factory com overrides, revisão antes do merge e revisão classificada por risco.
+- **Quatro anti-patterns do histórico:**
+  - editar código gerado à mão (`5cc5e09`);
+  - mover as pastas geradas sem o gerador (`a19d9d3` e `e7a0bb6`);
+  - mensagem de commit que diz menos do que o commit faz;
+  - rota literal depois de uma rota com parâmetro (#8).
+- **O glossário e o `CODING_STANDARDS.md`.** O `CODING_STANDARDS.md` só tem links, para cada pattern e cada anti-pattern. O `AGENTS.md`, o guia do Context Mesh, o fluxo e o project intent passam a apontar para os arquivos novos.
+- **Os critérios ao vivo da #3 e da #13** foram marcados, cada um com a própria evidência: a primeira auditoria de `main`, e o comentário de evidência na #13.
+
+### Números medidos
+
+Todos medidos numa cópia de `origin/main` tirada com `git archive`, fora do worktree.
+
+- **O Swagger.** sha256 `ced6c339f60e71f30f4a929ce04e748c814ca2e8350611b946af3267cb962eaf`, com 255 definições, 220 operações, 186 caminhos e 23 tags (contados com node).
+- **Os geradores.** O `--check` sai com 1 nos três geradores e acusa 255, 46 e 259 arquivos (definições, resources e factories). Gerados de novo, os 255 arquivos de definições e os 259 de factories saem idênticos aos commitados, só nas pastas antigas. Os 46 resources diferem só no prefixo dos imports.
+- **As rotas sombreadas.** Com um build `tsc` servido em 127.0.0.1 e cada método de service trocado por um que devolve o próprio nome, as 11 rotas literais sombreadas caem no handler da rota `:id`. `GET form/fields.json` e `GET form/programMemberFields.json` só escapam porque o `FormFieldsModule` é importado antes do `FormsModule`.
+- **O `tsc` nos commits.** Nenhum commit anterior a `fb4a804` passa no `tsc`. Erros TS2307 (módulo não encontrado): 123 em `a19d9d3`, 165 em `e7a0bb6`, 86 em `5cc5e09` e 86 em `0ef242d`.
+- **O Swagger UI.** O documento que ele serve tem 186 caminhos e 0 schemas.
+
+### Decisões tomadas
+
+- [0004: O Swagger como fonte única, com o código gerado commitado](../decisions/0004-swagger-as-single-source-with-committed-generated-code.md): a cópia `ced6c339…` gera as rotas, os DTOs e as factories, e a saída é commitada e conferida com `--check`.
+- [0005: NestJS sobre Express, com um módulo por tag](../decisions/0005-nestjs-express-one-module-per-tag.md): 23 módulos, rotas com o caminho inteiro e services que devolvem factories.
+- [0006: DTOs como interfaces TypeScript](../decisions/0006-dtos-as-typescript-interfaces.md): 255 interfaces e nenhuma validação em runtime.
+- [0007: Factories faker com overrides e seed](../decisions/0007-faker-factories-with-overrides-and-seed.md): `makeX(overrides)`, com o seed por variável de ambiente.
+- [0008: A toolchain](../decisions/0008-toolchain.md): npm, TypeScript 6, oxlint, prettier, vitest, `nest build` e os geradores em Python.
+- [0009: Comportamento ao lado do código gerado, nunca dentro](../decisions/0009-behaviour-beside-generated-code.md): `Proposed`.
+
+### Patterns aplicados ou criados
+
+- [Gerar e conferir](../knowledge/patterns/generate-and-check.md)
+- [A fronteira do código gerado](../knowledge/patterns/generated-code-boundary.md)
+- [A forma de um módulo de recurso](../knowledge/patterns/resource-module-shape.md)
+- [Factory com overrides](../knowledge/patterns/factory-with-overrides.md)
+- [Revisão antes do merge](../knowledge/patterns/review-before-merge.md)
+- [Revisão classificada por risco](../knowledge/patterns/risk-classified-review.md)
+
+### Aprendizados / surpresas
+
+- **Medir em vez de inferir.** Três pontos que os rascunhos marcavam como inferência foram medidos: as rotas sombreadas, o build quebrado entre os commits e o Swagger UI sem schemas. Duas inferências estavam erradas. O `npm ci --omit=dev` ainda instala o faker, porque o npm recalcula as flags de dev a partir do `package.json`. E 33 das 34 respostas "sem envelope" têm `success` e `requestId`.
+- **A mensagem de commit não é fonte.** Quatro dos nove commits pré-loop fazem mais, ou outra coisa, do que dizem. O registro só saiu lendo cada diff.
+- **O gerador e a saída já divergiam no primeiro commit.** Em `0c8e760`, os geradores emitiam imports com sufixo `.js`, e nenhum arquivo commitado os tinha.
+- **A ordem de import dos módulos também decide rotas.** Duas rotas de `form-fields` só não caem em `forms` pela ordem alfabética dos imports, e a #8 não as listava.
+- **Depois do merge da #13, o refresh também ficou `action_required`.** Quatro runs do `Atualiza vínculo com issue` por `workflow_run`, com o Copilot como ator, pediram aprovação e não rodaram. É o mesmo limite do sinal (ADR 0003): depois da revisão do Copilot, o veredito é renovado à mão.
 
 ---
 
@@ -192,3 +247,32 @@ Cada uma das 7 threads do Copilot deixadas abertas nas PRs #10 e #11 foi verific
 - **`updatedAt` não serve para detectar edição.** Ele muda com label e com comentário. O que serve é `lastEditedAt`, lido por GraphQL.
 - **Worktrees do Claude Code nascem do HEAD do checkout principal**, não de `origin/main`. Toda branch é cortada de `origin/main`, e o upstream que aponta para `origin/main` é removido.
 - **A PR ficou maior que o previsto**, com cerca de 8,5 mil linhas em vez de 3 mil, quase tudo em testes. O plano deveria estimar os testes de um gate à parte.
+
+---
+
+## 2026-09-24: O mock gerado do Swagger, antes do loop (#4)
+
+**Fase**: Learn
+**Tipo**: Retroactive
+
+### O que foi construído / corrigido
+
+Nove commits entraram direto em `main` no mesmo dia, sem issue e sem PR. A #4 os reconstruiu pelo diff, um a um.
+
+- **`0c8e760` Initial commit.** O starter NestJS, o Swagger de assets (`docs/marketo-swagger-asset.json`) e os geradores de definições e de resources. Traz 255 DTOs em `src/asset-definitions/` e 23 módulos de recurso cujos services lançam `NotImplementedException`.
+- **`01ee283`.** Os scripts npm `generate:*` e `check:*`. Também move o `@faker-js/faker` para `dependencies`, acrescenta o `@nestjs/swagger` e liga `ignoreDeprecations: "6.0"`.
+- **`a967f26`.** O gerador de resources passa a emitir services que devolvem factories e módulos com `exports`. Os geradores passam a importar `marketo_codegen`, que ainda não existe.
+- **`a19d9d3` e `e7a0bb6`.** Movem os 255 DTOs para `src/asset/asset-definitions/` e os reformatam, sem mudar os geradores.
+- **`5cc5e09`.** Os `exports` dos módulos, o prefixo novo dos imports e as chamadas às factories, fora do gerador.
+- **`0ef242d`.** O gerador de factories e o `marketo_codegen.py`.
+- **`b91681a`.** As 255 factories faker, o `seed.ts` e o `request-id.ts`, em `src/asset/asset-mocks/`.
+- **`fb4a804`.** O Swagger UI em `/api` e o `seedMockData()` no boot. É o primeiro commit que passa no `tsc`.
+
+### Decisões tomadas
+
+- [0004](../decisions/0004-swagger-as-single-source-with-committed-generated-code.md), [0005](../decisions/0005-nestjs-express-one-module-per-tag.md), [0006](../decisions/0006-dtos-as-typescript-interfaces.md), [0007](../decisions/0007-faker-factories-with-overrides-and-seed.md) e [0008](../decisions/0008-toolchain.md), registradas pela #4.
+
+### Aprendizados / surpresas
+
+- **Mover as pastas geradas sem o gerador** deixou os geradores escrevendo no layout antigo, e o `npm run check:all` não passa desde então (#7; [anti-pattern](../knowledge/anti-patterns/moving-generated-folders-without-the-generator.md)).
+- **A ordem das rotas vem do Swagger.** Por isso 11 rotas literais ficaram depois de uma rota `:id` que as engole (#8; [anti-pattern](../knowledge/anti-patterns/literal-route-after-param-route.md)).
