@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 import {
   approveHeading,
@@ -11,6 +11,7 @@ import {
   auditJudgeStep,
   auditLinkRetries,
   auditRetryDelayMs,
+  auditReviewPage,
   auditRunsRead,
   auditTitlePrefix,
   auditVerdictStep,
@@ -18,13 +19,25 @@ import {
   branchPrefixes,
   bugSections,
   commentOpening,
+  copilotFailedReview,
+  copilotHandle,
+  copilotRequestCommand,
+  copilotRequestLogin,
+  copilotReviewer,
+  copilotReviewStates,
   featureSections,
+  gateCiCommand,
   issueLinkEvent,
+  issueLinkRefreshWorkflowFile,
   issueLinkWorkflowPath,
   planHeading,
   refreshPollMs,
+  refreshPrCommand,
   refreshWaitMs,
   requiredChecks,
+  reviewRuleSince,
+  reviewSignalWorkflow,
+  reviewSignalWorkflowFile,
   skipCiTokens,
   skipChecksTrailer,
   stepIds,
@@ -49,6 +62,8 @@ const workflowGuide = 'docs/development/workflow.md'
 const adr0001 = 'context/decisions/0001-context-mesh-in-the-repository.md'
 const adr0002 = 'context/decisions/0002-soft-enforcement-on-github-free.md'
 const mainAudit = '.github/workflows/main-audit.yml'
+const adr0003 =
+  'context/decisions/0003-copilot-review-and-no-open-threads-before-merge.md'
 
 /** A doc's sentences: split after `.`, `;` or `:` followed by white space. */
 const sentencesOf = (text: string): string[] => text.split(/(?<=[.;:])\s+/)
@@ -706,5 +721,522 @@ describe('docs against the skip tokens', () => {
       expect(read(file), file).toContain(
         'todo push em `main` que dispara run ganha um veredito; o que um push sem run trouxe entra na auditoria seguinte',
       )
+  })
+})
+
+describe('docs against the review gate’s contract values (#13)', () => {
+  const gate = read('scripts/gate.mjs')
+  const reviewSignal = `.github/workflows/${reviewSignalWorkflowFile}`
+  const refresh = `.github/workflows/${issueLinkRefreshWorkflowFile}`
+  const reviewSteps = ['copilot-review', 'review-threads']
+
+  /** Code spans as pt-BR prose lists them: `a`, `b` ou `c`. */
+  const orList = (items: readonly string[]): string => {
+    const spans = items.map((item) => `\`${item}\``)
+    return spans.length < 2
+      ? spans.join('')
+      : `${spans.slice(0, -1).join(', ')} ou ${spans[spans.length - 1]}`
+  }
+
+  it.each([adr0003, loopGate])(
+    '%s identifies Copilot by type and database id, as copilotReviewer does',
+    (file) => {
+      const text = bodyOf(read(file))
+      expect(text).toContain(`\`${copilotReviewer.typename}\``)
+      const ids = numbersIn(text, /`databaseId` (\d+)/g)
+      expect(ids.length, file).toBeGreaterThan(0)
+      for (const id of ids) expect(id, file).toBe(copilotReviewer.databaseId)
+    },
+  )
+
+  it.each([adr0003, loopGate])(
+    '%s spells the bot’s logins only as the contract does',
+    (file) => {
+      const text = read(file)
+      expect(text).toContain(`\`${copilotReviewer.login}\``)
+      const logins = spansOf(text).filter((span) =>
+        span.startsWith('copilot-pull-request-reviewer'),
+      )
+      for (const login of logins)
+        expect([copilotReviewer.login, copilotRequestLogin], file).toContain(
+          login,
+        )
+    },
+  )
+
+  it('ADR 0003 names the login that requests a review', () => {
+    expect(read(adr0003)).toContain(
+      `o login de pedido (\`${copilotRequestLogin}\`)`,
+    )
+  })
+
+  it.each([adr0003, loopGate, workflowGuide])(
+    '%s lists the review states that count exactly as copilotReviewStates',
+    (file) => {
+      // Every list of two or more states that holds COMMENTED is the list of
+      // the states that count, whole: not a prefix of it, not a longer one.
+      const lists = [
+        ...read(file).matchAll(/`[A-Z_]+`(?:(?:, | ou | e )`[A-Z_]+`)+/g),
+      ]
+        .map((match) => match[0])
+        .filter((list) => list.includes('`COMMENTED`'))
+      expect(lists.length, file).toBeGreaterThan(0)
+      for (const list of lists)
+        expect(list, file).toBe(orList(copilotReviewStates))
+    },
+  )
+
+  it.each([adr0003, loopGate])(
+    '%s names as not counting only states copilotReviewStates leaves out',
+    (file) => {
+      // A sentence that says DISMISSED does not count names no counting state.
+      const denials = sentencesOf(read(file)).filter((sentence) =>
+        sentence.includes('`DISMISSED`'),
+      )
+      expect(denials.length, file).toBeGreaterThan(0)
+      for (const sentence of denials) {
+        expect(sentence, file).toMatch(/não/)
+        for (const state of spansOf(sentence).filter((span) =>
+          /^[A-Z_]+$/.test(span),
+        ))
+          expect(copilotReviewStates, sentence).not.toContain(state)
+      }
+    },
+  )
+
+  it.each([adr0003, adr0002, workflowGuide])(
+    '%s states the instant the audit holds merges to the review rule from',
+    (file) => {
+      expect(read('scripts/audit-main.mjs')).toContain('reviewRuleSince')
+      const named = [
+        ...bodyOf(read(file)).matchAll(/`([^`]+)` \(`reviewRuleSince`\)/g),
+      ].map((match) => match[1])
+      expect(named.length, file).toBeGreaterThan(0)
+      for (const instant of named) expect(instant, file).toBe(reviewRuleSince)
+    },
+  )
+
+  it.each([adr0003, loopGate, workflowGuide, lifecycle, 'AGENTS.md'])(
+    '%s gives the command that requests a Copilot review as the gate prints it',
+    (file) => {
+      expect(gate).toContain('copilotRequestCommand(options.pr)')
+      const text = read(file)
+      expect(text).toContain(`\`${copilotRequestCommand('<n>')}\``)
+      const handles = [...text.matchAll(/--add-reviewer ([^\s`]+)/g)].map(
+        (match) => match[1],
+      )
+      for (const handle of handles) expect(handle, file).toBe(copilotHandle)
+    },
+  )
+
+  it.each([adr0003, adr0002, loopGate, workflowGuide, lifecycle, 'AGENTS.md'])(
+    '%s gives the command that brings one PR’s check up to date through the refresh’s dispatch, on main',
+    (file) => {
+      expect(read('scripts/refresh-issue-link.mjs')).toContain(
+        'refreshPrCommand(input.pr)',
+      )
+      const input = /^ {2}workflow_dispatch:\n {4}inputs:\n {6}([\w-]+):/m.exec(
+        read(refresh),
+      )?.[1]
+      expect(input).toBeDefined()
+      expect(refreshPrCommand('<n>')).toContain(` -f ${input}=<n>`)
+      const text = read(file)
+      expect(text).toContain(`\`${refreshPrCommand('<n>')}\``)
+      const runs = [
+        ...text.matchAll(
+          /gh workflow run (issue-link-refresh[\w.-]*)([^`\n]*)/g,
+        ),
+      ]
+      expect(runs.length, file).toBeGreaterThan(0)
+      for (const [, workflow, rest] of runs) {
+        expect(workflow, file).toBe(issueLinkRefreshWorkflowFile)
+        expect(rest, file).toContain(` -f ${input}=`)
+        // A dispatch runs the YAML and the script of the ref it names.
+        expect(rest, file).toContain(' --ref main ')
+      }
+    },
+  )
+
+  it.each([adr0003, adr0002, workflowGuide])(
+    '%s names the review signal as its workflow does, with its events and no permissions',
+    (file) => {
+      const yaml = read(reviewSignal)
+      expect(/^name: (.+)$/m.exec(yaml)?.[1]).toBe(reviewSignalWorkflow)
+      expect(yaml).toMatch(/^permissions: \{\}$/m)
+      const types = /^ {2}pull_request_review:\n {4}types: \[([^\]]*)\]/m
+        .exec(yaml)?.[1]
+        .split(',')
+        .map((type) => type.trim())
+      expect(types?.length).toBeGreaterThan(0)
+      const text = read(file)
+      expect(text).toContain(`\`${reviewSignalWorkflow}\``)
+      expect(text).toContain(`\`${reviewSignal}\``)
+      expect(text).toContain(
+        `\`pull_request_review\` (${(types ?? []).map((type) => `\`${type}\``).join(', ')})`,
+      )
+      expect(text).toContain('`permissions: {}`')
+    },
+  )
+
+  it('the workflow guide’s review-step table names the review steps, in the gate’s order', () => {
+    const tables = tablesOf(
+      sectionOf(read(workflowGuide), '## A revisão do Copilot e as threads'),
+    ).filter(([header]) => header[0] === 'Passo')
+    expect(tables).toHaveLength(1)
+    const ids = tables[0]
+      .slice(1)
+      .map(([cell]) => /^`([\w-]+)`$/.exec(cell)?.[1] ?? cell)
+    for (const id of ids) expect(stepIds).toContain(id)
+    expect(ids).toEqual(stepIds.filter((id) => ids.includes(id)))
+    expect(ids).toEqual(expect.arrayContaining(reviewSteps))
+  })
+
+  it('the loop-gate pattern says the review steps block in CI outside a draft, as the gate does', () => {
+    expect(gate).toContain('const reviewBlocks = pr.isDraft !== true')
+    const table = tablesOf(read(loopGate)).find(
+      ([header]) => header[0] === 'Passo',
+    )
+    for (const id of reviewSteps) {
+      const row = (table ?? []).find(([cell]) => cell === `\`${id}\``)
+      expect(row?.[2], id).toBe('No CI, fora de draft')
+    }
+  })
+
+  it('the loop-gate pattern states how many open threads the gate names', () => {
+    const shown = Number(/^const threadsShown = (\d+)$/m.exec(gate)?.[1])
+    expect(gate).toContain('open.slice(0, threadsShown)')
+    const stated = numbersIn(read(loopGate), /[Ll]ista até (\d+)/g)
+    expect(stated.length).toBeGreaterThan(0)
+    for (const count of stated) expect(count).toBe(shown)
+  })
+
+  it.each([workflowGuide, adr0002])(
+    '%s quotes the audit’s review reasons as the audit writes them, and the page it reads',
+    (file) => {
+      const audit = read('scripts/audit-main.mjs')
+      expect(audit).toContain(
+        '`PR #${number} mergeada sem revisão do Copilot na cabeça ${short(headRefOid)}`',
+      )
+      expect(audit).toContain(
+        '`PR #${number} mergeada com ${open.length} thread(s) de revisão aberta(s)`',
+      )
+      const text = read(file)
+      expect(text).toContain(
+        '`PR #P mergeada sem revisão do Copilot na cabeça <sha7>`',
+      )
+      expect(text).toContain(
+        '`PR #P mergeada com <n> thread(s) de revisão aberta(s)`',
+      )
+      const pages = numbersIn(
+        bodyOf(text),
+        /mais de (\d+) (?:revisões|threads de revisão)/g,
+      )
+      expect(pages.length, file).toBeGreaterThan(0)
+      for (const size of pages) expect(size, file).toBe(auditReviewPage)
+    },
+  )
+
+  it('the decision index leaves to #4 only numbers no decision holds yet', () => {
+    const held = readdirSync(path.join(root, 'context', 'decisions'))
+      .map((file) => /^(\d{4})-/.exec(file)?.[1])
+      .filter((number): number is string => number !== undefined)
+      .map(Number)
+    expect(held).toContain(3)
+    const promised = sentencesOf(read('context/decisions/README.md'))
+      .filter(
+        (sentence) => sentence.includes('#4') && /retroativ/.test(sentence),
+      )
+      .flatMap((sentence) => numbersIn(sentence, /\b(\d{4})\b/g))
+    expect(promised.length).toBeGreaterThan(0)
+    for (const number of promised)
+      expect(number).toBeGreaterThan(Math.max(...held))
+  })
+
+  it('ADR 0003 quotes the owner’s request as the intent records it', () => {
+    const quote = /\*\*"([^"]+)"\*\*/.exec(
+      read('context/intent/feature-review-gate.md'),
+    )?.[1]
+    expect(quote).toBeDefined()
+    expect(read(adr0003)).toContain(`**"${quote}"**`)
+  })
+
+  it.each([workflowGuide, lifecycle, 'AGENTS.md'])(
+    '%s states the merge rule: a Copilot review on the head and no open thread of any author, outdated ones included',
+    (file) => {
+      const stated = bodyOf(read(file))
+        .split(/\r?\n/)
+        .filter(
+          (line) =>
+            line.toLowerCase().includes('revisão do copilot na cabeça') &&
+            line.includes('nenhuma thread') &&
+            line.includes('de qualquer autor') &&
+            line.includes('inclusive as desatualizadas'),
+        )
+      expect(stated, file).not.toEqual([])
+    },
+  )
+
+  it.each([adr0003, workflowGuide, 'AGENTS.md'])(
+    '%s says there is no bypass',
+    (file) => {
+      expect(read(file)).toMatch(/Não há bypass/)
+    },
+  )
+})
+
+describe('docs against the review gate after the #13 reviews', () => {
+  const gate = read('scripts/gate.mjs')
+  const freshVerdictDocs = [
+    workflowGuide,
+    'AGENTS.md',
+    lifecycle,
+    adr0002,
+    adr0003,
+  ]
+  const notFresh = /não é (?:um )?veredito fresco/
+
+  /** A doc's prose, fenced code left out, as sentences split after . ! or ? */
+  const proseOf = (text: string): string[] =>
+    text
+      .replace(/^```[^\n]*\n[\s\S]*?^```$/gm, '')
+      .split(/\r?\n/)
+      .flatMap((line) => line.split(/(?<=[.!?])\s+/))
+
+  /** The lines of a doc's fenced code blocks, block by block. */
+  const fencesOf = (text: string): string[][] =>
+    [...text.matchAll(/^```[^\n]*\n([\s\S]*?)^```$/gm)].map((match) =>
+      match[1].split(/\r?\n/),
+    )
+
+  it.each([...freshVerdictDocs, loopGate])(
+    '%s calls a refresh dispatch no fresh verdict wherever it gives one',
+    (file) => {
+      const text = bodyOf(read(file))
+      for (const sentence of proseOf(text).filter((line) =>
+        line.includes('gh workflow run issue-link-refresh'),
+      ))
+        expect(sentence, file).toMatch(notFresh)
+      for (const lines of fencesOf(text))
+        lines.forEach((line, index) => {
+          if (line.startsWith('gh workflow run issue-link-refresh'))
+            expect(lines[index - 1] ?? '', file).toMatch(
+              new RegExp(`^# .*${notFresh.source}`),
+            )
+        })
+    },
+  )
+
+  it.each([...freshVerdictDocs, loopGate])(
+    '%s never offers the refresh as a way to renew the verdict',
+    (file) => {
+      for (const sentence of proseOf(bodyOf(read(file))).filter(
+        (line) =>
+          /renov/i.test(line) &&
+          /veredito/i.test(line) &&
+          /refresh/i.test(line),
+      ))
+        expect(sentence, file).toMatch(notFresh)
+    },
+  )
+
+  it.each(freshVerdictDocs)(
+    '%s gives both fresh verdicts: the gate in CI mode, and a re-run watched to its end',
+    (file) => {
+      expect(gate).toContain('gateCiCommand(options.pr, options.branch)')
+      const text = bodyOf(read(file))
+      const gateRuns = [
+        ...text.matchAll(
+          /node scripts\/gate\.mjs --pr (<\w+>) --branch (<\w+>)/g,
+        ),
+      ]
+      expect(gateRuns.length, file).toBeGreaterThan(0)
+      for (const [command, pr, branch] of gateRuns)
+        expect(command, file).toBe(gateCiCommand(pr, branch))
+      expect(text, file).toMatch(/gh run rerun <run-id>/)
+      expect(text, file).toMatch(
+        /gh run watch <run-id>(?: --repo \S+)? --exit-status/,
+      )
+      expect(text, file).toMatch(notFresh)
+    },
+  )
+
+  it.each([adr0002, adr0003, workflowGuide])(
+    '%s says a dispatch runs the copy of the ref it was dispatched on',
+    (file) => {
+      expect(read(file)).toContain(
+        'roda o YAML e o script da ref em que foi disparado',
+      )
+    },
+  )
+
+  it.each([loopGate, adr0003, workflowGuide])(
+    '%s states the review page the gate reads, the newest, as the gate reads it',
+    (file) => {
+      const page = Number(/^const page = (\d+)$/m.exec(gate)?.[1])
+      expect(gate).toContain('reviews(last: ${page})')
+      // The guide also counts the audit's newest runs, elsewhere.
+      const text =
+        file === workflowGuide
+          ? sectionOf(read(file), '## A revisão do Copilot e as threads')
+          : read(file)
+      const stated = numbersIn(text, /(\d+) (?:revisões )?mais recentes/g)
+      expect(stated.length, file).toBeGreaterThan(0)
+      for (const size of stated) expect(size, file).toBe(page)
+    },
+  )
+
+  it('the loop-gate step table says a counting review among the newest page is enough', () => {
+    const table = tablesOf(bodyOf(read(loopGate))).find(
+      ([header]) => header[0] === 'Passo',
+    )
+    const rule = (table ?? []).find(
+      ([cell]) => cell === '`copilot-review`',
+    )?.[1]
+    expect(rule).toMatch(/mais recentes basta/)
+    expect(rule).not.toMatch(/página lida pela metade/)
+  })
+
+  it.each([loopGate, adr0003])(
+    '%s says a counting review among the newest page is enough',
+    (file) => {
+      // Not the Status block: an Atualizado line records what changed then.
+      const enough = proseOf(bodyOf(read(file))).filter(
+        (sentence) =>
+          sentence.includes('mais recentes') && /\bbasta\b/.test(sentence),
+      )
+      expect(enough, file).not.toEqual([])
+    },
+  )
+
+  it.each([adr0003, loopGate, adr0002])(
+    '%s names the contract that tells a failed review',
+    (file) => {
+      expect(read(file)).toContain('`copilotFailedReview`')
+    },
+  )
+
+  it.each([adr0003, loopGate, workflowGuide])(
+    '%s quotes only failure texts copilotFailedReview matches',
+    (file) => {
+      const quoted = [...read(file).matchAll(/"(Copilot [^"]+)"/g)].map(
+        (match) => match[1],
+      )
+      expect(quoted.length, file).toBeGreaterThan(1)
+      for (const body of quoted)
+        expect(copilotFailedReview.test(body), body).toBe(true)
+    },
+  )
+
+  it.each([adr0002, adr0003])(
+    '%s counts each thread reply as a review that fires the signal and the refresh',
+    (file) => {
+      const replies = proseOf(read(file)).filter(
+        (sentence) =>
+          /cada resposta numa thread/i.test(sentence) &&
+          sentence.includes('revisão') &&
+          sentence.includes('sinal') &&
+          sentence.includes('refresh'),
+      )
+      expect(replies, file).not.toEqual([])
+    },
+  )
+
+  it.each([workflowGuide, lifecycle, 'AGENTS.md', adr0003])(
+    '%s makes the re-request checkable on the PR timeline, without assuming the owner’s setting',
+    (file) => {
+      const text = read(file)
+      expect(text, file).toMatch(
+        /gh api (?:--paginate )?repos\/geazioliveira\/marketo-sandbox\/issues\/<[pn]>\/timeline/,
+      )
+      expect(text, file).toContain('`review_requested`')
+      expect(text, file).toMatch(/uns 10 min/)
+      expect(text, file).toContain(`\`${copilotRequestCommand('<n>')}\``)
+      expect(text, file).not.toMatch(
+        /(?:[Ee]nquanto|[Cc]om) "Review new pushes" (?:não )?(?:estiver )?ligad/,
+      )
+    },
+  )
+
+  it('the workflow guide’s timeline filter matches Copilot by type and database id', () => {
+    const filter =
+      /select\(\.event == "review_requested" and \.requested_reviewer\.type == "(\w+)" and \.requested_reviewer\.id == (\d+)\)/.exec(
+        read(workflowGuide),
+      )
+    expect(filter?.[1]).toBe(copilotReviewer.typename)
+    expect(Number(filter?.[2])).toBe(copilotReviewer.databaseId)
+  })
+
+  describe('the hooks of #5, which do not exist yet', () => {
+    const markdownUnder = (dir: string): string[] =>
+      readdirSync(path.join(root, dir), { withFileTypes: true }).flatMap(
+        (entry) => {
+          const relative = `${dir}/${entry.name}`
+          if (entry.isDirectory()) return markdownUnder(relative)
+          return entry.name.endsWith('.md') ? [relative] : []
+        },
+      )
+    // An intent records the plan as the owner approved it and is not restated
+    // after the fact, so it is left out.
+    const docs = [...markdownUnder('docs'), ...markdownUnder('context')].filter(
+      (file) => !file.startsWith('context/intent/'),
+    )
+    const future = /(?<!\p{L})(?:vão|vai|irão|irá|chegarem|até)(?!\p{L})/iu
+
+    it('are found in the docs at all', () => {
+      expect(docs.some((file) => read(file).includes('hooks da #5'))).toBe(true)
+    })
+
+    it.each(docs)(
+      '%s names the hooks of #5 only in the future, or until they come',
+      (file) => {
+        const sentences = read(file)
+          .split(/\r?\n/)
+          .flatMap((line) => line.split(/(?<=[.!?;])\s+/))
+          .filter((sentence) => sentence.includes('hooks da #5'))
+        for (const sentence of sentences) expect(sentence, file).toMatch(future)
+      },
+    )
+
+    /** A script's comments, block by block, as sentences. */
+    const commentSentences = (source: string): string[] => {
+      const blocks: string[] = []
+      let block: string[] = []
+      for (const line of source.split(/\r?\n/)) {
+        const comment =
+          /^\s*(?:\/\/|\/\*\*?|\*(?!\/))\s?(.*?)\s*(?:\*\/)?$/.exec(line)
+        if (comment === null) {
+          if (block.length > 0) blocks.push(block.join(' '))
+          block = []
+        } else block.push(comment[1])
+      }
+      if (block.length > 0) blocks.push(block.join(' '))
+      return blocks.flatMap((text) => text.split(/(?<=[.!?;])\s+/))
+    }
+
+    const scripts = readdirSync(path.join(root, 'scripts'))
+      .filter((file) => file.endsWith('.mjs'))
+      .map((file) => `scripts/${file}`)
+
+    it('are named in the scripts’ comments at all', () => {
+      expect(
+        scripts.some((file) =>
+          commentSentences(read(file)).some((sentence) =>
+            /hooks? (?:of #5|\(#5\))/.test(sentence),
+          ),
+        ),
+      ).toBe(true)
+    })
+
+    it.each(scripts)(
+      '%s names the hooks of #5 in its comments only as still to come',
+      (file) => {
+        for (const sentence of commentSentences(read(file)).filter((text) =>
+          /hooks? (?:of #5|\(#5\))/.test(text),
+        ))
+          expect(sentence, file).toMatch(
+            /\b(?:will|are to|is to|until|once|do not exist yet)\b/i,
+          )
+      },
+    )
   })
 })

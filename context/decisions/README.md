@@ -10,5 +10,6 @@ Uma escolha relevante por arquivo. Nome, template e vocabulário de status estã
 | --- | --- | --- |
 | [0001](0001-context-mesh-in-the-repository.md) | Context Mesh no repositório e loop issue-first | Accepted |
 | [0002](0002-soft-enforcement-on-github-free.md) | Enforcement soft do loop no GitHub Free | Accepted |
+| [0003](0003-copilot-review-and-no-open-threads-before-merge.md) | Revisão do Copilot na cabeça e nenhuma thread aberta antes do merge | Accepted |
 
-As decisões 0003 a 0008 chegam de forma retroativa com a #4: o Swagger como fonte única com o código gerado commitado, NestJS com um módulo por tag, DTOs como interfaces, factories faker com overrides e seed, a toolchain e o comportamento com estado ao lado do código gerado.
+A 0003 foi tomada pela #13. As seis decisões retroativas da #4 ficam com os próximos números livres, a partir da 0004: o Swagger como fonte única com o código gerado commitado, NestJS com um módulo por tag, DTOs como interfaces, factories faker com overrides e seed, a toolchain e o comportamento com estado ao lado do código gerado.
