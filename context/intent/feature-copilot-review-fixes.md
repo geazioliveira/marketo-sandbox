@@ -30,8 +30,8 @@ A regra que impede isso de se repetir fica no gate, na #13.
   - sufixo com ponto no nome da branch;
   - templates sem bloco Status;
   - títulos aninhados no `check:context`.
-- [ ] A PR abre em draft, sai de draft só com o Learn, e o monitor de CI do app é ligado nela. Ela espera a revisão do Copilot na cabeça e é mergeada só com todas as threads que ele abrir respondidas e resolvidas.
-- [ ] Depois do merge, cada uma das 7 threads de #10 e #11 recebe uma resposta em pt-BR com o veredito e o SHA ou a evidência, e é resolvida.
+- [x] A PR abre em draft, sai de draft só com o Learn, e o monitor de CI do app é ligado nela. Ela espera a revisão do Copilot na cabeça e é mergeada só com todas as threads que ele abrir respondidas e resolvidas.
+- [x] Depois do merge, cada uma das 7 threads de #10 e #11 recebe uma resposta em pt-BR com o veredito e o SHA ou a evidência, e é resolvida.
 - [x] `npm run check` e o e2e passam, e o gate fica aberto.
 
 ## Abordagem técnica
@@ -85,10 +85,14 @@ Desvios do plano, todos para o lado que bloqueia:
 
 Limites registrados no [gate do loop](../knowledge/patterns/loop-gate.md): uma caixa em bloco de código indentado com 4 espaços fora de lista ainda conta, e títulos em HTML (`<h1>`) não são lidos.
 
-Os dois últimos critérios dependem do GitHub ao vivo: a revisão do Copilot nesta PR e as respostas nas 7 threads antigas. Eles são marcados na PR desta issue e depois do merge.
+Os dois últimos critérios dependiam do GitHub ao vivo e foram cumpridos:
+- **A PR #14** saiu de draft já com o Learn e esperou a revisão do Copilot. A primeira revisão abriu 3 threads, todas respondidas e resolvidas. A revisão pedida de novo na cabeça `2f02ce0` não achou nada, e só então veio o merge `5545a2a`.
+- **As 7 threads antigas** das PRs #10 e #11 foram respondidas com o veredito e o commit ou a fonte, e resolvidas.
+
+Como um commit a mais na PR #14 exigiria outra revisão do Copilot, a marcação foi feita pela PR da #13.
 
 ## Status
 
 - **Criado**: 2026-09-25 (Fase: Intent), do plano aprovado na #12 (#12)
-- **Status**: In Progress
-- **Atualizado**: 2026-09-25 (Fase: Learn), Resultados escritos antes da PR; faltam a revisão do Copilot na PR e as respostas nas 7 threads antigas (#12)
+- **Status**: Completed
+- **Atualizado**: 2026-09-25 (Fase: Learn), critérios ao vivo cumpridos: a PR #14 foi mergeada depois da revisão do Copilot na cabeça, e as 7 threads antigas foram respondidas e resolvidas; marcado pela PR da #13 (#12)
