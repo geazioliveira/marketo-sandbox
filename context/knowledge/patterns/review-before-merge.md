@@ -35,7 +35,7 @@ Os comandos de cada passo estão em [A revisão do Copilot e as threads](../../.
 
 ## Quando usar
 
-- Em toda PR, inclusive uma que só muda documentação, como a da #4.
+- Em toda PR, inclusive uma de documentação.
 
 ## Quando NÃO usar
 

@@ -42,7 +42,7 @@ As issues já seguem isso. A #7 é HIGH porque mexe nos geradores e em toda a sa
 
 ### O que é NORMAL
 
-- Tudo o que não toca a lista acima: `context/`, `docs/` fora o Swagger, `README.md`, `AGENTS.md` e o código escrito à mão que não muda o que um consumidor vê. A #4, que só registra documentação, é NORMAL.
+- Tudo o que não toca a lista acima: `context/`, `docs/` fora o Swagger, `README.md`, `AGENTS.md` e o código escrito à mão que não muda o que um consumidor vê. O plano da #4, que só registrava documentação, era NORMAL. A PR dela subiu para HIGH porque mudou um teste de drift em `test/scripts/`.
 - Na dúvida entre os dois, é HIGH (inferido; confirmar).
 
 ### O que cada risco pede da revisão

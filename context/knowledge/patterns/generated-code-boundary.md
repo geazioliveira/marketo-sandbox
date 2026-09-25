@@ -9,7 +9,7 @@ Três pastas de `src/asset/` são saída de gerador e nunca são editadas à mã
 - O README diz para nunca editar essas pastas à mão (`README.md:60-61`), mas nada nos arquivos diz que eles são gerados: não há cabeçalho de "gerado, não edite". Pôr um é parte da correção planejada na #7.
 - Antes do loop, a fronteira foi cruzada duas vezes:
   - o `e7a0bb6` moveu as 255 definições para `src/asset/asset-definitions/` sem mudar os geradores ([mover as pastas geradas sem o gerador](../anti-patterns/moving-generated-folders-without-the-generator.md));
-  - o `5cc5e09` mudou os 69 arquivos de `src/asset/resources/` e reescreveu à mão o prefixo dos imports de 46 deles, que nenhuma versão do gerador emite ([editar código gerado à mão](../anti-patterns/hand-editing-generated-code.md)).
+  - o `5cc5e09` mudou os 69 arquivos de `src/asset/resources/` e deixou em 46 deles um prefixo de import que nenhuma versão do gerador emite ([editar código gerado à mão](../anti-patterns/hand-editing-generated-code.md)).
 
   Hoje os geradores e a saída commitada divergem, e o `npm run check:all` não passa (#7). Eles já divergiam no `0c8e760`, pelo sufixo `.js` dos imports ([gerar e conferir](generate-and-check.md)).
 - Uma edição à mão não sobrevive. O gerador apaga a pasta de saída inteira antes de escrever (`scripts/marketo_codegen.py:94-95`), e o check acusa todo arquivo mudado e todo `*.ts` a mais (`scripts/marketo_codegen.py:117-127`).

@@ -10,7 +10,7 @@ Cada tag do Swagger vira uma pasta com um module, um controller e um service: o 
 - A forma mudou antes do loop sem que o histórico dissesse:
   - no `0c8e760`, os 23 services lançavam `NotImplementedException` (`0c8e760:src/asset/resources/snippets/snippets.service.ts:1-8`);
   - o `a967f26` passou o gerador para services que devolvem factories e módulos que exportam o service (`a967f26:scripts/generate-marketo-resources.py:189,236`);
-  - o `5cc5e09` levou essa forma à saída commitada, à mão, numa mensagem que só fala dos exports ([mensagem de commit que diz menos do que o commit faz](../anti-patterns/commit-message-understating-its-content.md)).
+  - o `5cc5e09` levou essa forma à saída commitada sem rodar o gerador, que nem rodava nesse commit, e deixou nos imports o prefixo `../../`, que nenhuma versão do gerador emite, numa mensagem que só fala dos exports ([mensagem de commit que diz menos do que o commit faz](../anti-patterns/commit-message-understating-its-content.md)).
 - A ordem das rotas segue a ordem dos caminhos no Swagger, e 11 rotas literais ficam depois de uma rota `:id` do mesmo controller (#8).
 
 ## Solução
@@ -46,7 +46,7 @@ Cada tag do Swagger vira uma pasta com um module, um controller e um service: o 
 
 - **`@Injectable()`, um método por operação**, com o nome do método do controller e a assinatura `(..._arguments: unknown[])`. Os argumentos são ignorados (`scripts/generate-marketo-resources.py:192-196,215`).
 - **O corpo devolve a factory** da definição da primeira resposta 2xx com `$ref` (`scripts/generate-marketo-resources.py:88-101,186-189`). Sem `$ref`, o gerador emitiria `return undefined as never` (`scripts/generate-marketo-resources.py:191`), e nenhum service tem isso hoje.
-- **O envelope é o caso comum.** 186 dos 220 métodos devolvem uma factory `makeResponseOf*`. Os outros 34 devolvem respostas sem envelope, como `ModelResponse`, que é `{}` (`src/asset/asset-definitions/responses/model-response.ts:1`).
+- **O envelope é o caso comum.** 186 dos 220 métodos devolvem uma factory `makeResponseOf*`. Dos outros 34, 33 devolvem tipos com `success` e `requestId`, mas sem `errors` nem `warnings`, como `DeleteResponse`; só `ModelResponse` é `{}` (`src/asset/asset-definitions/responses/model-response.ts:1`).
 
 ### Os imports
 

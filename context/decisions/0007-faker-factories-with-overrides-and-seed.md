@@ -59,7 +59,7 @@ O histórico não registra que alternativas foram avaliadas. Cada motivo abaixo 
   - um teste fixa um campo com um override, e o resto continua válido pelo DTO;
   - `MARKETO_MOCK_SEED` fixa os dados de uma execução, sem mudar código.
 - **Mais difícil**:
-  - **o seed fixa a sequência, não cada resposta.** O `faker` é uma instância só, semeada uma vez no boot, e cada valor gerado avança o estado. Rodando `seedMockData()` e `mockRequestId()` em processos novos, `MARKETO_MOCK_SEED=42` deu os mesmos dois valores em cada processo, e os dois diferentes entre si. Então a mesma requisição só devolve o mesmo payload se as requisições antes dela, desde o boot, foram as mesmas (inferido; confirmar);
+  - **o seed fixa a sequência, não cada resposta.** O `faker` é uma instância só, semeada uma vez no boot, e cada valor gerado avança o estado. Rodando `seedMockData()` e `mockRequestId()` em processos novos, `MARKETO_MOCK_SEED=42` deu os mesmos dois valores em cada processo, e os dois diferentes entre si. Medido na #4, chamando os services direto: duas chamadas seguidas ao mesmo método devolvem payloads diferentes, a primeira se repete depois de semear de novo, e uma chamada a outro método antes dela muda o resultado. Então a mesma requisição só devolve o mesmo payload se as requisições antes dela, desde o boot, foram as mesmas;
   - **um seed 0 conta como ausente.** `Number(...) || undefined` transforma `0`, o vazio e um texto não numérico em `undefined` (`src/asset/asset-mocks/seed.ts:12`). Rodando, `MARKETO_MOCK_SEED=0` e `MARKETO_MOCK_SEED=abc` deram valores diferentes em cada processo. O comentário do código diz "any integer" (`:8`);
   - **`MARKETO_MOCK_REF_DATE` sozinha não faz nada.** Sem seed, `seedMockData()` volta antes de `setDefaultRefDate` (`:15-22`);
   - **os overrides são rasos.** `...overrides` troca a propriedade de topo inteira, e `Partial<X>` também é raso: em `makeSnippetResponse`, um override de `folder` troca a pasta gerada inteira e precisa trazer uma `SnippetFolder` completa, com `value`, `type` e `folderName` (`src/asset/asset-definitions/models/snippet-folder.ts:3-16`);
@@ -77,7 +77,7 @@ O histórico não registra que alternativas foram avaliadas. Cada motivo abaixo 
 - [Pattern: Factory com overrides](../knowledge/patterns/factory-with-overrides.md)
 - [Pattern: Gerar e conferir](../knowledge/patterns/generate-and-check.md)
 - [Pattern: A fronteira do código gerado](../knowledge/patterns/generated-code-boundary.md)
-- [Anti-pattern: Editar código gerado à mão](../knowledge/anti-patterns/hand-editing-generated-code.md), o que o `5cc5e09` fez com os stubs
+- [Anti-pattern: Editar código gerado à mão](../knowledge/anti-patterns/hand-editing-generated-code.md), sobre o `5cc5e09`, que trocou os stubs pelas factories sem rodar o gerador
 - [Feature: Registro retroativo do projeto](../intent/feature-retroactive-record.md)
 - Os geradores no layout antigo (#7) e o lockfile defasado (#9)
 

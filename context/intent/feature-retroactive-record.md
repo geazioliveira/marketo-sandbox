@@ -54,7 +54,7 @@ Sem registro, quem chegar depois não tem como separar o que é decisão do que 
 
 ## Perguntas em aberto
 
-Respondidas pelo dono no Approve da #4 (2026-09-25), "seguindo suas recomendações":
+Respondidas pelo dono no Approve da #4 (2026-09-25): "pode seguir com o plano da #4 com as suas recomendações".
 
 1. As ADRs retroativas entram como `Accepted`, com o racional inferido marcado, porque o código já é a decisão.
 2. Nenhuma decisão além das listadas precisa entrar agora: "não observei nada fora da listagem".
@@ -76,21 +76,25 @@ O que foi construído está na [entrada do changelog](../evolution/changelog.md)
 Desvios do plano e achados:
 
 - **As ADRs começam em 0004.** A #13 criou a 0003, então cada ADR retroativa desceu um número, e o slug de cada uma não mudou.
-- **Medições no lugar de inferências.** Três pontos que seriam "(inferido; confirmar)" foram medidos:
+- **Medições no lugar de inferências.** Quatro pontos que seriam "(inferido; confirmar)" foram medidos:
   - as 11 rotas sombreadas caem no handler da `:id`;
   - nenhum commit anterior a `fb4a804` passa no `tsc`;
-  - o Swagger UI serve 0 schemas.
+  - o Swagger UI serve 0 schemas;
+  - o seed fixa a sequência de chamadas, não cada resposta.
 
   Duas inferências dos rascunhos estavam erradas e foram corrigidas: o `npm ci --omit=dev` e as "34 respostas sem envelope".
 - **Um achado novo para a #8.** `GET form/fields.json` e `GET form/programMemberFields.json` também casam com `form/:id.json`, de outro controller. Só escapam porque o `FormFieldsModule` é importado antes do `FormsModule` ([ADR 0005](../decisions/0005-nestjs-express-one-module-per-tag.md)).
 - **O project intent foi corrigido em dois critérios**, sem mudar o que eles pedem:
   - as 11 rotas deixaram de ser "podem estar sombreadas" e passaram a ser medidas;
   - o seed hoje só repete o payload para a mesma sequência de requisições desde o boot ([ADR 0007](../decisions/0007-faker-factories-with-overrides-and-seed.md)).
+- **Um critério a mais: os critérios ao vivo da #3 e da #13.** O plano da #4 não os tinha. Os intents delas deixaram esses critérios para esta PR, e eles foram marcados com a evidência de cada um.
+- **A PR é `HIGH`, não `NORMAL`.** O plano previa só documentação. A PR também muda um teste de drift do harness (`test/scripts/drift.spec.ts`). Antes, ele garantia que os números de decisão prometidos à #4 estavam livres; agora garante que cada um existe. O pattern [revisão classificada por risco](../knowledge/patterns/risk-classified-review.md) sobe para `HIGH` uma PR que toca um teste do harness.
+- **Os commits.** Os passos 3 e 4 do plano (patterns e anti-patterns; glossário, `CODING_STANDARDS.md` e roteamento) saíram num commit só. Os critérios da #3 e da #13 ganharam um commit próprio.
 - **Os dois patterns de revisão não vêm dos commits pré-loop.** `review-before-merge` e `risk-classified-review` registram o que o loop das #2, #3 e #13 já pratica, e o bloco Status deles diz isso.
 
 Para o dono confirmar ou corrigir na revisão:
 
-- **As inferências marcadas.** São 68 marcas "(inferido; confirmar)" nos arquivos novos, a maior parte nas ADRs: 6 na 0004, 10 na 0005, 8 na 0006, 12 na 0007, 15 na 0008 e 8 na 0009.
+- **As inferências marcadas.** São 68 marcas "(inferido; confirmar)" nos arquivos novos (contadas com `grep -o`), a maior parte nas ADRs: 7 na 0004, 10 na 0005, 8 na 0006, 12 na 0007, 15 na 0008 e 8 na 0009. As outras 8 estão em `generate-and-check` (2), `risk-classified-review` (4) e `literal-route-after-param-route` (2).
 - **O "à mão" de `5cc5e09`.** O histórico só prova que o prefixo `../../` dos imports não saiu de nenhuma versão do gerador. Ele não diz se foi digitado ou feito por script.
 - **O `HIGH` pede que o dono leia a PR antes do merge?** O pattern `risk-classified-review` marca isso como inferência, porque estreitaria a autorização permanente de merge dada na #2.
 - **Se a #8 cobre também o caso de `form-fields`.**

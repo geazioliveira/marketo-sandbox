@@ -48,7 +48,7 @@ Nenhum está marcado ainda: um critério só é marcado quando um teste ou um ch
 
 - **A reescrita multi-API** (5 documentos Swagger, registro de alvos) está no checkout principal sem commit e entra por PR (#6).
 - **Qual cópia do Swagger de assets vale.** Aqui é `ced6c339…` (255 definições); o lite-campaign fixa `ff7ec628…` (254). A escolha sai de um diff nas rotas que o consumidor usa.
-- **Onde vive o comportamento com estado:** ao lado do código gerado, nunca dentro dele. A [ADR 0009](../decisions/0009-behaviour-beside-generated-code.md) propõe isso como `Proposed`, e a primeira sub-issue da Track A que construir comportamento a aceita.
+- **Onde vive o comportamento com estado:** ao lado do código gerado, nunca dentro dele. A [ADR 0009](../decisions/0009-behaviour-beside-generated-code.md) propõe isso como `Proposed`, e a primeira sub-issue da Track A que construir comportamento a aceita ou a substitui.
 - **ObserveModule:** tornar opt-in ou remover (#9).
 - **Esquema de release e tag** que os consumidores fixam.
 - **Versão do Node:** `.nvmrc` com 24, na #2.

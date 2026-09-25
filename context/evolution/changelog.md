@@ -15,21 +15,23 @@ Uma entrada por mudança mergeada, da mais nova para a mais antiga, escrita no p
 - **Seis patterns novos:** gerar e conferir, a fronteira do código gerado, a forma de um módulo de recurso, factory com overrides, revisão antes do merge e revisão classificada por risco.
 - **Quatro anti-patterns do histórico:**
   - editar código gerado à mão (`5cc5e09`);
-  - mover as pastas geradas sem o gerador (`a19d9d3` e `e7a0bb6`);
+  - mover as pastas geradas sem o gerador (`a19d9d3`, `e7a0bb6` e `b91681a`);
   - mensagem de commit que diz menos do que o commit faz;
   - rota literal depois de uma rota com parâmetro (#8).
 - **O glossário e o `CODING_STANDARDS.md`.** O `CODING_STANDARDS.md` só tem links, para cada pattern e cada anti-pattern. O `AGENTS.md`, o guia do Context Mesh, o fluxo e o project intent passam a apontar para os arquivos novos.
 - **Os critérios ao vivo da #3 e da #13** foram marcados, cada um com a própria evidência: a primeira auditoria de `main`, e o comentário de evidência na #13.
+- **Um teste de drift do harness mudou de invariante.** Antes da #4, ele garantia que os números de decisão prometidos à #4 estavam livres. Agora a #4 ocupa esses números, e o teste garante que cada um existe. Por isso a PR é `HIGH`, e não `NORMAL` como no plano.
 
 ### Números medidos
 
-Todos medidos numa cópia de `origin/main` tirada com `git archive`, fora do worktree.
+Medidos numa cópia de `origin/main` tirada com `git archive`, fora do worktree. O `tsc` foi rodado em cada commit pré-loop.
 
 - **O Swagger.** sha256 `ced6c339f60e71f30f4a929ce04e748c814ca2e8350611b946af3267cb962eaf`, com 255 definições, 220 operações, 186 caminhos e 23 tags (contados com node).
 - **Os geradores.** O `--check` sai com 1 nos três geradores e acusa 255, 46 e 259 arquivos (definições, resources e factories). Gerados de novo, os 255 arquivos de definições e os 259 de factories saem idênticos aos commitados, só nas pastas antigas. Os 46 resources diferem só no prefixo dos imports.
 - **As rotas sombreadas.** Com um build `tsc` servido em 127.0.0.1 e cada método de service trocado por um que devolve o próprio nome, as 11 rotas literais sombreadas caem no handler da rota `:id`. `GET form/fields.json` e `GET form/programMemberFields.json` só escapam porque o `FormFieldsModule` é importado antes do `FormsModule`.
 - **O `tsc` nos commits.** Nenhum commit anterior a `fb4a804` passa no `tsc`. Erros TS2307 (módulo não encontrado): 123 em `a19d9d3`, 165 em `e7a0bb6`, 86 em `5cc5e09` e 86 em `0ef242d`.
-- **O Swagger UI.** O documento que ele serve tem 186 caminhos e 0 schemas.
+- **O Swagger UI.** O documento que o `SwaggerModule` monta sobre o `AssetResourcesModule` tem 186 caminhos e 0 schemas. O que o app serve em `/api` tem também o `GET /` do starter, e fica com 187.
+- **O seed.** Chamando os services direto: duas chamadas seguidas ao mesmo método diferem, a primeira se repete depois de semear de novo, e uma chamada a outro método antes dela muda o resultado.
 
 ### Decisões tomadas
 
@@ -51,7 +53,7 @@ Todos medidos numa cópia de `origin/main` tirada com `git archive`, fora do wor
 
 ### Aprendizados / surpresas
 
-- **Medir em vez de inferir.** Três pontos que os rascunhos marcavam como inferência foram medidos: as rotas sombreadas, o build quebrado entre os commits e o Swagger UI sem schemas. Duas inferências estavam erradas. O `npm ci --omit=dev` ainda instala o faker, porque o npm recalcula as flags de dev a partir do `package.json`. E 33 das 34 respostas "sem envelope" têm `success` e `requestId`.
+- **Medir em vez de inferir.** Quatro pontos que os rascunhos marcavam como inferência foram medidos: as rotas sombreadas, o build quebrado entre os commits, o Swagger UI sem schemas e o seed, que fixa a sequência e não cada resposta. Duas inferências estavam erradas. O `npm ci --omit=dev` ainda instala o faker, porque o npm recalcula as flags de dev a partir do `package.json`. E 33 das 34 respostas "sem envelope" têm `success` e `requestId`.
 - **A mensagem de commit não é fonte.** Quatro dos nove commits pré-loop fazem mais, ou outra coisa, do que dizem. O registro só saiu lendo cada diff.
 - **O gerador e a saída já divergiam no primeiro commit.** Em `0c8e760`, os geradores emitiam imports com sufixo `.js`, e nenhum arquivo commitado os tinha.
 - **A ordem de import dos módulos também decide rotas.** Duas rotas de `form-fields` só não caem em `forms` pela ordem alfabética dos imports, e a #8 não as listava.
@@ -260,10 +262,10 @@ Cada uma das 7 threads do Copilot deixadas abertas nas PRs #10 e #11 foi verific
 Nove commits entraram direto em `main` no mesmo dia, sem issue e sem PR. A #4 os reconstruiu pelo diff, um a um.
 
 - **`0c8e760` Initial commit.** O starter NestJS, o Swagger de assets (`docs/marketo-swagger-asset.json`) e os geradores de definições e de resources. Traz 255 DTOs em `src/asset-definitions/` e 23 módulos de recurso cujos services lançam `NotImplementedException`.
-- **`01ee283`.** Os scripts npm `generate:*` e `check:*`. Também move o `@faker-js/faker` para `dependencies`, acrescenta o `@nestjs/swagger` e liga `ignoreDeprecations: "6.0"`.
+- **`01ee283`.** Os scripts npm `generate:factories`, `check:factories`, `generate:all` e `check:all`; os de definições e de resources já vinham em `0c8e760`. Também move o `@faker-js/faker` para `dependencies`, acrescenta o `@nestjs/swagger` e liga `ignoreDeprecations: "6.0"`.
 - **`a967f26`.** O gerador de resources passa a emitir services que devolvem factories e módulos com `exports`. Os geradores passam a importar `marketo_codegen`, que ainda não existe.
 - **`a19d9d3` e `e7a0bb6`.** Movem os 255 DTOs para `src/asset/asset-definitions/` e os reformatam, sem mudar os geradores.
-- **`5cc5e09`.** Os `exports` dos módulos, o prefixo novo dos imports e as chamadas às factories, fora do gerador.
+- **`5cc5e09`.** Os `exports` dos módulos e as chamadas às factories, que o gerador de `a967f26` já emitia, e o prefixo `../../` dos imports, que nenhuma versão dele emite, tudo sem rodar o gerador.
 - **`0ef242d`.** O gerador de factories e o `marketo_codegen.py`.
 - **`b91681a`.** As 255 factories faker, o `seed.ts` e o `request-id.ts`, em `src/asset/asset-mocks/`.
 - **`fb4a804`.** O Swagger UI em `/api` e o `seedMockData()` no boot. É o primeiro commit que passa no `tsc`.

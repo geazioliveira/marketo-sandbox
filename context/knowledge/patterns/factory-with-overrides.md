@@ -58,7 +58,7 @@ Toda definição do Swagger tem uma factory `makeX(overrides)` que devolve um ob
 - `seedMockData()` roda no começo do `bootstrap`, antes de o app ser criado (`src/main.ts:7`).
 - Com `MARKETO_MOCK_SEED`, ele chama `faker.seed` e fixa a data de referência dos helpers relativos, `MARKETO_MOCK_REF_DATE` ou `2024-01-01T00:00:00.000Z` (`src/asset/asset-mocks/seed.ts:4,11-23`, `README.md:77-87`).
 - Sem a variável, ele volta sem tocar no faker, e as respostas são aleatórias (`src/asset/asset-mocks/seed.ts:15-17`). Um seed `0` conta como ausente: `Number('0') || undefined` é `undefined` (`src/asset/asset-mocks/seed.ts:12`).
-- O seed vale para a instância compartilhada do faker (`src/asset/asset-mocks/seed.ts:19`). Então a mesma requisição só devolve o mesmo payload quando chega na mesma posição da sequência de chamadas desde o início do processo (inferido; confirmar). Nenhum teste prova a reprodutibilidade ainda ([project intent](../../intent/project-intent.md)).
+- O seed vale para a instância compartilhada do faker (`src/asset/asset-mocks/seed.ts:19`). Então a mesma requisição só devolve o mesmo payload quando chega na mesma posição da sequência de chamadas desde o início do processo, como a #4 mediu ([ADR 0007](../../decisions/0007-faker-factories-with-overrides-and-seed.md)). Nenhum teste prova a reprodutibilidade ainda ([project intent](../../intent/project-intent.md)).
 - `seed.ts` também é gerado (`scripts/generate-marketo-factories.py:243-271`). Mudar o seed é mudar o gerador.
 
 ### Como sobrescrever
