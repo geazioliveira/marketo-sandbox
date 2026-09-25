@@ -12,24 +12,24 @@ Esta é a segunda fatia do harness acompanhado na #1.
 
 ## Critérios de aceite
 
-- [ ] Existe o script `typecheck` (`tsc --noEmit`) e ele passa.
-- [ ] `scripts/check-context.mjs` passa no `context/` atual e recusa, com um teste para cada caso:
-  - [ ] link relativo quebrado;
-  - [ ] título sem dois-pontos, ou sem bloco Status, exceto nos índices, no glossário e no changelog;
-  - [ ] status do índice de decisões diferente do status do arquivo;
-  - [ ] título de entrada do changelog fora das formas `(#issue)` e `(#issue, PR #n)`;
-  - [ ] caminho absoluto de máquina (`/Users/`, `/Volumes/`, `/private/tmp/`).
-- [ ] `npm run check` junta lint, typecheck, test, check:context e build.
-- [ ] O `check.yml` roda `npm run check` e o e2e com `OBSERVE_ENDPOINT` apontando para loopback, e o job agregador continua se chamando `check`.
+- [x] Existe o script `typecheck` (`tsc --noEmit`) e ele passa.
+- [x] `scripts/check-context.mjs` passa no `context/` atual e recusa, com um teste para cada caso:
+  - [x] link relativo quebrado;
+  - [x] título sem dois-pontos, ou sem bloco Status, exceto nos índices, no glossário e no changelog;
+  - [x] status do índice de decisões diferente do status do arquivo;
+  - [x] título de entrada do changelog fora das formas `(#issue)` e `(#issue, PR #n)`;
+  - [x] caminho absoluto de máquina (`/Users/`, `/Volumes/`, `/private/tmp/`).
+- [x] `npm run check` junta lint, typecheck, test, check:context e build.
+- [x] O `check.yml` roda `npm run check` e o e2e com `OBSERVE_ENDPOINT` apontando para loopback, e o job agregador continua se chamando `check`.
   - O e2e só entra depois de medido.
   - Se não passar num runner limpo, fica registrado como falha conhecida, com a causa, e o conserto vai para a #9 (resposta 1 do dono na #3).
-- [ ] `main-audit.yml` e `scripts/audit-main.mjs` auditam só o intervalo `before..after` de cada push em `main`, pelo primeiro pai. Os commits até `fb4a804` são anteriores ao loop e nunca são auditados. Cada um destes casos tem teste:
-  - [ ] commit direto;
-  - [ ] force-push;
-  - [ ] PR que não fecha issue.
+- [x] `main-audit.yml` e `scripts/audit-main.mjs` auditam a linha do primeiro pai de `main`, com um teste para cada um destes casos (o intervalo e a linha de base mudaram na revisão; ver Resultados):
+  - [x] commit direto;
+  - [x] force-push;
+  - [x] PR que não fecha issue.
 
   Cada caso abre **automaticamente** uma issue `bug` + `needs-triage` chamada "Mudança em main fora do loop: <sha7>" (resposta 2 do dono na #3), sem duplicar, e o workflow fica vermelho.
-- [ ] `issue-link-refresh.yml` reage a label, comentário, fechamento e reabertura numa issue, re-executando o `issue-link` das PRs abertas que fecham aquela issue. Se o `GITHUB_TOKEN` não conseguir disparar o rerun, a limitação fica documentada na ADR 0002, com o que se mediu.
+- [x] `issue-link-refresh.yml` reage a label, comentário, fechamento e reabertura numa issue, re-executando o `issue-link` das PRs abertas que fecham aquela issue. Se o `GITHUB_TOKEN` não conseguir disparar o rerun, a limitação fica documentada na ADR 0002, com o que se mediu.
 - [ ] Na PR desta issue, o check `issue-link` roda a partir de `main` e fica verde. É a primeira prova ao vivo do harness.
 - [ ] Na primeira execução, o `main-audit` audita o merge desta própria PR e não abre issue.
 
@@ -57,7 +57,19 @@ Respondidas pelo dono na #3 (2026-09-25):
 - [O gate do loop](../knowledge/patterns/loop-gate.md)
 - [Ciclo de vida de issue e branch](../knowledge/patterns/issue-branch-lifecycle.md)
 
+## Resultados
+
+O que foi construído está na [entrada do changelog](../evolution/changelog.md). Desvios do plano aprovado, todos para o lado que julga mais:
+
+- **O intervalo da auditoria não é `before..after`.** Ele vai do topo da última run cujo passo `Julgar` terminou até o topo atual, com uma execução diária e uma manual. Com `before..after`, um push que não dispara run (um token de pular CI, um push feito com o `GITHUB_TOKEN`, uma run cancelada) nunca seria julgado. Isso ficou registrado no [anti-pattern](../knowledge/anti-patterns/audit-bound-from-the-event.md).
+- **A linha de base é `8d4662f`, não `fb4a804`.** É o merge da #2, a exceção de bootstrap: o `issue-link` do servidor chegou com ele e não podia estar verde nele.
+- **Estar no loop também exige os checks verdes.** Um merge só conta como dentro do loop se a PR teve `Vínculo com issue / issue-link` (de `pull_request_target`) e `Qualidade / check` verdes antes do merge. Assim um merge de PR vermelha vira issue.
+- **Três casos passaram a virar issue:** uma reescrita de `main` desde a última auditoria (pelo compare do GitHub quando o topo antigo sumiu do clone), um intervalo com mais de 200 commits, e mais de 10 commits fora do loop numa auditoria (uma issue só).
+- **Tokens de pular CI e o trailer `skip-checks: true` ficam proibidos** no título, no corpo e nos commits da PR.
+- **Os dois últimos critérios dependem de GitHub ao vivo.** O primeiro, `issue-link` verde a partir de `main` na PR, é marcado depois do CI desta PR. O segundo, a primeira auditoria do merge sem issue, só é observável depois do merge: o resultado vai num comentário na #3, e a PR da #4 o registra aqui.
+
 ## Status
 
 - **Criado**: 2026-09-25 (Fase: Intent), do plano aprovado na #3 (#3)
 - **Status**: In Progress
+- **Atualizado**: 2026-09-25 (Fase: Learn), Resultados escritos antes da PR; os dois critérios que dependem do GitHub ao vivo ficam para depois do CI e do merge (#3)
