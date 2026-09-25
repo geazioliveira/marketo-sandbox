@@ -76,7 +76,12 @@ jobs:
     # A comment on a pull request is an issue_comment event too, and nothing
     # on a PR's conversation changes the gate's verdict: skip it here, so it
     # costs no runner minutes. The script refuses it again (IS_PR). A signal
-    # run that did not succeed points at nothing to trust. A dispatch runs
+    # run that did not succeed points at nothing to trust. Copilot's own
+    # review is such a case: its signal run ends action_required (GitHub asks
+    # approval for a bot-triggered run, measured on PR #15), or no run starts
+    # at all, so after Copilot's review the verdict is renewed by hand (the
+    # gate in CI mode, or gh run rerun watched to its end), never by trusting
+    # this re-trigger (ADR 0003). A dispatch runs
     # only from main: this catches accidents only, since the dispatched ref's
     # own copy of this file can drop the guard.
     if: ${{ !github.event.issue.pull_request && (github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success') && (github.event_name != 'workflow_dispatch' || github.ref == 'refs/heads/main') }}
