@@ -4,7 +4,7 @@ Uma entrada por mudança mergeada, da mais nova para a mais antiga, escrita no p
 
 ---
 
-## 2026-09-25: CI de qualidade, auditoria de main e refresh do vínculo (#3)
+## 2026-09-25: CI de qualidade, auditoria de main e refresh do vínculo (#3, PR #11)
 
 **Fase**: Learn
 **Tipo**: Process
@@ -34,6 +34,7 @@ Uma entrada por mudança mergeada, da mais nova para a mais antiga, escrita no p
 
 - `npm run check`: 737 testes em 8 arquivos verdes; `check:context` sem problemas em 16 arquivos, com 106 links internos; build OK.
 - `OBSERVE_ENDPOINT=http://127.0.0.1:9 npm run test:e2e`: 1 teste verde, cerca de 1 s.
+- **Na PR #11, a primeira execução real do `Vínculo com issue / issue-link`:** evento `pull_request_target`, gate de `main` rodando contra a cabeça da PR, verde em 8 s. O `Qualidade / check` ficou verde em 1 min num runner limpo, com o e2e incluído.
 - Cada correção das revisões tem um teste de regressão que falha quando ela é revertida. Foram mais de 100 mutações, todas capturadas, feitas numa cópia fora do worktree.
 
 ### Decisões tomadas

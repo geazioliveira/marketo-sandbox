@@ -30,7 +30,7 @@ Esta é a segunda fatia do harness acompanhado na #1.
 
   Cada caso abre **automaticamente** uma issue `bug` + `needs-triage` chamada "Mudança em main fora do loop: <sha7>" (resposta 2 do dono na #3), sem duplicar, e o workflow fica vermelho.
 - [x] `issue-link-refresh.yml` reage a label, comentário, fechamento e reabertura numa issue, re-executando o `issue-link` das PRs abertas que fecham aquela issue. Se o `GITHUB_TOKEN` não conseguir disparar o rerun, a limitação fica documentada na ADR 0002, com o que se mediu.
-- [ ] Na PR desta issue, o check `issue-link` roda a partir de `main` e fica verde. É a primeira prova ao vivo do harness.
+- [x] Na PR desta issue, o check `issue-link` roda a partir de `main` e fica verde. É a primeira prova ao vivo do harness.
 - [ ] Na primeira execução, o `main-audit` audita o merge desta própria PR e não abre issue.
 
 ## Abordagem técnica
@@ -72,4 +72,4 @@ O que foi construído está na [entrada do changelog](../evolution/changelog.md)
 
 - **Criado**: 2026-09-25 (Fase: Intent), do plano aprovado na #3 (#3)
 - **Status**: In Progress
-- **Atualizado**: 2026-09-25 (Fase: Learn), Resultados escritos antes da PR; os dois critérios que dependem do GitHub ao vivo ficam para depois do CI e do merge (#3)
+- **Atualizado**: 2026-09-25 (Fase: Learn), o `issue-link` rodou de `main` e ficou verde na PR #11; só falta observar a primeira auditoria depois do merge, que a PR da #4 registra (#3)
