@@ -1,0 +1,54 @@
+# Lint and unit tests on every pull request and on main.
+#
+# Deliberately minimal for #2; the full quality CI comes in #3. Left out, and why:
+# - no e2e: test/app.e2e-spec.ts boots ObserveModule, which sends telemetry
+#   from the runner (#9);
+# - no check:all, and so no Python: the generators still write to the old
+#   layout, so it cannot pass today (#7);
+# - no build: nothing here ships an artifact yet.
+name: Qualidade
+
+on:
+  # A feature branch is covered by its pull request; push runs only on main, so
+  # the same commit is not billed twice.
+  push:
+    branches: [main]
+  pull_request:
+  # Re-run main without an empty commit.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Supersede a stale run on a branch. Runs on main are never cancelled: every
+# commit on main needs a verdict, and a cancelled run is neither pass nor fail.
+concurrency:
+  group: check-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  check:
+    name: check
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm test
+      # A step that rewrote a tracked file, or left a file that is not ignored,
+      # passes on its own. `git diff` sees only tracked files, so read the status.
+      - name: Árvore limpa
+        run: |
+          status="$(git status --porcelain)"
+          if [ -n "$status" ]; then
+            echo "Os checks deixaram a árvore suja:"
+            echo "$status"
+            exit 1
+          fi
