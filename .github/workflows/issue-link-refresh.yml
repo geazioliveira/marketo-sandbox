@@ -1,0 +1,70 @@
+# Keeps the issue-link check fresh (#3): when an issue changes, re-run the
+# issue-link of every open PR that closes it. scripts/refresh-issue-link.mjs
+# does the work.
+#
+# Why: issue-link.yml runs on pull_request_target, and events on the issue do
+# not trigger it. A withdrawn Approve, a new `# Plano`, a moved label, a
+# closing or a reopening used to leave a green check with a stale verdict.
+# Issue events always run the workflow from the default branch, so this file
+# and the script come from main, as the gate does.
+#
+# Only a pull_request_target run is re-run: that is the one that takes
+# issue-link.yml from main, not from the PR. A run still in progress cannot be
+# re-run: the script polls it until it finishes and then re-runs it, and goes
+# red if it is still going after four minutes, inside the job's five.
+#
+# The only write is actions: write, for the re-run. Whether a re-run asked for
+# with GITHUB_TOKEN goes through is unverified until the first live event;
+# until it is measured, and after it too, the rule stands: right before a
+# merge, renew the verdict (re-run issue-link or run the gate in CI mode) and
+# merge only on green (docs/development/workflow.md#pull-requests-e-merge).
+name: Atualiza vínculo com issue
+
+on:
+  issues:
+    types: [labeled, unlabeled, edited, closed, reopened]
+  issue_comment:
+    types: [created, edited, deleted]
+
+permissions:
+  actions: write
+  issues: read
+  pull-requests: read
+  contents: read
+
+# One refresh per issue at a time. A newer event waits and replaces an older
+# waiting one, which is right here: the last state of the issue is what the
+# re-run must read.
+concurrency:
+  group: issue-link-refresh-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    name: refresh
+    # A comment on a pull request is an issue_comment event too, and nothing
+    # on a PR's conversation changes the gate's verdict: skip it here, so it
+    # costs no runner minutes. The script refuses it again (IS_PR).
+    if: ${{ !github.event.issue.pull_request }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      # Only the scripts; cone mode also keeps the root files, so .nvmrc
+      # comes along.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: scripts
+          persist-credentials: false
+      # Nothing is installed: the script uses only Node's own modules.
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          package-manager-cache: false
+      # Event data reaches the script only through env, never interpolated
+      # into the shell.
+      - name: Re-roda o issue-link das PRs abertas
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          IS_PR: ${{ github.event.issue.pull_request != null }}
+        run: node scripts/refresh-issue-link.mjs
