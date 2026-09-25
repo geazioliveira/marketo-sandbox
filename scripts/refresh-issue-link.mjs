@@ -158,6 +158,7 @@ function readInput(env) {
   const isPr = String(env.IS_PR ?? '')
   const pr = String(env.PR_NUMBER ?? '')
   const branch = String(env.HEAD_BRANCH ?? '')
+  const headRepo = String(env.HEAD_REPO ?? '')
   if (issueMode) {
     if (!positive.test(issue))
       errors.push(`ISSUE_NUMBER deve ser o número da issue, recebeu "${issue}"`)
@@ -195,6 +196,7 @@ function readInput(env) {
       isPr: issueMode && isPr === 'true',
       pr: !issueMode && pr !== '' ? Number(pr) : null,
       branch: !issueMode && pr === '' ? branch : null,
+      headRepo: !issueMode && pr === '' ? headRepo : null,
       pollMs: Number(pollMs),
       waitMs: Number(waitMs),
     },
@@ -436,6 +438,19 @@ function refreshPull(input, deadline, lines) {
     lines.push(
       `Atualiza o issue-link das PRs abertas da branch ${input.branch}, ${why}: a run do sinal não nomeou a PR.`,
     )
+    // GitHub leaves pull_requests empty for a fork's PR. Its branch name says
+    // nothing about this repository's PRs, so a same-named branch here is no
+    // evidence: look the branch up only when it came from this repository.
+    if (
+      String(input.headRepo ?? '').toLowerCase() !== input.repo.toLowerCase()
+    ) {
+      lines.push(
+        input.headRepo
+          ? `A revisão veio de uma branch de ${input.headRepo}, não deste repositório: o issue-link não vale para fork, e uma branch ${input.branch} daqui não é a origem. Nada a re-rodar.`
+          : `O evento não disse de que repositório veio a branch ${input.branch}: sem essa prova, nenhuma PR daqui é re-rodada.`,
+      )
+      return exitCode
+    }
     const { nodes, others, total, read } = branchPulls(input, input.branch)
     if (others > 0)
       lines.push(

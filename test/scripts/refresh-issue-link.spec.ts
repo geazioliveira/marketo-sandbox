@@ -236,13 +236,14 @@ const branchPulls = (
  */
 const prMode = (
   event: 'workflow_run' | 'workflow_dispatch',
-  env: { PR_NUMBER?: string; HEAD_BRANCH?: string } = {},
+  env: { PR_NUMBER?: string; HEAD_BRANCH?: string; HEAD_REPO?: string } = {},
 ) => ({
   GITHUB_EVENT_NAME: event,
   ISSUE_NUMBER: '',
   IS_PR: 'false',
   PR_NUMBER: '',
   HEAD_BRANCH: event === 'workflow_run' ? BRANCH : '',
+  HEAD_REPO: event === 'workflow_run' ? REPO : '',
   ...env,
 })
 
@@ -963,6 +964,28 @@ describe.concurrent('scripts/refresh-issue-link.mjs in PR mode (#13)', () => {
     )
   })
 
+  // A fork's review leaves pull_requests empty; a branch of the same name in
+  // this repository is not where it came from (Copilot review on PR #15).
+  test.for([
+    ['a fork', 'someone/marketo-sandbox'],
+    ['an unnamed repository', ''],
+  ] as const)(
+    'refreshes nothing, green, and asks gh nothing, when the branch came from %s',
+    async ([, headRepo], { expect, scratch }) => {
+      const run = await scratch.refresh(
+        { answers: branchPulls(BRANCH, [{ number: PR, repo: REPO }]) },
+        prMode('workflow_run', { HEAD_REPO: headRepo }),
+      )
+      expect(run.status, run.stdout).toBe(0)
+      expect(keys(run.calls)).toEqual([])
+      expect(run.stdout).toContain(
+        headRepo
+          ? `A revisão veio de uma branch de ${headRepo}`
+          : 'O evento não disse de que repositório veio a branch',
+      )
+    },
+  )
+
   test('prefers the PR the run names over its branch', async ({
     expect,
     scratch,
@@ -1083,6 +1106,7 @@ describe('.github/workflows/issue-link-refresh.yml', () => {
       'IS_PR: ${{ github.event.issue.pull_request != null }}',
       'PR_NUMBER: ${{ github.event.workflow_run.pull_requests[0].number || inputs.pr }}',
       'HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}',
+      'HEAD_REPO: ${{ github.event.workflow_run.head_repository.full_name }}',
     ]
     expect(text).toContain(
       `        env:\n${env.map((line) => `          ${line}\n`).join('')}        run: node scripts/refresh-issue-link.mjs\n`,

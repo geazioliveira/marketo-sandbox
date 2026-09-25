@@ -97,8 +97,9 @@ jobs:
       # Event data reaches the script only through env, never interpolated
       # into the shell. The script picks its mode by GITHUB_EVENT_NAME, which
       # the runner sets: an issue event reads ISSUE_NUMBER and IS_PR, a
-      # workflow_run or a dispatch reads PR_NUMBER (and HEAD_BRANCH when a
-      # workflow_run names no PR).
+      # workflow_run or a dispatch reads PR_NUMBER (and HEAD_BRANCH with
+      # HEAD_REPO when a workflow_run names no PR: the branch is looked up
+      # only when it came from this repository).
       - name: Re-roda o issue-link das PRs abertas
         env:
           GH_TOKEN: ${{ github.token }}
@@ -106,4 +107,5 @@ jobs:
           IS_PR: ${{ github.event.issue.pull_request != null }}
           PR_NUMBER: ${{ github.event.workflow_run.pull_requests[0].number || inputs.pr }}
           HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          HEAD_REPO: ${{ github.event.workflow_run.head_repository.full_name }}
         run: node scripts/refresh-issue-link.mjs
