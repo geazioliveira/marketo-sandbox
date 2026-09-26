@@ -252,6 +252,19 @@ describe.concurrent('git through the hook', () => {
     expectDeny(await guard('git commit -m "Hooks [skip ci]"'), /\[skip ci\]/)
   })
 
+  it('denies a skip token in a merge commit message (Copilot review of #26)', async () => {
+    expectDeny(
+      await guard("git merge --no-ff -m '[skip ci]' origin/main"),
+      /a mensagem do merge traz "\[skip ci\]"/,
+    )
+    expectDeny(
+      await guard(
+        String.raw`printf 'Trazer main\n\n[no ci]\n' > msg-ok.txt && git merge --no-ff -F msg-ok.txt origin/main`,
+      ),
+      /a mensagem do merge traz "\[no ci\]"/,
+    )
+  })
+
   it('asks for a commit after a cd it cannot read', async () => {
     expectAsk(
       await guard('cd "$WORKTREE" && git commit -m x'),
@@ -714,6 +727,63 @@ describe.concurrent('which repository a gh command acts on', () => {
     expectPass(await guard('gh issue reopen 5', { repo: elsewhere }))
   })
 })
+
+describe.concurrent(
+  'a remote changed earlier on the line (Copilot review of #26)',
+  () => {
+    const PROJECT_URL = 'https://github.com/geazioliveira/marketo-sandbox.git'
+    const reopen = /reabrir uma issue cancela o Approve/
+
+    it.each([
+      `git remote set-url origin ${PROJECT_URL} && gh issue reopen 5`,
+      `git config remote.origin.url ${PROJECT_URL} && gh issue reopen 5`,
+      `git remote rename origin velho; git remote add origin ${PROJECT_URL}; gh issue reopen 5`,
+      'git remote set-url origin "$URL" && gh issue reopen 5',
+      `git remote add upstream ${PROJECT_URL} && gh issue reopen 5`,
+      `git config --global url.${PROJECT_URL}.insteadOf https://github.com/alguem/outro.git && gh issue reopen 5`,
+      `gh issue reopen 5 "$(git remote set-url origin ${PROJECT_URL})"`,
+    ])('denies, in another repository, %s', async (text) => {
+      expectDeny(await guard(text, { repo: elsewhere }), reopen)
+    })
+
+    it('fills the placeholders from the changed origin', async () => {
+      expectDeny(
+        await guard(
+          `git remote set-url origin ${PROJECT_URL} && gh api repos/{owner}/{repo}/issues/5/labels -f 'labels[]=ready-for-agent'`,
+          { repo: elsewhere },
+        ),
+        /label de estado/,
+      )
+    })
+
+    it('still judges this project when origin is pointed away: the change may fail', async () => {
+      expectDeny(
+        await guard(
+          'git remote add origin https://github.com/alguem/outro.git; gh issue reopen 5',
+        ),
+        reopen,
+      )
+    })
+
+    it('passes when origin still names another repository, or the change lands elsewhere', async () => {
+      expectPass(
+        await guard('git remote -v && gh issue reopen 5', { repo: elsewhere }),
+      )
+      expectPass(
+        await guard(
+          'git remote set-url origin https://github.com/alguem/outra.git && gh issue reopen 5',
+          { repo: elsewhere },
+        ),
+      )
+      expectPass(
+        await guard(
+          `git -C ${feature.dir} remote set-url origin ${PROJECT_URL} && gh issue reopen 5`,
+          { repo: elsewhere },
+        ),
+      )
+    })
+  },
+)
 
 describe.concurrent('commands that must pass', () => {
   test.for([

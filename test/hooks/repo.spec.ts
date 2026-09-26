@@ -429,6 +429,33 @@ describe.concurrent('the gate cache', () => {
     expect(lib.readGateCache(linked.gitDir)).toBeNull()
     expect(lib.readGateCache(repo.gitDir)).not.toBeNull()
   })
+
+  test('clears the cache of every worktree from the common git dir (Copilot review of #26)', async ({
+    expect,
+    fresh,
+  }) => {
+    const repo = await fresh({ cache: true })
+    expect(lib.worktreeGitDirs(repo.gitDir)).toEqual([repo.gitDir])
+    const linked = await repo.addWorktree('linked', BRANCH)
+    writeFileSync(path.join(linked.gitDir, gateCacheFile), '{}\n')
+    expect(lib.worktreeGitDirs(repo.gitDir)).toEqual([
+      repo.gitDir,
+      realpathSync.native(linked.gitDir),
+    ])
+    lib.clearGateCaches(repo.gitDir)
+    expect(existsSync(path.join(repo.gitDir, gateCacheFile))).toBe(false)
+    expect(existsSync(path.join(linked.gitDir, gateCacheFile))).toBe(false)
+    expect(() => lib.clearGateCaches(repo.gitDir)).not.toThrow()
+  })
+
+  test('throws when a cache cannot be removed', async ({ expect, fresh }) => {
+    const repo = await fresh()
+    const linked = await repo.addWorktree('linked', BRANCH)
+    mkdirSync(path.join(linked.gitDir, gateCacheFile, 'dentro'), {
+      recursive: true,
+    })
+    expect(() => lib.clearGateCaches(repo.gitDir)).toThrow()
+  })
 })
 
 describe.concurrent('the pending-plan marker', () => {

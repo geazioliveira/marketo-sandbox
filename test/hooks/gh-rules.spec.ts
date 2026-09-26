@@ -89,7 +89,11 @@ interface GhRulesLib {
 }
 
 /** The repository as guard-bash hands it on: branchKnown false when an earlier command moved HEAD. */
-type SeenRepo = RepoInfo & { branchKnown?: boolean; repoKnown?: boolean }
+type SeenRepo = RepoInfo & {
+  branchKnown?: boolean
+  repoKnown?: boolean
+  remoteKnown?: boolean
+}
 
 interface GhCtx {
   cwd: string
@@ -2249,5 +2253,198 @@ describe('gh aliases (review of #5)', () => {
     expect(moves('gh pr view 7')).toBe(false)
     expect(moves('gh i view 5')).toBe(false)
     expect(moves('gh issue view 5')).toBe(false)
+  })
+})
+
+describe('a repository it cannot read is never this project for a pass (Copilot review of #26)', () => {
+  const transition = '--remove-label needs-triage --add-label ready-for-human'
+  const unplaced = /não consegui ler em que repositório o comando troca/
+
+  it.each([
+    ['-R of a variable', `gh issue edit 5 -R "$REPO" ${transition}`],
+    ['--repo= of a variable', `gh issue edit 5 "--repo=$REPO" ${transition}`],
+    ['GH_REPO of a variable', `GH_REPO=$DESTINO gh issue edit 5 ${transition}`],
+  ])(
+    'asks, not critical, before reading an issue named through %s',
+    async (_, text) => {
+      const github = stub({ issueState: issueAnswer() })
+      expectAsk(await judge(text, { github }), { reason: unplaced })
+      expect(github.calls).toEqual([])
+    },
+  )
+
+  it('asks the same after a directory or a remote it could not read', async () => {
+    const github = stub({ issueState: issueAnswer() })
+    expectAsk(
+      await judge(`gh issue edit 5 ${transition}`, {
+        github,
+        extra: { cwdKnown: false },
+      }),
+      { reason: unplaced },
+    )
+    expectAsk(
+      await judge(`gh issue edit 5 ${transition}`, {
+        github,
+        repo: { ...project(), remoteKnown: false },
+      }),
+      { reason: unplaced },
+    )
+    expect(github.calls).toEqual([])
+  })
+
+  it('keeps the denies that do not depend on the repository', async () => {
+    const github = stub()
+    expectDeny(
+      await judge('gh issue edit 5 -R "$REPO" --add-label ready-for-agent', {
+        github,
+      }),
+      /ready-for-agent são do dono/,
+    )
+    expectDeny(await judge('gh issue reopen 5 -R "$REPO"', { github }))
+    expect(github.calls).toEqual([])
+  })
+
+  it('asks, critical, before reading a PR in a repository it cannot read', async () => {
+    const github = stub({
+      prMergeState: mergeAnswer({ checksOk: false, checksDetail: 'vermelho' }),
+    })
+    expectAsk(await judge('gh pr merge 7 -R "$REPO" --squash', { github }), {
+      critical: true,
+      reason: /o repositório da PR não pôde ser lido/,
+    })
+    expect(github.calls).toEqual([])
+  })
+
+  it('judges a remote changed to one it can read by that repository', async () => {
+    expectPass(
+      await judge('gh issue reopen 5', {
+        repo: { ...project(), repo: 'alguem/outro' },
+      }),
+    )
+    expectDeny(
+      await judge('gh issue reopen 5', {
+        repo: { ...project(), repo: null, remoteKnown: false },
+      }),
+    )
+    expectDeny(
+      await judge(
+        `gh api repos/{owner}/{repo}/issues/5/labels -f 'labels[]=ready-for-agent'`,
+        { repo: { ...project(), repo: 'alguem/outro', remoteKnown: false } },
+      ),
+      /label de estado/,
+    )
+  })
+})
+
+describe('a PR created through the API (Copilot review of #26)', () => {
+  const repoPath = `repos/${PROJECT}`
+  const noBody =
+    /a PR precisa de um corpo cuja primeira linha é exatamente "Closes #5\."/
+  const unreadPrBody = /não consegui ler o corpo da PR/
+
+  it.each([
+    [
+      'POST by its fields',
+      `gh api ${repoPath}/pulls -f head=${BRANCH} -f base=main -f title=T`,
+    ],
+    [
+      '-X POST with placeholders',
+      `gh api -X POST repos/{owner}/{repo}/pulls -f head=${BRANCH} -f base=main -f title=T`,
+    ],
+    [
+      'an issue turned into a PR',
+      `gh api ${repoPath}/pulls -f head=${BRANCH} -f base=main -F issue=5`,
+    ],
+  ])('denies a REST %s with no body, as gh pr create does', async (_, text) => {
+    expectDeny(await judge(text), noBody)
+  })
+
+  test('reads the body from --input, and asks only when it cannot read it', async ({
+    scratch,
+  }) => {
+    const dir = scratch()
+    const pr = { head: BRANCH, base: 'main', title: 'T' }
+    writeFileSync(path.join(dir, 'sem-corpo.json'), JSON.stringify(pr))
+    writeFileSync(
+      path.join(dir, 'com-corpo.json'),
+      JSON.stringify({ ...pr, body: 'Closes #5.\n\nTexto.' }),
+    )
+    expectDeny(
+      await judge(`gh api ${repoPath}/pulls --input sem-corpo.json`, {
+        cwd: dir,
+      }),
+      noBody,
+    )
+    expectPass(
+      await judge(`gh api ${repoPath}/pulls --input com-corpo.json`, {
+        cwd: dir,
+      }),
+    )
+    expectAsk(
+      await judge(
+        `gh api ${repoPath}/pulls -f head=${BRANCH} -f base=main -f body="$CORPO"`,
+      ),
+      { reason: unreadPrBody },
+    )
+  })
+
+  const create = (fields: string) =>
+    `gh api graphql -f query='mutation { createPullRequest(input: {repositoryId: "R_1", baseRefName: "main", ${fields}}) { pullRequest { url } } }'`
+
+  it('denies createPullRequest through GraphQL with no body', async () => {
+    expectDeny(
+      await judge(create(`headRefName: "${BRANCH}", title: "T"`)),
+      noBody,
+    )
+  })
+
+  it('holds createPullRequest to the rest of the gh pr create rules', async () => {
+    expectDeny(
+      await judge(
+        create(`headRefName: "claude/x", title: "T", body: "Closes #5."`),
+      ),
+      /a PR sai de uma branch/,
+    )
+    expectDeny(
+      await judge(
+        create(`headRefName: "${BRANCH}", title: "T", body: "Resumo"`),
+      ),
+      /exatamente "Closes #5\."; hoje é "Resumo"/,
+    )
+    expectDeny(
+      await judge(
+        create(`headRefName: "${BRANCH}", title: "T", body: "Closes #7."`),
+      ),
+      /fecha a #7, mas a branch é da #5/,
+    )
+    expectDeny(
+      await judge(
+        create(
+          `headRefName: "${BRANCH}", title: "T [skip ci]", body: "Closes #5."`,
+        ),
+      ),
+      /a PR traz "\[skip ci\]"/,
+    )
+    expectPass(
+      await judge(
+        create(
+          `headRefName: "${BRANCH}", title: "T", body: "Closes #5.\\n\\nTexto."`,
+        ),
+      ),
+    )
+  })
+
+  it('reads createPullRequest through variables, and asks for a body it cannot read', async () => {
+    const query =
+      'mutation($head: String!, $body: String) { createPullRequest(input: {repositoryId: "R_1", baseRefName: "main", headRefName: $head, title: "T", body: $body}) { pullRequest { url } } }'
+    expectPass(
+      await judge(
+        `gh api graphql -f head=${BRANCH} -f body='Closes #5.' -f query='${query}'`,
+      ),
+    )
+    expectAsk(
+      await judge(`gh api graphql -f head=${BRANCH} -f query='${query}'`),
+      { reason: unreadPrBody },
+    )
   })
 })

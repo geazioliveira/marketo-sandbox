@@ -9,6 +9,7 @@
 import { spawnSync } from 'node:child_process'
 import {
   existsSync,
+  readdirSync,
   readFileSync,
   realpathSync,
   renameSync,
@@ -274,7 +275,39 @@ export function readGateCache(gitDir) {
   }
 }
 
-/** Where session `sessionId`'s pending-plan marker lives: in the worktree's own git dir. */
+/**
+ * The git dirs of every worktree of a repository, from its common git dir:
+ * the common dir itself (the main worktree's) and each linked worktree's
+ * admin dir under `worktrees/`. The gate writes its cache into each.
+ */
+export function worktreeGitDirs(commonDir) {
+  const admin = path.join(commonDir, 'worktrees')
+  let linked = []
+  try {
+    linked = readdirSync(admin, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => path.join(admin, entry.name))
+  } catch (error) {
+    // No linked worktree yet; any other failure is not read as none.
+    if (error?.code !== 'ENOENT') throw error
+  }
+  return [commonDir, ...linked]
+}
+
+/**
+ * Removes the gate's cache from every worktree of the repository. A removal
+ * that fails throws at once, so the caller keeps what it meant to remove
+ * after the caches (the plan marker, which every worktree sees).
+ */
+export function clearGateCaches(commonDir) {
+  for (const dir of worktreeGitDirs(commonDir))
+    rmSync(path.join(dir, gateCacheFile), { force: true })
+}
+
+/**
+ * Where session `sessionId`'s pending-plan marker lives: in the git dir
+ * given, which plan-to-issue makes the repository's common one.
+ */
 export function pendingPlanPath(gitDir, sessionId) {
   return path.join(gitDir, planPendingFile(sessionId))
 }

@@ -569,6 +569,14 @@ const directoryKnown = (ctx) =>
   ctx.cwdKnown !== false && ctx.repo?.repoKnown !== false
 
 /**
+ * Whether ctx.repo.repo is the repository gh picks from the remotes: not
+ * when an earlier command of the line changed them in a way guard-bash
+ * cannot follow (remoteKnown false; Copilot review of #26).
+ */
+const remotesKnown = (ctx) =>
+  directoryKnown(ctx) && ctx.repo?.remoteKnown !== false
+
+/**
  * The branch checked out where the command runs, and whether it is known:
  * not when the directory is not, or an earlier command of the line moved
  * HEAD (guard-bash sets branchKnown: false).
@@ -607,7 +615,7 @@ function targetOf(command, ctx, operands) {
   }
   const env = ghRepoEnv(command, ctx)
   if (env !== null) return env
-  if (!directoryKnown(ctx)) return { repo: null, unknown: true }
+  if (!remotesKnown(ctx)) return { repo: null, unknown: true }
   return { repo: ctx.repo?.repo ?? null, unknown: false }
 }
 
@@ -879,10 +887,18 @@ function issueEdit(command, ctx) {
       others.length === 0 &&
       refs.length === 1 &&
       refs[0] !== null
+    // A repository the command names through something the hook cannot
+    // read is judged as this project for a refusal, never for a pass: the
+    // live read of this project's issue says nothing of another repository's
+    // (Copilot review of #26).
     decisions.push(
-      exception
-        ? planTransition(ctx.github, ctx.target, refs[0].number)
-        : deny(labelRule),
+      !exception
+        ? deny(labelRule)
+        : ctx.targetKnown === false
+          ? ask(
+              `não consegui ler em que repositório o comando troca ${planFrom} por ${planTo}: confira que a issue #${refs[0].number} é deste projeto, está em ${planFrom} e tem um # Plano como último comentário`,
+            )
+          : planTransition(ctx.github, ctx.target, refs[0].number),
     )
   } else if (others.some((label) => !label.known))
     decisions.push(ask(unknownLabels))
@@ -894,6 +910,10 @@ function issueEdit(command, ctx) {
     )
   return combine(decisions)
 }
+
+/** Why a new PR with no body is refused: the reason gh pr create gives. */
+const noPrBody = (issue) =>
+  `a PR precisa de um corpo cuja primeira linha é exatamente "Closes #${issue ?? 'N'}."`
 
 /** The first line of a PR body against the branch's issue. */
 function closesDecision(text, issue, what) {
@@ -956,7 +976,7 @@ function prCreate(command, ctx) {
       deny(
         filling
           ? `--fill sem --body tira o corpo dos commits, e a primeira linha precisa ser exatamente "Closes #${issue ?? 'N'}."`
-          : `a PR precisa de um corpo cuja primeira linha é exatamente "Closes #${issue ?? 'N'}."`,
+          : noPrBody(issue),
       ),
     )
   else decisions.push(closesDecision(body.text, issue, 'da PR'))
@@ -1074,6 +1094,10 @@ function prMerge(command, ctx) {
             : 'sem número, e a branch em que ele roda não pôde ser lida',
       ),
     )
+  // A repository that cannot be read is not read as this project's PR
+  // (Copilot review of #26): it asks, critical, as a failed read does.
+  if (ctx.targetKnown === false)
+    return mergeDecision(failed('o repositório da PR não pôde ser lido'))
   return mergeDecision(ctx.github.prMergeState(ctx.target, prRef))
 }
 
@@ -1686,6 +1710,35 @@ const decode = (segment) => {
   }
 }
 
+/**
+ * A pull request created through the API (REST `pulls`, GraphQL
+ * createPullRequest), held to the rules of gh pr create: its head is a
+ * branch the gate accepts, its body opens with the Closes line of the
+ * branch's issue, and neither the body nor the title carries a skip string.
+ * A body left out is refused, as gh pr create refuses one; only a body the
+ * hook cannot read asks (Copilot review of #26). Each field is
+ * { present, known, value }.
+ */
+function apiPrCreate(head, body, title) {
+  const branch =
+    head.present && head.known && typeof head.value === 'string'
+      ? head.value.slice(head.value.indexOf(':') + 1)
+      : null
+  const parsed = parseBranch(branch)
+  const issue = parsed?.issue ?? null
+  const text = fieldText(body)
+  const bodyDecision = !text.known
+    ? ask('não consegui ler o corpo da PR para conferir a primeira linha')
+    : text.text === null
+      ? deny(noPrBody(issue))
+      : closesDecision(text.text, issue, 'da PR')
+  return combine([
+    parsed === null ? deny(`a PR sai de uma branch ${branchShapes}`) : pass(),
+    bodyDecision,
+    skipDecision([fieldText(title).text, text.text], 'a PR'),
+  ])
+}
+
 function restDecision(method, route, body) {
   const [first, second, third, ...more] = route
   const numeric = (text) => /^[1-9]\d*$/.test(String(text ?? ''))
@@ -1798,22 +1851,12 @@ function restDecision(method, route, body) {
 
   // Spec silent: a PR created or edited through the API is held to the
   // rules of gh pr create and gh pr edit.
-  if (first === 'pulls' && second === undefined && method !== 'GET') {
-    const head = fieldOf(body, 'head')
-    const branch =
-      head.present && head.known && typeof head.value === 'string'
-        ? head.value.slice(head.value.indexOf(':') + 1)
-        : null
-    const parsed = parseBranch(branch)
-    const text = fieldText(fieldOf(body, 'body'))
-    return combine([
-      parsed === null ? deny(`a PR sai de uma branch ${branchShapes}`) : pass(),
-      text.known && text.text !== null
-        ? closesDecision(text.text, parsed?.issue ?? null, 'da PR')
-        : ask('não consegui ler o corpo da PR para conferir a primeira linha'),
-      skipDecision([fieldText(fieldOf(body, 'title')).text, text.text], 'a PR'),
-    ])
-  }
+  if (first === 'pulls' && second === undefined && method !== 'GET')
+    return apiPrCreate(
+      fieldOf(body, 'head'),
+      fieldOf(body, 'body'),
+      fieldOf(body, 'title'),
+    )
   if (first === 'pulls' && numeric(second) && third === undefined) {
     if (method === 'GET') return pass()
     const text = fieldText(fieldOf(body, 'body'))
@@ -2133,6 +2176,17 @@ function graphqlDecision(body, ctx) {
   each('mergeBranch', () =>
     deny(`merge de branch pela API: a mudança entra em ${trunk} por PR`),
   )
+  // Spec silent: a PR created through GraphQL is held to the rules of gh pr
+  // create, as the REST route is (Copilot review of #26). Its repository is
+  // a node id the hook cannot name, so it is judged wherever the command
+  // runs, like the other mutations.
+  each('createPullRequest', (args) =>
+    apiPrCreate(
+      argumentOf(args, 'headRefName', variables),
+      argumentOf(args, 'body', variables),
+      argumentOf(args, 'title', variables),
+    ),
+  )
   each('updatePullRequest', (args) =>
     skipDecision([text(args, 'title').text, text(args, 'body').text], 'a PR'),
   )
@@ -2152,7 +2206,7 @@ const placeholder = /:(?:owner|repo|branch)\b|\{[a-z]+\}/
 function placeholderRepo(command, ctx) {
   const env = ghRepoEnv(command, ctx)
   if (env !== null) return env.repo
-  return directoryKnown(ctx) ? (ctx.repo?.repo ?? null) : null
+  return remotesKnown(ctx) ? (ctx.repo?.repo ?? null) : null
 }
 
 function apiDecision(command, ctx, from) {
@@ -2226,6 +2280,9 @@ const handlers = {
  * Decision (or Promise of one) for one SimpleCommand whose argv[0] is 'gh'.
  * ctx = { cwd: the command's directory, absolute; repo: repoAt of it (read
  * only when a rule needs it); permissionMode; github: githubClient() }.
+ * A handler also gets `target`, the repository the command acts on, this
+ * project when it cannot be read, and `targetKnown`, false then: a rule
+ * that would pass on a live read of this project asks instead.
  */
 export async function ghDecision(command, ctx) {
   const [group, verb] = leadingWords(command)
@@ -2260,6 +2317,10 @@ export async function ghDecision(command, ctx) {
   if (!target.unknown && !isProject(target.repo)) return pass()
   return handler(
     command,
-    extend(local, { operands, target: target.repo ?? projectRepo }),
+    extend(local, {
+      operands,
+      target: target.repo ?? projectRepo,
+      targetKnown: !target.unknown,
+    }),
   )
 }

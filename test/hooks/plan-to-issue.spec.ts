@@ -366,22 +366,26 @@ describe.concurrent('plan-to-issue on Bash: what removes the marker', () => {
     expect(contextOf(run)).toBe(
       [
         `plano publicado em ${url}; o marcador foi removido. Se a issue estava em ${FROM}, troque: gh issue edit 5 --remove-label ${FROM} --add-label ${TO}`,
-        'Rode npm run gate de novo antes de construir: o cache do gate desta worktree, se havia um, foi removido, porque veio de antes deste plano, que ainda não tem o Approve do dono.',
+        'Rode npm run gate de novo antes de construir: o cache do gate de cada worktree deste repositório, se havia um, foi removido, porque veio de antes deste plano, que ainda não tem o Approve do dono.',
       ].join('\n'),
     )
     expect(repo.calls()).toEqual([])
   })
 
-  test('publishing the plan removes the gate cache too, so the gate runs again before any build', async ({
+  test('publishing the plan removes the gate cache of every worktree, so the gate runs again before any build', async ({
     fresh,
     expect,
   }) => {
     // The cache was written before this plan: the Approve it read is the
     // one the new # Plano cancels. Left in place, it would read as open for
-    // up to gateTtlHours on a plan the owner never saw.
+    // up to gateTtlHours on a plan the owner never saw. The marker lives in
+    // the common git dir, seen from every worktree, so removing it opens
+    // them all: each worktree's cache goes with it (Copilot review of #26).
     const repo = await pending(fresh)
     const other = await repo.addWorktree('outra', 'feature/8-outra')
+    const third = await repo.addWorktree('terceira', 'feature/9-terceira')
     writeFileSync(path.join(other.gitDir, gateCacheFile), '{}\n')
+    writeFileSync(path.join(third.gitDir, gateCacheFile), '{}\n')
     expect(cacheExists(repo)).toBe(true)
     repo.write({ 'plano.md': planComment })
     const run = await bash(
@@ -392,9 +396,31 @@ describe.concurrent('plan-to-issue on Bash: what removes the marker', () => {
     expect(run.status).toBe(0)
     expect(existsSync(repo.markerPath(SESSION))).toBe(false)
     expect(cacheExists(repo)).toBe(false)
+    expect(existsSync(path.join(other.gitDir, gateCacheFile))).toBe(false)
+    expect(existsSync(path.join(third.gitDir, gateCacheFile))).toBe(false)
     expect(contextOf(run)).toContain('Rode npm run gate de novo')
-    // Only this worktree's cache: another worktree's gate read its own issue.
-    expect(existsSync(path.join(other.gitDir, gateCacheFile))).toBe(true)
+    expect(contextOf(run)).toContain('de cada worktree deste repositório')
+  })
+
+  test('a gate cache that cannot be removed keeps the marker, and it says so (Copilot review of #26)', async ({
+    fresh,
+    expect,
+  }) => {
+    const repo = await pending(fresh)
+    const other = await repo.addWorktree('outra', 'feature/8-outra')
+    // A directory where the cache goes: rm refuses it without recursion.
+    mkdirSync(path.join(other.gitDir, gateCacheFile, 'dentro'), {
+      recursive: true,
+    })
+    repo.write({ 'plano.md': planComment })
+    const run = await bash(
+      repo,
+      'gh issue comment 5 --body-file plano.md',
+      `${ISSUE_URL}/5#issuecomment-3304\n`,
+    )
+    expect(run.status).toBe(0)
+    expect(existsSync(repo.markerPath(SESSION))).toBe(true)
+    expect(contextOf(run)).toContain('o hook plan-to-issue falhou')
   })
 
   test('a publication with no cache in the worktree still says to run the gate', async ({
@@ -1018,6 +1044,92 @@ describe.concurrent('plan-to-issue on Bash: the issue the branch names', () => {
     }
   })
 })
+
+describe.concurrent(
+  'plan-to-issue on Bash: the worktree the publication runs in (Copilot review of #26)',
+  () => {
+    const otherCache = (other: { gitDir: string }) =>
+      existsSync(path.join(other.gitDir, gateCacheFile))
+
+    test('a cd into another worktree reads that worktree branch, and clears the caches from there', async ({
+      fresh,
+      expect,
+    }) => {
+      const repo = await pending(fresh)
+      const other = await repo.addWorktree('outra', 'feature/8-outra')
+      writeFileSync(path.join(other.gitDir, gateCacheFile), '{}\n')
+      repo.write({ 'plano.md': planComment }, other.dir)
+      const run = await bash(
+        repo,
+        `cd ${JSON.stringify(other.dir)} && gh issue comment 8 --body-file plano.md`,
+        `${ISSUE_URL}/8#issuecomment-40\n`,
+      )
+      expect(run.status).toBe(0)
+      expect(existsSync(repo.markerPath(SESSION))).toBe(false)
+      expect(otherCache(other)).toBe(false)
+      expect(cacheExists(repo)).toBe(false)
+      expect(contextOf(run)).toContain('gh issue edit 8 ')
+    })
+
+    test('a cd into another worktree holds a comment to that worktree issue', async ({
+      fresh,
+      expect,
+    }) => {
+      const repo = await pending(fresh)
+      const other = await repo.addWorktree('outra', 'feature/8-outra')
+      writeFileSync(path.join(other.gitDir, gateCacheFile), '{}\n')
+      repo.write({ 'plano.md': planComment }, other.dir)
+      const run = await bash(
+        repo,
+        `cd ${JSON.stringify(other.dir)} && gh issue comment 5 --body-file plano.md`,
+        `${ISSUE_URL}/5#issuecomment-41\n`,
+      )
+      expect(run.status).toBe(0)
+      expect(existsSync(repo.markerPath(SESSION))).toBe(true)
+      expect(otherCache(other)).toBe(true)
+      expect(cacheExists(repo)).toBe(true)
+      expect(contextOf(run)).toContain('esta branch é da #8')
+    })
+
+    test('a session opened above the repository publishes from the worktree it cds into', async ({
+      fresh,
+      expect,
+    }) => {
+      const repo = await pending(fresh)
+      repo.write({ 'plano.md': planComment })
+      const run = await bash(
+        repo,
+        'cd repo && gh issue comment 5 --body-file plano.md',
+        `${ISSUE_URL}/5#issuecomment-42\n`,
+        { cwd: repo.root },
+      )
+      expect(run.status).toBe(0)
+      expect(existsSync(repo.markerPath(SESSION))).toBe(false)
+      expect(cacheExists(repo)).toBe(false)
+    })
+
+    test('a publication run outside any worktree of the project keeps the marker, and it says so', async ({
+      fresh,
+      scratch,
+      expect,
+    }) => {
+      const repo = await pending(fresh)
+      const dir = scratch()
+      writeFileSync(path.join(dir, 'plano.md'), planComment)
+      const run = await bash(
+        repo,
+        `cd ${JSON.stringify(dir)} && gh issue comment 5 -R geazioliveira/marketo-sandbox --body-file plano.md`,
+        `${ISSUE_URL}/5#issuecomment-43\n`,
+      )
+      expect(run.status).toBe(0)
+      expect(existsSync(repo.markerPath(SESSION))).toBe(true)
+      expect(cacheExists(repo)).toBe(true)
+      expect(contextOf(run)).toContain(
+        'roda fora de uma worktree deste projeto',
+      )
+    })
+  },
+)
 
 describe.concurrent(
   'plan-to-issue on Bash: how the target and the labels are read',

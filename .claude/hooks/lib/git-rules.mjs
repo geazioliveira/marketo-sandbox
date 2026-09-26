@@ -553,6 +553,33 @@ const commitSpec = {
 }
 
 /**
+ * git merge's options, as `git merge -h` lists them: `--into-name` names
+ * the branch merged into in the message git writes, so its value is read as
+ * part of the message.
+ */
+const mergeSpec = {
+  short: 'msFX',
+  optional: 'S',
+  long: [
+    '--message',
+    '--file',
+    '--strategy',
+    '--strategy-option',
+    '--cleanup',
+    '--into-name',
+  ],
+}
+
+/**
+ * The subcommands whose message the command line carries: how each reads
+ * its options, and how the refusal names the message.
+ */
+const messages = {
+  commit: { spec: commitSpec, what: 'a mensagem do commit' },
+  merge: { spec: mergeSpec, what: 'a mensagem do merge' },
+}
+
+/**
  * A `--trailer` as it lands in the message: `key: value`, whether it was
  * written with `:` or with `=`.
  */
@@ -564,20 +591,26 @@ function trailerLine(value) {
 }
 
 /**
- * A commit message carrying a skip string. The message is every `-m` and
- * `--message` (git joins them as paragraphs), every `-F`/`--file`, read
- * relative to the command's directory, `-` being stdin, and every
- * `--trailer`. A message that cannot be read (an expansion, a file that is
- * not there) is not refused on its own: a skip string is rare, and asking on
- * every `-m "$msg"` would teach the person to click through. That is a known
- * limit.
+ * A commit message carrying a skip string, for `commit` and `merge`, which
+ * both write a commit (Copilot review of #26: merge was left out). The
+ * message is every `-m` and `--message` (git joins them as paragraphs),
+ * every `-F`/`--file`, read relative to the command's directory, `-` being
+ * stdin, every `--trailer` (commit) and `--into-name` (merge, whose name git
+ * writes into the message). A message that cannot be read (an expansion, a
+ * file that is not there, an editor, the subjects `--log` pulls in) is not
+ * refused on its own: a skip string is rare, and asking on every `-m "$msg"`
+ * would teach the person to click through. That is a known limit.
  */
-function commitMessage(command, argv, dir, from, files) {
-  const { options } = readGitArgs(argv, from, commitSpec)
+function commitMessage(command, argv, dir, from, files, { spec, what }) {
+  const { options } = readGitArgs(argv, from, spec)
   for (const option of options) {
     let text = null
     if (option.value === null || !wordKnown(command, option.index)) text = null
-    else if (option.name === '-m' || option.name === '--message')
+    else if (
+      option.name === '-m' ||
+      option.name === '--message' ||
+      option.name === '--into-name'
+    )
       text = option.value
     else if (option.name === '--trailer') text = trailerLine(option.value)
     else if (option.name === '-F' || option.name === '--file')
@@ -585,7 +618,7 @@ function commitMessage(command, argv, dir, from, files) {
     const token = skipTokenIn(text)
     if (token !== null)
       return deny(
-        `a mensagem do commit traz "${token}", que faz o GitHub pular os checks do push e do merge: tire-o da mensagem`,
+        `${what} traz "${token}", que faz o GitHub pular os checks do push e do merge: tire-o da mensagem`,
       )
   }
   return pass()
@@ -889,8 +922,10 @@ function decide({ command, g, sub, alias }, ctx, env) {
       )
     else if (repo.branch === trunk) decisions.push(deny(commitOnTrunk))
   }
-  if (sub === 'commit')
-    decisions.push(commitMessage(command, argv, g.dir, g.at + 1, ctx.files))
+  if (Object.hasOwn(messages, sub))
+    decisions.push(
+      commitMessage(command, argv, g.dir, g.at + 1, ctx.files, messages[sub]),
+    )
   return combine(decisions)
 }
 
@@ -1105,6 +1140,207 @@ export function configSetBy(command, ctx) {
   return [
     { pair: `${key.value}=${value.value}`, known: key.known && value.known },
   ]
+}
+
+// ---------------------------------------------------------------------------
+// What a git command changes in the remotes gh reads (guard-bash)
+
+/**
+ * The config sections that decide which repository a remote names: the
+ * remotes themselves, the rewriting of their URLs (`url.<base>.insteadOf`),
+ * and the includes, which can bring either from another file.
+ */
+const remoteSection = /^(?:remote|url|include|includeif)(?:\.|$)/i
+
+/** git config's options that take a separate value. */
+const configValued = new Set([
+  '--file',
+  '-f',
+  '--blob',
+  '--type',
+  '--comment',
+  '--default',
+  '--value',
+])
+
+/** git config's options with which it only reads. */
+const configReads = new Set([
+  '--get',
+  '--get-all',
+  '--get-regexp',
+  '--get-urlmatch',
+  '--get-color',
+  '--get-colorbool',
+  '--list',
+  '-l',
+  '--blob',
+])
+
+/** git config's options with which it writes something else than one value. */
+const configRewrites = new Set([
+  '--add',
+  '--append',
+  '--all',
+  '--replace-all',
+  '--value',
+  '--fixed-value',
+  '--unset',
+  '--unset-all',
+  '--rename-section',
+  '--remove-section',
+  '--edit',
+  '-e',
+])
+
+/** git config's options that write a file every repository may read. */
+const configEverywhere = new Set(['--global', '--system', '--file', '-f'])
+
+/** git config's subcommands (git 2.46 and later). */
+const configVerbs = new Set([
+  'list',
+  'get',
+  'set',
+  'unset',
+  'rename-section',
+  'remove-section',
+  'edit',
+])
+
+const changeNotFollowed = { everywhere: false, origin: null }
+
+/**
+ * What `git config` changes in the remotes: null when it only reads, or
+ * writes no key of a remoteSection; else { everywhere, origin }, origin
+ * being the new URL when the change is a plain set of remote.origin.url.
+ * GIT_CONFIG points git config at another file, as `--file` does.
+ */
+function configRemoteChange(command, argv, from, env) {
+  const words = []
+  let everywhere = typeof env.GIT_CONFIG === 'string' && env.GIT_CONFIG !== ''
+  let reads = false
+  let rewrites = false
+  let edits = false
+  let renames = false
+  for (let k = from; k < argv.length; k += 1) {
+    const arg = argv[k]
+    if (arg.startsWith('-') && arg !== '-') {
+      const name = arg.startsWith('--') ? arg.split('=')[0] : arg
+      if (configEverywhere.has(name)) everywhere = true
+      if (configReads.has(name)) reads = true
+      if (configRewrites.has(name)) rewrites = true
+      if (name === '--edit' || name === '-e') edits = true
+      if (name === '--rename-section') renames = true
+      if (configValued.has(arg)) k += 1
+      continue
+    }
+    words.push({ value: arg, known: wordKnown(command, k) })
+  }
+  let verb = null
+  if (words[0] !== undefined && !words[0].known)
+    return { everywhere, origin: null }
+  if (configVerbs.has(words[0]?.value)) verb = words.shift().value
+  if (verb === 'list' || verb === 'get' || (verb === null && reads)) return null
+  if (verb === 'edit' || edits) return { everywhere, origin: null }
+  const plainSet = (verb === 'set' || verb === null) && !rewrites
+  // `git config <key>` alone reads the key.
+  if (words.length === 0 || (verb === null && plainSet && words.length < 2))
+    return null
+  const keys =
+    verb === 'rename-section' || renames ? words.slice(0, 2) : words.slice(0, 1)
+  if (keys.every((key) => key.known && !remoteSection.test(key.value)))
+    return null
+  const [key, value] = words
+  const origin =
+    plainSet &&
+    words.length === 2 &&
+    canonicalKey(key.value) === 'remote.origin.url'
+      ? { known: value.known, url: value.value }
+      : null
+  return { everywhere, origin }
+}
+
+/** The `git remote` verbs that change a remote's name or URLs. */
+const remoteVerbs = new Set(['add', 'rename', 'remove', 'rm', 'set-url'])
+
+/**
+ * What `git remote` changes: null for the verbs that change no URL (`-v`,
+ * `get-url`, `show`, `prune`…), else { everywhere: false, origin }, origin
+ * being the new URL of `set-url origin <url>` or `add origin <url>`. An add
+ * of a name that exists fails and leaves the old URL, which the caller
+ * keeps in mind.
+ */
+function remoteCommandChange(command, argv, from) {
+  const words = []
+  const flags = []
+  for (let k = from; k < argv.length; k += 1) {
+    const arg = argv[k]
+    if (arg.startsWith('-') && arg !== '-') {
+      flags.push(arg.split('=')[0])
+      // add's -t <branch> and -m <master> take a value.
+      if (arg === '-t' || arg === '-m') k += 1
+      continue
+    }
+    words.push({ value: arg, known: wordKnown(command, k) })
+  }
+  const [verb, name, url] = words
+  if (verb === undefined) return null
+  if (!verb.known) return changeNotFollowed
+  if (!remoteVerbs.has(verb.value)) return null
+  const setsOrigin =
+    (verb.value === 'add' ||
+      (verb.value === 'set-url' &&
+        !flags.some((flag) =>
+          ['--push', '--add', '--delete'].includes(flag),
+        ))) &&
+    name?.known === true &&
+    name.value === 'origin' &&
+    words.length === 3
+  return {
+    everywhere: false,
+    origin: setsOrigin ? { known: url.known, url: url.value } : null,
+  }
+}
+
+/**
+ * What a git command changes in the remotes gh reads to pick its repository,
+ * for the gh commands after it on the same line (guard-bash; Copilot review
+ * of #26): null when it changes none, else { dir, dirKnown, everywhere,
+ * origin }.
+ * - `dir` is the repository the change lands in (after `-C` and
+ *   `--git-dir`), `dirKnown` false when it cannot be read;
+ * - `everywhere` when it writes a config every repository may read
+ *   (`--global`, `--system`, `--file`), or when what the command runs cannot
+ *   be read (a subcommand behind an expansion, an alias not expanded);
+ * - `origin` is { known, url } when the change is only a new URL for origin
+ *   (`git remote set-url origin <url>`, `git remote add origin <url>`, `git
+ *   config remote.origin.url <url>`), else null: a change the hook does not
+ *   follow (another remote, a rename, an unset, a rewrite of URLs).
+ */
+export function remoteChangeOf(command, ctx) {
+  const env = envOf(command, ctx)
+  const { command: resolved, g, sub, alias } = resolveCommand(command, ctx, env)
+  if (g.at >= g.argv.length) return null
+  const place = {
+    dir: g.gitDir ?? g.dir,
+    dirKnown: g.dirKnown && g.gitDirKnown && ctx.cwdKnown !== false,
+  }
+  let change = null
+  if (sub === null || alias !== null)
+    change = { everywhere: true, origin: null }
+  else if (sub === 'config')
+    change = configRemoteChange(resolved, g.argv, g.at + 1, env)
+  else if (sub === 'remote')
+    change = remoteCommandChange(resolved, g.argv, g.at + 1)
+  else if (
+    !gitCommands.has(sub) &&
+    g.argv
+      .slice(g.at + 1)
+      .some((word) => word === 'config' || word === 'remote')
+  )
+    // A word git does not know may be the value of an option the hook does
+    // not know, with the real subcommand after it.
+    change = { everywhere: true, origin: null }
+  return change === null ? null : { ...place, ...change }
 }
 
 /**

@@ -7,7 +7,8 @@
 // the directory that command runs in. The commands are judged in order, and
 // what an earlier one leaves behind is carried to the later ones: a `cd`, an
 // `export`, a `git checkout` that moves HEAD, a `git config` or `gh alias set`,
-// a file written with `>` that a later command reads as a body.
+// a `git remote set-url` that changes the repository gh picks, a file written
+// with `>` that a later command reads as a body.
 //
 // What the parser cannot see through is covered in two ways. A script handed
 // to `sh`, `find -exec` or `watch` is read and judged like the line; a
@@ -1463,6 +1464,12 @@ async function decide(input, libs) {
     lineConfig: [],
     ghAliases: new Map(),
     written: new Map(),
+    // What earlier commands did to the remotes gh picks its repository from:
+    // per common git dir, whether the change can be followed, and the
+    // repositories origin may name now (the disk's, then each new URL). Lost
+    // when a change lands where the hook cannot tell.
+    remotes: new Map(),
+    remotesLost: false,
     evaluators: [],
     opaque: [],
     // Set once a program the hook does not read has run: from then on, a
@@ -1480,6 +1487,64 @@ async function decide(input, libs) {
     return head === undefined
       ? info
       : { ...info, branch: head.branch, branchKnown: head.known }
+  }
+
+  /**
+   * Records what a git command changes in the remotes (Copilot review of
+   * #26). A change in a config every repository reads, in a directory the
+   * hook cannot read, or outside a repository (a `git init` earlier on the
+   * line may make one) leaves every repository's remotes unknown.
+   */
+  const recordRemote = (change) => {
+    if (change.everywhere || !change.dirKnown || !existsSync(change.dir)) {
+      state.remotesLost = true
+      return
+    }
+    const info = repoOf(change.dir)
+    if (info == null) {
+      state.remotesLost = true
+      return
+    }
+    const seen = state.remotes.get(info.commonDir) ?? {
+      known: true,
+      repos: [info.repo],
+    }
+    if (change.origin === null || !change.origin.known) seen.known = false
+    else seen.repos.push(repo.repoFromRemote(change.origin.url))
+    state.remotes.set(info.commonDir, seen)
+  }
+
+  /**
+   * The repository gh finds around a directory, after what earlier commands
+   * of the line did to the remotes. With no change, origin as the disk has
+   * it. With changes the hook follows, this project when origin named it or
+   * may name it now (a change may fail, and `git remote add` of a name that
+   * exists does, leaving the old URL), else the last URL. With a change it
+   * cannot follow, remoteKnown false: gh-rules then judges the command as
+   * this project, never as another repository.
+   */
+  const withRemotes = (info) => {
+    if (state.remotesLost)
+      return {
+        ...(info ?? {
+          top: null,
+          gitDir: null,
+          commonDir: null,
+          branch: null,
+          branchKnown: false,
+        }),
+        repo: null,
+        remoteKnown: false,
+      }
+    if (info == null) return info
+    const seen = state.remotes.get(info.commonDir)
+    if (seen === undefined) return info
+    if (!seen.known) return { ...info, repo: null, remoteKnown: false }
+    return {
+      ...info,
+      repo:
+        seen.repos.find((name) => repo.isProject(name)) ?? seen.repos.at(-1),
+    }
   }
 
   const parseScript = async (script, cwd, cwdKnown, depth) => {
@@ -1544,6 +1609,8 @@ async function decide(input, libs) {
           else if (moved != null) state.heads.set(moved.gitDir, change.head)
         }
         state.lineConfig.push(...git.configSetBy(command, gitCtx))
+        const remote = git.remoteChangeOf(command, gitCtx)
+        if (remote !== null) recordRemote(remote)
       } else if (program === 'gh') {
         // gh finds its repository through git, so GIT_DIR moves it too.
         const gitDir = env.GIT_DIR
@@ -1569,7 +1636,7 @@ async function decide(input, libs) {
         }
         Object.defineProperty(ctx, 'repo', {
           enumerable: true,
-          get: () => adjust(repoOf(where)),
+          get: () => withRemotes(adjust(repoOf(where))),
         })
         decisions.push(await gh.ghDecision(command, ctx))
         for (const [name, expansion] of gh.ghAliasDefinitions(command, ctx))
@@ -1653,6 +1720,30 @@ async function decide(input, libs) {
   // anywhere on the line makes the files the line did not write unknown
   // from the start.
   if (parsed.commands.some(writesUnseen)) state.untracked = true
+
+  // The same for the remotes: a git inside a substitution or a `bash -c` is
+  // listed after the gh commands it may run before. When a git that changes
+  // the remotes is listed after a gh, that gh cannot read its repository
+  // from the disk.
+  const firstGh = parsed.commands.findIndex(
+    (command) => programOf(command) === 'gh',
+  )
+  if (
+    firstGh >= 0 &&
+    parsed.commands.slice(firstGh + 1).some(
+      (command) =>
+        programOf(command) === 'git' &&
+        command.known?.[0] !== false &&
+        git.remoteChangeOf(command, {
+          cwd: path.resolve(base, command.cwd ?? '.'),
+          cwdKnown: false,
+          env: process.env,
+          lineConfig: [],
+          cache: state.cache,
+        }) !== null,
+    )
+  )
+    state.remotesLost = true
 
   const decisions = []
   for (const command of parsed.commands)

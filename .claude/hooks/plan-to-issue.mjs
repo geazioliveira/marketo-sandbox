@@ -19,13 +19,17 @@
 // but for a `cd`. Anything else on the line could have printed the URL, or
 // rewritten the body file after gh read it.
 //
-// The publication also removes the gate's cache in the worktree: the cache
-// was written before this plan, and the Approve it read is not an Approve of
-// the plan just posted.
+// Each publication is judged where its gh runs: the directory its `cd`
+// leads to, and the worktree there, whose branch names the issue and whose
+// repository holds the marker and the caches.
+//
+// The publication also removes the gate's cache in every worktree of the
+// repository: a cache was written before this plan, and the Approve it read
+// is not an Approve of the plan just posted. The marker lives in the common
+// git dir, where every worktree sees it, so removing it opens them all.
 //
 // A PostToolUse hook cannot undo the tool call, so it never blocks: it
 // writes or removes the marker and tells the agent what it did.
-import { rmSync } from 'node:fs'
 import path from 'node:path'
 import {
   agentPlanLabelTransition,
@@ -34,13 +38,13 @@ import {
   checkSections,
   commentOpening,
   featureSections,
-  gateCacheFile,
   issueFromBranch,
   kindOf,
   sectionsFor,
 } from '../../scripts/loop-sections.mjs'
 import { autonomousModes, contextOutput, readInput } from './lib/io.mjs'
 import {
+  clearGateCaches,
   clearPendingPlan,
   isProject,
   pendingPlanExists,
@@ -166,15 +170,29 @@ function shortText(command) {
 }
 
 /**
+ * Where a publication runs: the directory its `cd` leads to, resolved
+ * against the input cwd, and the repository there (Copilot review of #26).
+ * A directory spelled with an expansion is not known: which worktree, and so
+ * which branch and which caches, cannot be told.
+ * @returns {{ known: false } | { known: true, dir: string, repo: object | null }}
+ */
+function placeOf(command, baseCwd, repoOf) {
+  if (typeof command.cwd === 'string' && /[$`]/.test(command.cwd))
+    return { known: false }
+  const dir = path.resolve(baseCwd, command.cwd ?? '.')
+  return { known: true, dir, repo: repoOf(dir) }
+}
+
+/**
  * Whether the command posts to this project, and on which issue when it
  * names one. The target is the one gh would use: an issue URL given as the
  * argument, else `-R/--repo`, else GH_REPO, else the repository of the
- * directory the command runs in. A target that cannot be read (an
- * expansion) is `unknown` and counts as another repository: the marker
+ * directory the command runs in (its place). A target that cannot be read
+ * (an expansion) is `unknown` and counts as another repository: the marker
  * stays, the restrictive side, and the hook says why.
  * @returns {{ project: boolean, issue: number | null, unknown: boolean }}
  */
-function targetOf(command, kind, baseCwd, inputRepo) {
+function targetOf(command, kind, place) {
   const unknown = { project: false, issue: null, unknown: true }
   const hasExpansion = (text) => /[$`]/.test(text)
   let issue = null
@@ -204,14 +222,8 @@ function targetOf(command, kind, baseCwd, inputRepo) {
       ? unknown
       : { project: isProject(named), issue, unknown: false }
 
-  if (command.cwd === null || command.cwd === undefined)
-    return { project: isProject(inputRepo), issue, unknown: false }
-  if (hasExpansion(command.cwd)) return unknown
-  return {
-    project: isProject(repoAt(path.resolve(baseCwd, command.cwd))),
-    issue,
-    unknown: false,
-  }
+  if (!place.known) return unknown
+  return { project: isProject(place.repo), issue, unknown: false }
 }
 
 /**
@@ -342,9 +354,29 @@ function onBash(input, baseCwd, sessionId) {
     .filter((attempt) => attempt.kind !== null)
   if (attempts.length === 0) return null
 
-  const repo = repoAt(baseCwd)
-  if (repo === null || !isProject(repo)) return null
-  if (!pendingPlanExists(repo.commonDir, sessionId)) return null
+  // Each publication is judged where its gh runs (Copilot review of #26): a
+  // `cd` before it may lead to another worktree, on another branch, or to
+  // another clone. The session's marker lives in the common git dir of the
+  // repository it was accepted in: the session's own, or the one the
+  // publication runs in, as build-guard reads it.
+  const repos = new Map()
+  const repoOf = (dir) => {
+    if (!repos.has(dir)) repos.set(dir, repoAt(dir))
+    return repos.get(dir)
+  }
+  const inProject = (repo) => repo != null && isProject(repo)
+  const marked = (repo) =>
+    inProject(repo) && pendingPlanExists(repo.commonDir, sessionId)
+  const sessionRepo = repoOf(baseCwd)
+  const placed = attempts.map((attempt) => ({
+    ...attempt,
+    place: placeOf(attempt.command, baseCwd, repoOf),
+  }))
+  if (
+    !marked(sessionRepo) &&
+    !placed.some(({ place }) => place.known && marked(place.repo))
+  )
+    return null
 
   // The URL in stdout is gh's word only when gh is the one command the line
   // ran (a cd aside): `x && gh …; echo <url>` prints one without gh, and
@@ -355,21 +387,34 @@ function onBash(input, baseCwd, sessionId) {
       (command) =>
         publicationKind(command) !== null || shellMoves.has(command.argv[0]),
     )
-  // The spec is silent on which issue a comment goes to; this takes the
-  // restrictive side. On a branch that names an issue, the gate reads the
-  // plan in force on that issue, so a # Plano posted on another one leaves
-  // the old plan and its Approve in force there. A new issue still counts:
-  // it is where new work starts.
-  const branchIssue = issueFromBranch(repo.branch)
   const urls = issueUrls(input.tool_response)
   const notes = []
-  for (const { command, kind } of attempts) {
-    const target = targetOf(command, kind, baseCwd, repo)
+  for (const { command, kind, place } of placed) {
+    const target = targetOf(command, kind, place)
     if (target.unknown)
       notes.push(
         `não consegui ler em que issue ou repositório \`${shortText(command)}\` publica; se era o plano, o marcador continua: publique-o com o número da issue escrito no comando.`,
       )
     if (!target.project) continue
+    if (!place.known) {
+      notes.push(
+        `não consegui ler em que worktree \`${shortText(command)}\` roda; se era o plano, o marcador continua: publique-o de dentro da worktree, sem cd de variável.`,
+      )
+      continue
+    }
+    if (!inProject(place.repo)) {
+      notes.push(
+        `\`${shortText(command)}\` roda fora de uma worktree deste projeto (${place.dir}); o marcador continua: publique o plano de dentro da worktree da issue.`,
+      )
+      continue
+    }
+    // The spec is silent on which issue a comment goes to; this takes the
+    // restrictive side. On a branch that names an issue, the gate reads the
+    // plan in force on that issue, so a # Plano posted on another one leaves
+    // the old plan and its Approve in force there. A new issue still counts:
+    // it is where new work starts. The branch is the one checked out where
+    // gh runs.
+    const branchIssue = issueFromBranch(place.repo.branch)
     if (
       kind === 'comment' &&
       branchIssue !== null &&
@@ -409,14 +454,21 @@ function onBash(input, baseCwd, sessionId) {
     // The spec is silent on the gate's cache; removing it is the restrictive
     // side. It was written before this plan, and until the gate runs again
     // it would still read as open, for up to gateTtlHours, a plan the owner
-    // has not approved. The cache goes first: if that fails, the marker
-    // stays and the catch in main says so.
-    rmSync(path.join(repo.gitDir, gateCacheFile), { force: true })
-    clearPendingPlan(repo.commonDir, sessionId)
+    // has not approved. The marker is seen from every worktree, so the cache
+    // of every worktree goes (Copilot review of #26), in the repository
+    // where gh ran and in the session's, when that is another clone of the
+    // project. The caches go first: if one removal fails, the markers stay
+    // and the catch in main says so.
+    const cleared = new Map()
+    for (const repo of [place.repo, sessionRepo])
+      if (inProject(repo)) cleared.set(repo.commonDir, repo)
+    for (const commonDir of cleared.keys()) clearGateCaches(commonDir)
+    for (const commonDir of cleared.keys())
+      clearPendingPlan(commonDir, sessionId)
     const { from, to } = agentPlanLabelTransition
     return [
       `plano publicado em ${shown.url}; o marcador foi removido. Se a issue estava em ${from}, troque: gh issue edit ${shown.issue} --remove-label ${from} --add-label ${to}`,
-      'Rode npm run gate de novo antes de construir: o cache do gate desta worktree, se havia um, foi removido, porque veio de antes deste plano, que ainda não tem o Approve do dono.',
+      'Rode npm run gate de novo antes de construir: o cache do gate de cada worktree deste repositório, se havia um, foi removido, porque veio de antes deste plano, que ainda não tem o Approve do dono.',
     ].join('\n')
   }
   return notes.length > 0 ? notes.join('\n') : null

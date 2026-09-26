@@ -295,6 +295,8 @@ export interface RepoLib {
   repoFromArg(value: string): string | null
   isProject(repo: RepoInfo | string | null | undefined): boolean
   readGateCache(gitDir: string): Record<string, unknown> | null
+  worktreeGitDirs(commonDir: string): string[]
+  clearGateCaches(commonDir: string): void
   pendingPlanPath(gitDir: string, sessionId: unknown): string
   pendingPlanExists(gitDir: string, sessionId: unknown): boolean
   writePendingPlan(gitDir: string, sessionId: unknown, data: unknown): string

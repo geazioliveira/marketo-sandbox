@@ -51,9 +51,17 @@ interface HeadChange {
   head: { known: boolean; branch: string | null }
 }
 
+interface RemoteChange {
+  dir: string
+  dirKnown: boolean
+  everywhere: boolean
+  origin: { known: boolean; url: string } | null
+}
+
 interface GitRulesLib {
   gitDecision(command: SimpleCommand, ctx: GitCtx): Decision
   headChangeOf(command: SimpleCommand, ctx: GitCtx): HeadChange | null
+  remoteChangeOf(command: SimpleCommand, ctx: GitCtx): RemoteChange | null
   configSetBy(
     command: SimpleCommand,
     ctx: GitCtx,
@@ -297,6 +305,56 @@ describe('skip strings in commit messages', () => {
     ['a reused message', '-C HEAD'],
   ])('passes %s', (_, args) => {
     expect(verdict(`git commit ${args}`, onFeature.dir).decision).toBe('pass')
+  })
+})
+
+describe('skip strings in merge commit messages (Copilot review of #26)', () => {
+  const skipInMerge = /^a mensagem do merge traz "/
+
+  it.each([
+    ['--no-ff -m', '--no-ff -m "[skip ci]" origin/main'],
+    ['a glued -m', '--no-ff "-mTrazer main [ci skip]" origin/main'],
+    ['--message=', '"--message=Trazer main [no ci]" origin/main'],
+    ['an abbreviated --mess', '--mess "x [skip actions]" origin/main'],
+    ['the trailer in the second -m', `-m ok -m "${skipChecksTrailer}" main`],
+    ['-F with a file', '--no-ff -F msg-skip.txt origin/main'],
+    ['--file= with a file', '--file=msg-skip.txt origin/main'],
+    [
+      '--into-name, a name git writes into the message',
+      '--no-ff --into-name "x [skip ci]" origin/main',
+    ],
+  ])('denies %s', (_, args) => {
+    const decision = verdict(`git merge ${args}`, onFeature.dir)
+    expect(decision.decision).toBe('deny')
+    expect(decision.reason).toMatch(skipInMerge)
+  })
+
+  it('reads -F - from a heredoc', () => {
+    const text = `git merge --no-ff -F - origin/main <<'EOF'\nTrazer main\n\n[actions skip]\nEOF`
+    expect(verdict(text, onFeature.dir).reason).toMatch(skipInMerge)
+  })
+
+  it('reads the values of -s and -X as options, not as a message', () => {
+    expect(
+      verdict('git merge -s ort -X "[skip ci]" origin/main', onFeature.dir)
+        .decision,
+    ).toBe('pass')
+  })
+
+  it.each([
+    ['an ordinary message', '--no-ff -m "Trazer main. Refs #5" origin/main'],
+    ['no message', 'origin/main'],
+    ['a message it cannot read (a documented limit)', '-m "$MSG" origin/main'],
+    ['--abort, which writes no commit', '--abort'],
+  ])('passes %s', (_, args) => {
+    expect(verdict(`git merge ${args}`, onFeature.dir).decision).toBe('pass')
+  })
+
+  it('passes a merge in another repository', () => {
+    expect(
+      verdict('git merge --no-ff -m "[skip ci]" origin/main', elsewhere.dir)
+        .decision,
+    ).toBe('pass')
   })
 })
 
@@ -783,6 +841,100 @@ describe('what a git command leaves for the rest of the line', () => {
     expect(git.definesAlias(commandOf(text), ctxAt(onFeature.dir))).toBe(
       expected,
     )
+  })
+
+  describe('the remotes gh picks its repository from (Copilot review of #26)', () => {
+    const OTHER_URL = 'https://github.com/alguem/outro.git'
+    const change = (text: string, cwd = onFeature.dir) =>
+      git.remoteChangeOf(commandOf(text), ctxAt(cwd))
+
+    it.each([
+      `git remote set-url origin ${PROJECT_URL}`,
+      `git remote add origin ${PROJECT_URL}`,
+      `git remote add -t main -m main origin ${PROJECT_URL}`,
+      `git config remote.origin.url ${PROJECT_URL}`,
+      `git config --local Remote.origin.URL ${PROJECT_URL}`,
+      `git config set remote.origin.url ${PROJECT_URL}`,
+    ])('follows %s as a new URL for origin', (text) => {
+      expect(change(text)).toEqual({
+        dir: onFeature.dir,
+        dirKnown: true,
+        everywhere: false,
+        origin: { known: true, url: PROJECT_URL },
+      })
+    })
+
+    it('keeps a URL it cannot read as unknown', () => {
+      expect(change('git remote set-url origin "$URL"')).toMatchObject({
+        origin: { known: false },
+      })
+    })
+
+    it.each([
+      `git remote add upstream ${PROJECT_URL}`,
+      `git remote set-url --push origin ${PROJECT_URL}`,
+      `git remote set-url --add origin ${PROJECT_URL}`,
+      `git remote set-url origin ${PROJECT_URL} ${OTHER_URL}`,
+      'git remote rename origin velho',
+      'git remote remove origin',
+      'git remote "$VERBO" origin',
+      'git config --unset remote.origin.url',
+      `git config --add remote.origin.url ${PROJECT_URL}`,
+      `git config remote.Origin.url ${PROJECT_URL}`,
+      `git config remote.origin.pushurl ${PROJECT_URL}`,
+      'git config --remove-section remote.origin',
+      'git config rename-section remote.origin remote.velho',
+      `git config "$CHAVE" ${PROJECT_URL}`,
+      'git config --edit',
+      'git config include.path ../outro.cfg',
+    ])('reads %s as a change it does not follow', (text) => {
+      expect(change(text)).toEqual({
+        dir: onFeature.dir,
+        dirKnown: true,
+        everywhere: false,
+        origin: null,
+      })
+    })
+
+    it.each([
+      `git config --global url.${PROJECT_URL}.insteadOf ${OTHER_URL}`,
+      'git config --system remote.origin.url x',
+      `git config --file .git/config remote.origin.url ${PROJECT_URL}`,
+    ])('reads %s as a change every repository sees', (text) => {
+      expect(change(text)).toMatchObject({ everywhere: true })
+    })
+
+    it('lands where -C points, in a place not known when -C cannot be read', () => {
+      expect(
+        change(`git -C ${onMain.dir} remote set-url origin ${OTHER_URL}`),
+      ).toMatchObject({ dir: onMain.dir, dirKnown: true })
+      expect(
+        change(`git -C "$REPO" remote set-url origin ${OTHER_URL}`),
+      ).toMatchObject({ dirKnown: false })
+    })
+
+    it('counts a subcommand it cannot read as a change anywhere', () => {
+      expect(change('git "$SUB" origin x')).toMatchObject({
+        everywhere: true,
+        origin: null,
+      })
+    })
+
+    it.each([
+      'git remote -v',
+      'git remote get-url origin',
+      'git remote show origin',
+      'git config --get remote.origin.url',
+      'git config remote.origin.url',
+      'git config get remote.origin.url',
+      'git config --list',
+      'git config user.name x',
+      'git config --global alias.ci commit',
+      'git status',
+      'git fetch origin',
+    ])('reads no change in %s', (text) => {
+      expect(change(text)).toBeNull()
+    })
   })
 
   it('reads a file through the override first, stdin included', () => {
