@@ -1,10 +1,13 @@
-import { readdirSync, readFileSync } from 'node:fs'
-import path from 'node:path'
 import { INestApplication } from '@nestjs/common'
 import { Test } from '@nestjs/testing'
 import request from 'supertest'
 import { App } from 'supertest/types'
 import { AppModule } from '../src/app.module'
+import {
+  documentedRoutes,
+  routeLayers,
+  swaggerDocuments,
+} from './support/marketo-routes'
 
 /**
  * The five Marketo Swagger documents in docs/, held to the routes the app
@@ -17,20 +20,6 @@ import { AppModule } from '../src/app.module'
  * test/route-order.e2e-spec.ts holds every route to its own handler (#8).
  */
 
-const root = path.resolve(__dirname, '..')
-// Every method OpenAPI allows, not only those the generators handle: an
-// operation they skip, such as a HEAD, still has to have a route.
-const httpMethods = [
-  'get',
-  'put',
-  'post',
-  'delete',
-  'options',
-  'head',
-  'patch',
-  'trace',
-]
-
 /** Operations per document, measured on the copies pinned in #6. */
 const operationsPerDocument = {
   'marketo-swagger-asset.json': 220,
@@ -40,39 +29,11 @@ const operationsPerDocument = {
   'marketo-swagger-user.json': 12,
 }
 
-interface SwaggerDocument {
-  paths: Record<string, Record<string, unknown>>
-}
-
-interface RouterLayer {
-  route?: { path: string; methods: Record<string, boolean> }
-}
-
-/** Each operation as `METHOD /path/:param`, the way Express names a route. */
-function documentedRoutes(file: string): string[] {
-  const document = JSON.parse(
-    readFileSync(path.join(root, 'docs', file), 'utf8'),
-  ) as SwaggerDocument
-  return Object.entries(document.paths).flatMap(([route, item]) =>
-    Object.keys(item)
-      .filter((method) => httpMethods.includes(method))
-      .map(
-        (method) =>
-          `${method.toUpperCase()} ${route.replace(/\{([^}]+)\}/g, ':$1')}`,
-      ),
-  )
-}
-
 function registeredRoutes(app: INestApplication): string[] {
-  const { stack } = app.getHttpAdapter().getInstance().router as {
-    stack: RouterLayer[]
-  }
-  return stack.flatMap(({ route }) =>
-    route
-      ? Object.keys(route.methods).map(
-          (method) => `${method.toUpperCase()} ${route.path}`,
-        )
-      : [],
+  return routeLayers(app).flatMap(({ route }) =>
+    Object.keys(route.methods).map(
+      (method) => `${method.toUpperCase()} ${route.path}`,
+    ),
   )
 }
 
@@ -97,9 +58,7 @@ describe('Marketo API mock (e2e)', () => {
   })
 
   describe('routes', () => {
-    const documents = readdirSync(path.join(root, 'docs'))
-      .filter((file) => /^marketo-swagger-.+\.json$/.test(file))
-      .sort()
+    const documents = swaggerDocuments()
     const documented = documents.flatMap(documentedRoutes)
 
     it('reads the five documents in docs/, 388 operations in all', () => {
