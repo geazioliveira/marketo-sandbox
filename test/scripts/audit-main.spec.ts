@@ -1317,6 +1317,13 @@ describe.concurrent('scripts/audit-main.mjs', () => {
       expect(body).toContain('## O que o dono decide')
       expect(body).toContain('**Registrar retroativamente**')
       expect(body).toContain('**Reverter**')
+      expect(body).toContain(
+        'com `needs-triage`. Ao publicar um plano completo nesta issue, o agente troca `needs-triage` por `ready-for-human`',
+      )
+      expect(body).toContain(
+        'só o dono escreve o Approve e aplica `ready-for-agent`',
+      )
+      expect(body).not.toContain('Só o dono move a label de estado.')
       // The body file is the script's own, and it is gone afterwards.
       expect(existsSync(issue.argv[11])).toBe(false)
     })

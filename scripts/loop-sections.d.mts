@@ -33,6 +33,10 @@ export declare const categoryLabels: readonly string[]
 export declare const stateLabels: readonly string[]
 export declare const readyLabel: string
 export declare const agentCreateStateLabels: readonly string[]
+export declare const agentPlanLabelTransition: Readonly<{
+  from: 'needs-triage'
+  to: 'ready-for-human'
+}>
 
 export declare function kindOf(labelNames: readonly string[]): {
   kind: Kind | null

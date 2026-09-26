@@ -9,10 +9,6 @@
 // (brunohab/lite-campaign#111). User-facing text is pt-BR; identifiers and
 // tokens stay English (context/decisions/0001-context-mesh-in-the-repository.md).
 
-/** Printed on every gate run, passing ones included. */
-export const ownerRule =
-  'Ao publicar um plano, o agente move needs-triage para ready-for-human. Só o dono escreve o Approve e move ready-for-agent.'
-
 // ---------------------------------------------------------------------------
 // Branches
 
@@ -53,7 +49,7 @@ export function issueFromBranch(branch) {
 /** Exactly one of these on every open issue (the tracking issue excepted). */
 export const categoryLabels = ['bug', 'enhancement']
 
-/** Exactly one of these on every open issue. Only the owner moves them. */
+/** Exactly one on every open issue. The agent has one post-plan transition below. */
 export const stateLabels = [
   'needs-triage',
   'needs-info',
@@ -65,8 +61,20 @@ export const stateLabels = [
 /** The state that lets building start, applied by the owner after the Approve. */
 export const readyLabel = 'ready-for-agent'
 
-/** The only state labels the agent may set, and only in `gh issue create`. */
+/** State labels the agent may set in `gh issue create`. */
 export const agentCreateStateLabels = ['ready-for-human', 'needs-triage']
+
+/** The only state-label edit the agent may make after publishing a complete `# Plano`. */
+export const agentPlanLabelTransition = Object.freeze({
+  from: 'needs-triage',
+  to: 'ready-for-human',
+})
+
+/**
+ * Printed on every gate run, passing ones included. It is built from the
+ * labels above, so the rule the gate prints is the one the contract holds.
+ */
+export const ownerRule = `Ao publicar um plano completo numa issue em ${agentPlanLabelTransition.from}, o agente a troca por ${agentPlanLabelTransition.to}. Só o dono escreve o Approve e aplica ${readyLabel}.`
 
 /** @returns {{ kind: 'bug' | 'enhancement' | null, found: string[] }} */
 export function kindOf(labelNames) {

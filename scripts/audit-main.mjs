@@ -95,6 +95,7 @@ import {
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import {
+  agentPlanLabelTransition,
   auditBaseline,
   auditChecksPage,
   auditClosingPage,
@@ -116,6 +117,7 @@ import {
   issueLinkWorkflowPath,
   mainAuditWorkflowFile,
   openThreads,
+  readyLabel,
   requiredChecks,
   reviewRuleSince,
 } from './loop-sections.mjs'
@@ -998,7 +1000,7 @@ function issueBody(input, sha, listed, range) {
     '- **Registrar retroativamente**: ligar a mudança a uma issue que explique o porquê, citar este commit nela e fechar esta issue com o link.',
     '- **Reverter**: fazer a reversão pelo loop, numa issue com plano e Approve, e fechar esta issue com o link da PR.',
     '',
-    'Aberta automaticamente pela auditoria de `main` (`scripts/audit-main.mjs`). Só o dono move a label de estado.',
+    `Aberta automaticamente pela auditoria de \`main\` (\`scripts/audit-main.mjs\`) com \`${agentPlanLabelTransition.from}\`. Ao publicar um plano completo nesta issue, o agente troca \`${agentPlanLabelTransition.from}\` por \`${agentPlanLabelTransition.to}\`; só o dono escreve o Approve e aplica \`${readyLabel}\`.`,
     '',
   ].join('\n')
 }
