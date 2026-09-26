@@ -32,7 +32,7 @@
 - **Todo gerador tem `--check`.** O argumento está em `generate-marketo-definitions.py:171`, `generate-marketo-resources.py:287` e `generate-marketo-factories.py:302`. `check_output` (`scripts/marketo_codegen.py:104-132`) gera em `.codegen-tmp`, formata, compara arquivo a arquivo com os arquivos da árvore e aponta todo `*.ts` a mais na pasta. Qualquer diferença sai com 1.
 - **Os scripts npm.** `generate:{definitions,resources,factories,all}` e `check:{definitions,resources,factories,all}` (`package.json:11-18`). `check:all` encadeia os três `--check` (`package.json:18`).
 - **O código gerado é commitado**: 255 arquivos em `src/asset/asset-definitions/`, 70 em `src/asset/resources/` e 259 em `src/asset/asset-mocks/`.
-- **Ninguém edita a saída à mão.** O [README](../../README.md#mock-marketo-asset-api) diz, desde `01ee283`, que essas pastas são geradas do Swagger e que nunca se editam à mão: regenera-se (`README.md:60-61`). E indica `npm run check:all` para o CI (`README.md:73-74`).
+- **Ninguém edita a saída à mão.** O [README](../../README.md#mock-marketo-api) diz, desde `01ee283`, que essas pastas são geradas do Swagger e que nunca se editam à mão: regenera-se (`README.md:60-61`). E indica `npm run check:all` para o CI (`README.md:73-74`).
 
 ## Racional
 

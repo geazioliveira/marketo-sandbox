@@ -51,28 +51,56 @@ When the application is running, Swagger UI is available at
 document is available at
 [http://localhost:3000/api-json](http://localhost:3000/api-json).
 
-## Mock Marketo Asset API
+## Mock Marketo API
 
-Every endpoint under `/rest/asset/**` mirrors the Marketo Asset REST API
-(`docs/marketo-swagger-asset.json`) and answers with faker-generated data, so no
-Marketo tenant is required.
+This project mirrors five Marketo REST APIs and answers every request with
+faker-generated data, so no Marketo tenant is required.
 
-The TypeScript surface is fully generated from the Swagger document — never edit
-these folders by hand, regenerate them instead:
+All three generators read the documents in `docs/` and handle both Swagger 2.0
+(`definitions`) and OpenAPI 3 (`components.schemas` / `requestBody` / `content`).
+Each target owns one area under `src/`:
 
-| Folder                  | Contents                                                 | Generator                                 |
-| ----------------------- | -------------------------------------------------------- | ----------------------------------------- |
-| `src/asset/asset-definitions` | 255 models, requests and responses                       | `scripts/generate-marketo-definitions.py` |
-| `src/asset/resources`   | 23 Nest modules covering all 220 operations              | `scripts/generate-marketo-resources.py`   |
-| `src/asset/asset-mocks`       | 255 faker factories plus the seed and request-id helpers | `scripts/generate-marketo-factories.py`   |
+| Target           | Document                              | Area under `src/` | Schemas | Operations |
+| ---------------- | ------------------------------------- | ----------------- | ------- | ---------- |
+| `asset`          | `marketo-swagger-asset.json`          | `asset`           | 255     | 220        |
+| `data-ingestion` | `marketo-swagger-data-ingestion.json` | `data-ingestion`  | 15      | 7          |
+| `identity`       | `marketo-swagger-identity.json`       | `identity`        | 2       | 2          |
+| `mapi`           | `marketo-swagger-mapi.json`           | `lead-database`   | 175     | 147        |
+| `user`           | `marketo-swagger-user.json`           | `user-management` | 12      | 12         |
+
+Each area is laid out identically — never edit these folders by hand, regenerate
+them instead:
+
+| Folder                          | Contents                          | Generator                                 |
+| ------------------------------- | --------------------------------- | ----------------------------------------- |
+| `src/<area>/<area>-definitions` | models, requests and responses    | `scripts/generate-marketo-definitions.py` |
+| `src/<area>/resources`          | one Nest module per Swagger tag   | `scripts/generate-marketo-resources.py`   |
+| `src/<area>/<area>-mocks`       | one faker factory per schema      | `scripts/generate-marketo-factories.py`   |
+| `src/mocks`                     | shared seed and request-id helper | `scripts/generate-marketo-factories.py`   |
+
+Only `src/<area>/<area>.module.ts` is hand-written; it wires the generated
+resources module into `AppModule`.
+
+### Regenerating
 
 ```bash
-# regenerate everything after changing the Swagger document
+# every generator, every target
 npm run generate:all
 
 # fail if any generated file is out of date (use this in CI)
 npm run check:all
+
+# one generator, some targets
+npm run generate:definitions -- --target mapi user
+npm run generate:resources -- --target identity
+
+# a document that is not registered yet, written to src/billing/**
+npm run generate:definitions -- --swagger docs/marketo-swagger-billing.json --area billing
 ```
+
+To register a new document permanently, add a `Target` to `TARGETS` in
+`scripts/marketo_codegen.py`. All three generators pick it up automatically; then
+add `src/<area>/<area>.module.ts` and import it from `AppModule`.
 
 ### Reproducible mock data
 
