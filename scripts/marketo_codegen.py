@@ -240,6 +240,7 @@ def format_with_prettier(paths: list[Path]) -> None:
 def write_output(output: Path, files: dict[Path, str], label: str) -> int:
     """Write generated files, then normalise them with prettier."""
     if output.exists():
+        refuse_foreign_files(output, files)
         shutil.rmtree(output)
     for path, content in files.items():
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -301,3 +302,28 @@ def custom_target(swagger: Path, area: str) -> Target:
     ):
         raise SystemExit(f"src/{area} already holds something no generator writes; pick a new --area: {area!r}")
     return target
+
+
+def refuse_foreign_files(output: Path, files: dict[Path, str]) -> None:
+    """Before an unregistered area's folder is deleted, check that it only holds files this run writes.
+
+    A registered area's folders and the shared mocks are regenerated as a whole: a file the document
+    no longer produces has to go. A folder named with `--area` may hold anything, so a file this run
+    would not write again is refused instead of deleted.
+    """
+    registered = {SHARED_MOCKS} | {
+        folder for target in TARGETS.values() for folder in (target.definitions, target.resources, target.mocks)
+    }
+    if output in registered:
+        return
+    foreign = sorted(
+        path.relative_to(ROOT)
+        for path in output.rglob("*")
+        if path.is_file() and path not in files and not path.name.startswith(".")
+    )
+    if foreign:
+        listed = ", ".join(str(path) for path in foreign[:5])
+        raise SystemExit(
+            f"{output.relative_to(ROOT)} holds files this run would not write again ({listed}); "
+            "move them or pick a new --area."
+        )
