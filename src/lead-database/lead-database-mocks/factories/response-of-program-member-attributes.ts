@@ -1,0 +1,21 @@
+import { faker } from '@faker-js/faker'
+import { mockRequestId } from '../../../mocks/request-id'
+import type { ResponseOfProgramMemberAttributes } from '../../lead-database-definitions/responses/response-of-program-member-attributes'
+import { makeProgramMemberAttribute } from './program-member-attribute'
+
+export function makeResponseOfProgramMemberAttributes(
+  overrides: Partial<ResponseOfProgramMemberAttributes> = {},
+): ResponseOfProgramMemberAttributes {
+  return {
+    errors: [],
+    moreResult: faker.datatype.boolean(),
+    nextPageToken: faker.lorem.word(),
+    requestId: mockRequestId(),
+    result: faker.helpers.multiple(() => makeProgramMemberAttribute(), {
+      count: { min: 1, max: 3 },
+    }),
+    success: true,
+    warnings: [],
+    ...overrides,
+  }
+}

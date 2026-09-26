@@ -1,0 +1,20 @@
+import { faker } from '@faker-js/faker'
+import { mockRequestId } from '../../../mocks/request-id'
+import type { ResponseOfLeadByListId } from '../../lead-database-definitions/responses/response-of-lead-by-list-id'
+import { makeLead } from './lead'
+
+export function makeResponseOfLeadByListId(
+  overrides: Partial<ResponseOfLeadByListId> = {},
+): ResponseOfLeadByListId {
+  return {
+    errors: [],
+    nextPageToken: faker.lorem.word(),
+    requestId: mockRequestId(),
+    result: faker.helpers.multiple(() => makeLead(), {
+      count: { min: 1, max: 3 },
+    }),
+    success: true,
+    warnings: [],
+    ...overrides,
+  }
+}

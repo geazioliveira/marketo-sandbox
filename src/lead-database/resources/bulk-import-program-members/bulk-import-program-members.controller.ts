@@ -1,0 +1,63 @@
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  Param,
+  Post,
+  Query,
+} from '@nestjs/common'
+import { BulkImportProgramMembersService } from './bulk-import-program-members.service'
+
+import type { ObservableOfInputStreamContent } from '../../lead-database-definitions/models/observable-of-input-stream-content'
+import type { ResponseOfImportProgramMemberResponse } from '../../lead-database-definitions/responses/response-of-import-program-member-response'
+
+@Controller()
+export class BulkImportProgramMembersController {
+  constructor(
+    private readonly bulkImportProgramMembersService: BulkImportProgramMembersService,
+  ) {}
+
+  @Post('bulk/v1/program/:programId/members/import.json')
+  @HttpCode(200)
+  async importProgramMemberUsingPOST(
+    @Param('programId') programId: string,
+    @Query('programMemberStatus') programMemberStatus: string,
+    @Query('format') format: 'CSV' | 'TSV' | 'SSV',
+    @Body('file') file: unknown,
+  ): Promise<ResponseOfImportProgramMemberResponse> {
+    return this.bulkImportProgramMembersService.importProgramMemberUsingPOST(
+      programId,
+      programMemberStatus,
+      format,
+      file,
+    )
+  }
+
+  @Get('bulk/v1/program/members/import/:batchId/failures.json')
+  async getImportProgramMemberFailuresUsingGET(
+    @Param('batchId') batchId: number,
+  ): Promise<ObservableOfInputStreamContent> {
+    return this.bulkImportProgramMembersService.getImportProgramMemberFailuresUsingGET(
+      batchId,
+    )
+  }
+
+  @Get('bulk/v1/program/members/import/:batchId/status.json')
+  async getImportProgramMemberStatusUsingGET(
+    @Param('batchId') batchId: number,
+  ): Promise<ResponseOfImportProgramMemberResponse> {
+    return this.bulkImportProgramMembersService.getImportProgramMemberStatusUsingGET(
+      batchId,
+    )
+  }
+
+  @Get('bulk/v1/program/members/import/:batchId/warnings.json')
+  async getImportProgramMemberWarningsUsingGET(
+    @Param('batchId') batchId: number,
+  ): Promise<ObservableOfInputStreamContent> {
+    return this.bulkImportProgramMembersService.getImportProgramMemberWarningsUsingGET(
+      batchId,
+    )
+  }
+}

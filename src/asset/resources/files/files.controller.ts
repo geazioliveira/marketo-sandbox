@@ -1,4 +1,12 @@
-import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common'
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  Param,
+  Post,
+  Query,
+} from '@nestjs/common'
 import { FilesService } from './files.service'
 
 import type { CreateFileRequest } from '../../asset-definitions/requests/create-file-request'
@@ -32,6 +40,7 @@ export class FilesController {
   }
 
   @Post('rest/asset/v1/files.json')
+  @HttpCode(200)
   async createFileUsingPOST(
     @Body() createFileRequest: CreateFileRequest,
   ): Promise<ResponseOfFileResponse> {

@@ -1,0 +1,93 @@
+import {
+  Body,
+  Controller,
+  Get,
+  Headers,
+  HttpCode,
+  Param,
+  Post,
+  Query,
+} from '@nestjs/common'
+import { BulkExportActivitiesService } from './bulk-export-activities.service'
+
+import type { ExportActivityRequest } from '../../lead-database-definitions/requests/export-activity-request'
+import type { ObservableOfInputStreamRangeContent } from '../../lead-database-definitions/models/observable-of-input-stream-range-content'
+import type { ResponseOfExportResponse } from '../../lead-database-definitions/responses/response-of-export-response'
+import type { ResponseOfExportResponseWithToken } from '../../lead-database-definitions/responses/response-of-export-response-with-token'
+
+@Controller()
+export class BulkExportActivitiesController {
+  constructor(
+    private readonly bulkExportActivitiesService: BulkExportActivitiesService,
+  ) {}
+
+  @Get('bulk/v1/activities/export.json')
+  async getExportActivitiesUsingGET(
+    @Query('status')
+    status?:
+      | 'created'
+      | 'queued'
+      | 'processing'
+      | 'cancelled'
+      | 'completed'
+      | 'failed',
+    @Query('batchSize') batchSize?: number,
+    @Query('nextPageToken') nextPageToken?: string,
+  ): Promise<ResponseOfExportResponseWithToken> {
+    return this.bulkExportActivitiesService.getExportActivitiesUsingGET(
+      status,
+      batchSize,
+      nextPageToken,
+    )
+  }
+
+  @Post('bulk/v1/activities/export/create.json')
+  @HttpCode(200)
+  async createExportActivitiesUsingPOST(
+    @Body() exportActivityRequest?: ExportActivityRequest,
+  ): Promise<ResponseOfExportResponse> {
+    return this.bulkExportActivitiesService.createExportActivitiesUsingPOST(
+      exportActivityRequest,
+    )
+  }
+
+  @Post('bulk/v1/activities/export/:exportId/cancel.json')
+  @HttpCode(200)
+  async cancelExportActivitiesUsingPOST(
+    @Param('exportId') exportId: string,
+  ): Promise<ResponseOfExportResponse> {
+    return this.bulkExportActivitiesService.cancelExportActivitiesUsingPOST(
+      exportId,
+    )
+  }
+
+  @Post('bulk/v1/activities/export/:exportId/enqueue.json')
+  @HttpCode(200)
+  async enqueueExportActivitiesUsingPOST(
+    @Param('exportId') exportId: string,
+  ): Promise<ResponseOfExportResponse> {
+    return this.bulkExportActivitiesService.enqueueExportActivitiesUsingPOST(
+      exportId,
+    )
+  }
+
+  @Get('bulk/v1/activities/export/:exportId/file.json')
+  async getExportActivitiesFileUsingGET(
+    @Param('exportId') exportId: string,
+    @Headers('Range') range?: string,
+  ): Promise<ObservableOfInputStreamRangeContent> {
+    return this.bulkExportActivitiesService.getExportActivitiesFileUsingGET(
+      exportId,
+      range,
+    )
+  }
+
+  @Get('bulk/v1/activities/export/:exportId/status.json')
+  async getExportActivitiesStatusUsingGET(
+    @Param('exportId') exportId: string,
+  ): Promise<ResponseOfExportResponse> {
+    return this.bulkExportActivitiesService.getExportActivitiesStatusUsingGET(
+      exportId,
+    )
+  }
+}

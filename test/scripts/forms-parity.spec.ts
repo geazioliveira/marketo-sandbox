@@ -649,21 +649,24 @@ describe(workflows.check, () => {
     expect(scripts.at(-1)).toContain('git status --porcelain')
   })
 
-  it('runs the e2e as its own step, its telemetry pointed at a closed loopback port', () => {
-    // ObserveModule calls out by default (#9); the e2e must not reach the network.
+  it('runs the e2e as its own step, with no environment of its own', () => {
+    // Since #9 the app sends no telemetry, so nothing needs pointing away
+    // from the network; test/runtime-defaults.spec.ts guards that.
     const e2e = stepsOf(text).find(
       (step) => stepField(step, 'run') === 'npm run test:e2e',
     )
     expect(e2e && stepField(e2e, 'name')).toBe('e2e')
-    expect(e2e && stepField(e2e, 'OBSERVE_ENDPOINT')).toBe('http://127.0.0.1:9')
+    expect(e2e?.some((line) => /^\s*env:/.test(line))).toBe(false)
+    expect(text).not.toContain('OBSERVE_')
   })
 
-  it('relies on a `npm run check` that chains lint, typecheck, test, check:context and build', () => {
+  it('relies on a `npm run check` that chains lint, format:check, typecheck, test, check:context and build', () => {
     const { scripts } = JSON.parse(read('package.json')) as {
       scripts: Record<string, string>
     }
     expect(scripts.check.split(' && ')).toEqual([
       'npm run lint',
+      'npm run format:check',
       'npm run typecheck',
       'npm test',
       'npm run check:context',
@@ -671,6 +674,13 @@ describe(workflows.check, () => {
     ])
     expect(scripts.typecheck).toBe('tsc --noEmit')
     expect(scripts['check:context']).toBe('node scripts/check-context.mjs')
+    // format:check refuses exactly what `npm run format` would rewrite (#9).
+    expect(scripts['format:check']).toBe(
+      'prettier --check "src/**/*.ts" "test/**/*.ts" "scripts/**/*.{mjs,mts}" ".claude/hooks/**/*.mjs"',
+    )
+    expect(scripts.format).toBe(
+      scripts['format:check'].replace('--check', '--write'),
+    )
   })
 
   it('reads the repository with a read-only token', () => {

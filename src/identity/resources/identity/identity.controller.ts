@@ -1,0 +1,36 @@
+import { Controller, Get, HttpCode, Post, Query } from '@nestjs/common'
+import { IdentityService } from './identity.service'
+
+import type { ResponseOfIdentity } from '../../identity-definitions/responses/response-of-identity'
+
+@Controller()
+export class IdentityController {
+  constructor(private readonly identityService: IdentityService) {}
+
+  @Get('identity/oauth/token')
+  async identityUsingGET(
+    @Query('client_id') clientId: string,
+    @Query('client_secret') clientSecret: string,
+    @Query('grant_type') grantType: 'client_credentials',
+  ): Promise<ResponseOfIdentity> {
+    return this.identityService.identityUsingGET(
+      clientId,
+      clientSecret,
+      grantType,
+    )
+  }
+
+  @Post('identity/oauth/token')
+  @HttpCode(200)
+  async identityUsingPOST(
+    @Query('client_id') clientId: string,
+    @Query('client_secret') clientSecret: string,
+    @Query('grant_type') grantType: 'client_credentials',
+  ): Promise<ResponseOfIdentity> {
+    return this.identityService.identityUsingPOST(
+      clientId,
+      clientSecret,
+      grantType,
+    )
+  }
+}

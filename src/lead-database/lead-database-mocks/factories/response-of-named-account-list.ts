@@ -1,0 +1,21 @@
+import { faker } from '@faker-js/faker'
+import { mockRequestId } from '../../../mocks/request-id'
+import type { ResponseOfNamedAccountList } from '../../lead-database-definitions/responses/response-of-named-account-list'
+import { makeNamedAccountList } from './named-account-list'
+
+export function makeResponseOfNamedAccountList(
+  overrides: Partial<ResponseOfNamedAccountList> = {},
+): ResponseOfNamedAccountList {
+  return {
+    errors: [],
+    moreResult: faker.datatype.boolean(),
+    nextPageToken: faker.lorem.word(),
+    requestId: mockRequestId(),
+    result: faker.helpers.multiple(() => makeNamedAccountList(), {
+      count: { min: 1, max: 3 },
+    }),
+    success: true,
+    warnings: [],
+    ...overrides,
+  }
+}

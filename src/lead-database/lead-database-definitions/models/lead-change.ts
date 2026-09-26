@@ -1,0 +1,31 @@
+import type { Attribute } from './attribute'
+import type { LeadChangeField } from './lead-change-field'
+
+export interface LeadChange {
+  /**
+   * Datetime of the activity
+   */
+  activityDate: string
+  /**
+   * Id of the activity type
+   */
+  activityTypeId: number
+  /**
+   * List of secondary attributes
+   */
+  attributes: Array<Attribute>
+  campaignId?: number
+  fields?: Array<LeadChangeField>
+  /**
+   * Integer id of the activity. For instances which have been migrated to Activity Service, this field may not be present, and should not be treated as unique.
+   */
+  id: number
+  /**
+   * Id of the lead associated to the activity
+   */
+  leadId: number
+  /**
+   * Unique id of the activity (128 character string)
+   */
+  marketoGUID?: string
+}

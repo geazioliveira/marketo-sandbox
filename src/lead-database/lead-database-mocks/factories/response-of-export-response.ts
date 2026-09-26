@@ -1,0 +1,19 @@
+import { faker } from '@faker-js/faker'
+import { mockRequestId } from '../../../mocks/request-id'
+import type { ResponseOfExportResponse } from '../../lead-database-definitions/responses/response-of-export-response'
+import { makeExportResponse } from './export-response'
+
+export function makeResponseOfExportResponse(
+  overrides: Partial<ResponseOfExportResponse> = {},
+): ResponseOfExportResponse {
+  return {
+    errors: [],
+    requestId: mockRequestId(),
+    result: faker.helpers.multiple(() => makeExportResponse(), {
+      count: { min: 1, max: 3 },
+    }),
+    success: true,
+    warnings: [],
+    ...overrides,
+  }
+}

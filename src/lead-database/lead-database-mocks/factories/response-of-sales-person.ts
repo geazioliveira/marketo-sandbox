@@ -1,0 +1,21 @@
+import { faker } from '@faker-js/faker'
+import { mockRequestId } from '../../../mocks/request-id'
+import type { ResponseOfSalesPerson } from '../../lead-database-definitions/responses/response-of-sales-person'
+import { makeSalesPerson } from './sales-person'
+
+export function makeResponseOfSalesPerson(
+  overrides: Partial<ResponseOfSalesPerson> = {},
+): ResponseOfSalesPerson {
+  return {
+    errors: [],
+    moreResult: faker.datatype.boolean(),
+    nextPageToken: faker.lorem.word(),
+    requestId: mockRequestId(),
+    result: faker.helpers.multiple(() => makeSalesPerson(), {
+      count: { min: 1, max: 3 },
+    }),
+    success: true,
+    warnings: [],
+    ...overrides,
+  }
+}

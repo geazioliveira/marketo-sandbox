@@ -1,4 +1,12 @@
-import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common'
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  Param,
+  Post,
+  Query,
+} from '@nestjs/common'
 import { EmailTemplatesService } from './email-templates.service'
 
 import type { CloneEmailTemplateRequest } from '../../asset-definitions/requests/clone-email-template-request'
@@ -31,6 +39,7 @@ export class EmailTemplatesController {
   }
 
   @Post('rest/asset/v1/emailTemplate/:id.json')
+  @HttpCode(200)
   async updateEmailTemplateUsingPOST(
     @Param('id') id: number,
     @Body() updateEmailMetaDataRequest: UpdateEmailTemplateMetaDataRequest,
@@ -42,6 +51,7 @@ export class EmailTemplatesController {
   }
 
   @Post('rest/asset/v1/emailTemplate/:id/approveDraft.json')
+  @HttpCode(200)
   async approveDraftUsingPOST_1(
     @Param('id') id: number,
   ): Promise<ResponseOfEmailTemplateResponse> {
@@ -49,6 +59,7 @@ export class EmailTemplatesController {
   }
 
   @Post('rest/asset/v1/emailTemplate/:id/clone.json')
+  @HttpCode(200)
   async cloneTemplateUsingPOST(
     @Param('id') id: number,
     @Body() cloneEmailTemplateRequest: CloneEmailTemplateRequest,
@@ -68,6 +79,7 @@ export class EmailTemplatesController {
   }
 
   @Post('rest/asset/v1/emailTemplate/:id/content.json')
+  @HttpCode(200)
   async updateEmailTemplateContentUsingPOST(
     @Param('id') id: number,
     @Body()
@@ -80,6 +92,7 @@ export class EmailTemplatesController {
   }
 
   @Post('rest/asset/v1/emailTemplate/:id/delete.json')
+  @HttpCode(200)
   async deleteTemplateUsingPOST(
     @Param('id') id: number,
   ): Promise<ResponseOfIdResponse> {
@@ -87,6 +100,7 @@ export class EmailTemplatesController {
   }
 
   @Post('rest/asset/v1/emailTemplate/:id/discardDraft.json')
+  @HttpCode(200)
   async discardDraftUsingPOST_1(
     @Param('id') id: number,
   ): Promise<ResponseOfIdResponse> {
@@ -94,6 +108,7 @@ export class EmailTemplatesController {
   }
 
   @Post('rest/asset/v1/emailTemplate/:id/unapprove.json')
+  @HttpCode(200)
   async unapproveDraftUsingPOST_1(
     @Param('id') id: number,
   ): Promise<ResponseOfEmailTemplateResponse> {
@@ -114,6 +129,7 @@ export class EmailTemplatesController {
   }
 
   @Post('rest/asset/v1/emailTemplates.json')
+  @HttpCode(200)
   async createEmailTemplateUsingPOST(
     @Body() createEmailTemplateRequest: CreateEmailTemplateRequest,
   ): Promise<ResponseOfEmailTemplateResponse> {

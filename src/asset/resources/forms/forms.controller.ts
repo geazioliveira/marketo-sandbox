@@ -1,4 +1,12 @@
-import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common'
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  Param,
+  Post,
+  Query,
+} from '@nestjs/common'
 import { FormsService } from './forms.service'
 
 import type { CloneFormRequest } from '../../asset-definitions/requests/clone-form-request'
@@ -33,6 +41,7 @@ export class FormsController {
   }
 
   @Post('rest/asset/v1/form/:id.json')
+  @HttpCode(200)
   async updateFormsUsingPOST(
     @Param('id') id: number,
     @Body() updateFormMetaDataRequest: UpdateFormMetaDataRequest,
@@ -41,6 +50,7 @@ export class FormsController {
   }
 
   @Post('rest/asset/v1/form/:id/approveDraft.json')
+  @HttpCode(200)
   async approveFromUsingPOST(
     @Param('id') id: number,
   ): Promise<ResponseOfLpFormResponse> {
@@ -48,6 +58,7 @@ export class FormsController {
   }
 
   @Post('rest/asset/v1/form/:id/clone.json')
+  @HttpCode(200)
   async cloneLpFormsUsingPOST(
     @Param('id') id: number,
     @Body() cloneFormRequest?: CloneFormRequest,
@@ -56,6 +67,7 @@ export class FormsController {
   }
 
   @Post('rest/asset/v1/form/:id/delete.json')
+  @HttpCode(200)
   async deleteFormByIdUsingPOST(
     @Param('id') id: number,
   ): Promise<ResponseOfIdResponse> {
@@ -63,6 +75,7 @@ export class FormsController {
   }
 
   @Post('rest/asset/v1/form/:id/discardDraft.json')
+  @HttpCode(200)
   async discardFormByIdUsingPOST(
     @Param('id') id: number,
   ): Promise<ResponseOfIdResponse> {
@@ -70,6 +83,7 @@ export class FormsController {
   }
 
   @Post('rest/asset/v1/form/:id/submitButton.json')
+  @HttpCode(200)
   async updateFormSubmitButtonUsingPOST(
     @Param('id') id: number,
     @Body() submitButtonRequest: SubmitButtonRequest,
@@ -89,6 +103,7 @@ export class FormsController {
   }
 
   @Post('rest/asset/v1/form/:id/thankYouPage.json')
+  @HttpCode(200)
   async updateThankYouPageByIdUsingPOST(
     @Param('id') id: number,
     @Body() thankYouPageRequest: UpdateThankYouPageRequest,
@@ -115,6 +130,7 @@ export class FormsController {
   }
 
   @Post('rest/asset/v1/forms.json')
+  @HttpCode(200)
   async createLpFormsUsingPOST(
     @Body() createFormRequest: CreateLpFormRequest,
   ): Promise<ResponseOfLpFormResponse> {

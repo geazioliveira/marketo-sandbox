@@ -1,12 +1,20 @@
-import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common'
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  Param,
+  Post,
+  Query,
+} from '@nestjs/common'
 import { ProgramsService } from './programs.service'
 
 import type { CloneProgramRequest } from '../../asset-definitions/requests/clone-program-request'
 import type { CreateProgramRequest } from '../../asset-definitions/requests/create-program-request'
-import type { ResponseOfBrowseAllPrograms } from '../../asset-definitions/models/response-of-browse-all-programs'
+import type { ResponseOfBrowseAllPrograms } from '../../asset-definitions/responses/response-of-browse-all-programs'
 import type { ResponseOfIdResponse } from '../../asset-definitions/responses/response-of-id-response'
 import type { ResponseOfProgramResponse } from '../../asset-definitions/responses/response-of-program-response'
-import type { ResponseOfSmartListResponseWithRules } from '../../asset-definitions/models/response-of-smart-list-response-with-rules'
+import type { ResponseOfSmartListResponseWithRules } from '../../asset-definitions/responses/response-of-smart-list-response-with-rules'
 import type { UpdateProgramRequest } from '../../asset-definitions/requests/update-program-request'
 
 @Controller()
@@ -49,6 +57,7 @@ export class ProgramsController {
   }
 
   @Post('rest/asset/v1/program/:id.json')
+  @HttpCode(200)
   async updateProgramUsingPOST(
     @Param('id') id: number,
     @Body() updateProgramRequest: UpdateProgramRequest,
@@ -68,6 +77,7 @@ export class ProgramsController {
   }
 
   @Post('rest/asset/v1/program/:id/approve.json')
+  @HttpCode(200)
   async approveProgramUsingPOST(
     @Param('id') id: number,
   ): Promise<ResponseOfIdResponse> {
@@ -75,6 +85,7 @@ export class ProgramsController {
   }
 
   @Post('rest/asset/v1/program/:id/clone.json')
+  @HttpCode(200)
   async cloneProgramUsingPOST(
     @Param('id') id: number,
     @Body() cloneProgramRequest: CloneProgramRequest,
@@ -83,6 +94,7 @@ export class ProgramsController {
   }
 
   @Post('rest/asset/v1/program/:id/delete.json')
+  @HttpCode(200)
   async deleteProgramUsingPOST(
     @Param('id') id: number,
   ): Promise<ResponseOfIdResponse> {
@@ -90,6 +102,7 @@ export class ProgramsController {
   }
 
   @Post('rest/asset/v1/program/:id/unapprove.json')
+  @HttpCode(200)
   async unapproveProgramUsingPOST(
     @Param('id') id: number,
   ): Promise<ResponseOfIdResponse> {
@@ -115,6 +128,7 @@ export class ProgramsController {
   }
 
   @Post('rest/asset/v1/programs.json')
+  @HttpCode(200)
   async createProgramUsingPOST(
     @Body() createProgramRequest: CreateProgramRequest,
   ): Promise<ResponseOfProgramResponse> {

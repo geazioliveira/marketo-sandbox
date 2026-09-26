@@ -9,15 +9,15 @@ import { makeResponseOfSmartCampaignRuleType } from '../../asset-mocks/factories
 import { makeResponseOfSmartCampaignUsedBy } from '../../asset-mocks/factories/response-of-smart-campaign-used-by'
 import { makeResponseOfSmartListResponseWithRules } from '../../asset-mocks/factories/response-of-smart-list-response-with-rules'
 
-import type { ResponseOfAutoSuggestValue } from '../../asset-definitions/models/response-of-auto-suggest-value'
+import type { ResponseOfAutoSuggestValue } from '../../asset-definitions/responses/response-of-auto-suggest-value'
 import type { ResponseOfIdResponse } from '../../asset-definitions/responses/response-of-id-response'
-import type { ResponseOfSmartCampaignFlowStepActionType } from '../../asset-definitions/models/response-of-smart-campaign-flow-step-action-type'
-import type { ResponseOfSmartCampaignFlowStepType } from '../../asset-definitions/models/response-of-smart-campaign-flow-step-type'
+import type { ResponseOfSmartCampaignFlowStepActionType } from '../../asset-definitions/responses/response-of-smart-campaign-flow-step-action-type'
+import type { ResponseOfSmartCampaignFlowStepType } from '../../asset-definitions/responses/response-of-smart-campaign-flow-step-type'
 import type { ResponseOfSmartCampaignResponse } from '../../asset-definitions/responses/response-of-smart-campaign-response'
-import type { ResponseOfSmartCampaignResponseWithFlow } from '../../asset-definitions/models/response-of-smart-campaign-response-with-flow'
-import type { ResponseOfSmartCampaignRuleType } from '../../asset-definitions/models/response-of-smart-campaign-rule-type'
-import type { ResponseOfSmartCampaignUsedBy } from '../../asset-definitions/models/response-of-smart-campaign-used-by'
-import type { ResponseOfSmartListResponseWithRules } from '../../asset-definitions/models/response-of-smart-list-response-with-rules'
+import type { ResponseOfSmartCampaignResponseWithFlow } from '../../asset-definitions/responses/response-of-smart-campaign-response-with-flow'
+import type { ResponseOfSmartCampaignRuleType } from '../../asset-definitions/responses/response-of-smart-campaign-rule-type'
+import type { ResponseOfSmartCampaignUsedBy } from '../../asset-definitions/responses/response-of-smart-campaign-used-by'
+import type { ResponseOfSmartListResponseWithRules } from '../../asset-definitions/responses/response-of-smart-list-response-with-rules'
 
 @Injectable()
 export class SmartCampaignsService {

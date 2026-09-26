@@ -1,5 +1,5 @@
 import { faker } from '@faker-js/faker'
-import { mockRequestId } from '../request-id'
+import { mockRequestId } from '../../../mocks/request-id'
 import type { ResponseOfStaticListResponse } from '../../asset-definitions/responses/response-of-static-list-response'
 import { makeStaticListResponse } from './static-list-response'
 

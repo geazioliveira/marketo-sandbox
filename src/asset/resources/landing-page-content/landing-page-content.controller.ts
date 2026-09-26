@@ -1,4 +1,12 @@
-import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common'
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  Param,
+  Post,
+  Query,
+} from '@nestjs/common'
 import { LandingPageContentService } from './landing-page-content.service'
 
 import type { CreateLandingPageContentRequest } from '../../asset-definitions/requests/create-landing-page-content-request'
@@ -26,6 +34,7 @@ export class LandingPageContentController {
   }
 
   @Post('rest/asset/v1/landingPage/:id/content.json')
+  @HttpCode(200)
   async addLandingPageContentUsingPOST(
     @Param('id') id: number,
     @Body() request: CreateLandingPageContentRequest,
@@ -37,6 +46,7 @@ export class LandingPageContentController {
   }
 
   @Post('rest/asset/v1/landingPage/:id/content/:contentId.json')
+  @HttpCode(200)
   async updateLandingPageContentUsingPOST(
     @Param('id') id: number,
     @Param('contentId') contentId: string,
@@ -50,6 +60,7 @@ export class LandingPageContentController {
   }
 
   @Post('rest/asset/v1/landingPage/:id/content/:contentId/delete.json')
+  @HttpCode(200)
   async removeLandingPageContentUsingPOST(
     @Param('id') id: number,
     @Param('contentId') contentId: string,
@@ -72,6 +83,7 @@ export class LandingPageContentController {
   }
 
   @Post('rest/asset/v1/landingPage/:id/dynamicContent/:contentId.json')
+  @HttpCode(200)
   async updateLandingPageDynamicContentUsingPOST(
     @Param('id') id: number,
     @Param('contentId') contentId: string,

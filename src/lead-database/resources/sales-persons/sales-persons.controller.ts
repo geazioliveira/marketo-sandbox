@@ -1,0 +1,54 @@
+import { Body, Controller, Get, HttpCode, Post, Query } from '@nestjs/common'
+import { SalesPersonsService } from './sales-persons.service'
+
+import type { DeleteSalesPersonRequest } from '../../lead-database-definitions/requests/delete-sales-person-request'
+import type { ResponseOfObjectMetaData } from '../../lead-database-definitions/responses/response-of-object-meta-data'
+import type { ResponseOfSalesPerson } from '../../lead-database-definitions/responses/response-of-sales-person'
+import type { SyncSalesPersonRequest } from '../../lead-database-definitions/requests/sync-sales-person-request'
+
+@Controller()
+export class SalesPersonsController {
+  constructor(private readonly salesPersonsService: SalesPersonsService) {}
+
+  @Get('rest/v1/salespersons.json')
+  async getSalesPersonUsingGET(
+    @Query('filterType') filterType: string,
+    @Query('filterValues') filterValues: Array<string>,
+    @Query('fields') fields?: Array<string>,
+    @Query('batchSize') batchSize?: number,
+    @Query('nextPageToken') nextPageToken?: string,
+  ): Promise<ResponseOfSalesPerson> {
+    return this.salesPersonsService.getSalesPersonUsingGET(
+      filterType,
+      filterValues,
+      fields,
+      batchSize,
+      nextPageToken,
+    )
+  }
+
+  @Post('rest/v1/salespersons.json')
+  @HttpCode(200)
+  async syncSalesPersonsUsingPOST(
+    @Body() syncSalesPersonRequest: SyncSalesPersonRequest,
+  ): Promise<ResponseOfSalesPerson> {
+    return this.salesPersonsService.syncSalesPersonsUsingPOST(
+      syncSalesPersonRequest,
+    )
+  }
+
+  @Post('rest/v1/salespersons/delete.json')
+  @HttpCode(200)
+  async deleteSalesPersonUsingPOST(
+    @Body() deleteSalesPersonRequest: DeleteSalesPersonRequest,
+  ): Promise<ResponseOfSalesPerson> {
+    return this.salesPersonsService.deleteSalesPersonUsingPOST(
+      deleteSalesPersonRequest,
+    )
+  }
+
+  @Get('rest/v1/salespersons/describe.json')
+  async describeUsingGET_5(): Promise<ResponseOfObjectMetaData> {
+    return this.salesPersonsService.describeUsingGET_5()
+  }
+}

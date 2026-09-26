@@ -1,0 +1,30 @@
+import { faker } from '@faker-js/faker'
+import type { CustomActivityType } from '../../lead-database-definitions/models/custom-activity-type'
+import { makeCustomActivityTypeAttribute } from './custom-activity-type-attribute'
+
+export function makeCustomActivityType(
+  overrides: Partial<CustomActivityType> = {},
+): CustomActivityType {
+  return {
+    apiName: faker.lorem.words({ min: 2, max: 3 }),
+    attributes: faker.helpers.multiple(
+      () => makeCustomActivityTypeAttribute(),
+      { count: { min: 1, max: 3 } },
+    ),
+    createdAt: faker.date.recent().toISOString(),
+    description: faker.lorem.sentence(),
+    filterName: faker.lorem.words({ min: 2, max: 3 }),
+    id: faker.number.int({ min: 1, max: 99999 }),
+    name: faker.lorem.words({ min: 2, max: 3 }),
+    primaryAttribute: makeCustomActivityTypeAttribute(),
+    status: faker.helpers.arrayElement([
+      'draft',
+      'approved',
+      'deleted',
+      'approved with draft',
+    ] as const),
+    triggerName: faker.lorem.words({ min: 2, max: 3 }),
+    updatedAt: faker.date.recent().toISOString(),
+    ...overrides,
+  }
+}

@@ -1,0 +1,26 @@
+import type { Error } from '../models/error'
+import type { ImportProgramMemberResponse } from './import-program-member-response'
+import type { Warning } from '../models/warning'
+
+export interface ResponseOfImportProgramMemberResponse {
+  /**
+   * Array of errors that occurred if the request was unsuccessful
+   */
+  errors: Array<Error>
+  /**
+   * Id of the request made
+   */
+  requestId: string
+  /**
+   * Array of results for individual records in the operation, may be empty
+   */
+  result: Array<ImportProgramMemberResponse>
+  /**
+   * Whether the request succeeded
+   */
+  success: boolean
+  /**
+   * Array of warnings given for the operation
+   */
+  warnings: Array<Warning>
+}

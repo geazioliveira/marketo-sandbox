@@ -1,4 +1,12 @@
-import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common'
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  Param,
+  Post,
+  Query,
+} from '@nestjs/common'
 import { TokensService } from './tokens.service'
 
 import type { CreateTokenRequest } from '../../asset-definitions/requests/create-token-request'
@@ -19,6 +27,7 @@ export class TokensController {
   }
 
   @Post('rest/asset/v1/folder/:id/tokens.json')
+  @HttpCode(200)
   async addTokenTOFolderUsingPOST(
     @Param('id') id: number,
     @Body() createTokenRequest: CreateTokenRequest,
@@ -27,6 +36,7 @@ export class TokensController {
   }
 
   @Post('rest/asset/v1/folder/:id/tokens/delete.json')
+  @HttpCode(200)
   async deleteTokenByNameUsingPOST(
     @Param('id') id: number,
     @Body() deleteTokenRequest: DeleteTokenRequest,

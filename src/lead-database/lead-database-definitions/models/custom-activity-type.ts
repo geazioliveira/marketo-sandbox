@@ -1,0 +1,48 @@
+import type { CustomActivityTypeAttribute } from './custom-activity-type-attribute'
+
+export type CustomActivityTypeStatus =
+  'draft' | 'approved' | 'deleted' | 'approved with draft'
+
+export interface CustomActivityType {
+  /**
+   * API Name of the type. The API name must be unique and alphanumeric, containing at least one letter. It is highly recommended to prepend a unique namespace of up to sixteen characters to the API name. Required on creation
+   */
+  apiName?: string
+  /**
+   * List of attributes for the activity type. May only be added or update through Create or Update Custom Activity Type Attributes
+   */
+  attributes?: Array<CustomActivityTypeAttribute>
+  /**
+   * Datetime when the activity type was created
+   */
+  createdAt?: string
+  /**
+   * Description of the activity type
+   */
+  description?: string
+  /**
+   * Human-readable name for the associated filter of the activity type. Required on creation
+   */
+  filterName?: string
+  id?: number
+  /**
+   * Human-readable display name of the type. Required on creation
+   */
+  name?: string
+  /**
+   * Primary Attribute of the activity type. Required on creation
+   */
+  primaryAttribute?: CustomActivityTypeAttribute
+  /**
+   * State of the activity type
+   */
+  status?: CustomActivityTypeStatus
+  /**
+   * Human-readable name for the associated trigger of the activity type. Required on creation
+   */
+  triggerName?: string
+  /**
+   * Datetime when the activity type was most recently updated
+   */
+  updatedAt?: string
+}

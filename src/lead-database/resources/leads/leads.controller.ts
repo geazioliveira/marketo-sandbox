@@ -1,0 +1,265 @@
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  Param,
+  Post,
+  Query,
+} from '@nestjs/common'
+import { LeadsService } from './leads.service'
+
+import type { ChangeLeadProgramStatusRequest } from '../../lead-database-definitions/requests/change-lead-program-status-request'
+import type { CreateLeadFieldRequest } from '../../lead-database-definitions/requests/create-lead-field-request'
+import type { DeleteLeadRequest } from '../../lead-database-definitions/requests/delete-lead-request'
+import type { PushLeadToMarketoRequest } from '../../lead-database-definitions/requests/push-lead-to-marketo-request'
+import type { ResponseOfChangeLeadProgramStatusOutputData } from '../../lead-database-definitions/responses/response-of-change-lead-program-status-output-data'
+import type { ResponseOfCreateLeadField } from '../../lead-database-definitions/responses/response-of-create-lead-field'
+import type { ResponseOfLead } from '../../lead-database-definitions/responses/response-of-lead'
+import type { ResponseOfLeadAttribute } from '../../lead-database-definitions/responses/response-of-lead-attribute'
+import type { ResponseOfLeadAttribute2 } from '../../lead-database-definitions/responses/response-of-lead-attribute2'
+import type { ResponseOfLeadField } from '../../lead-database-definitions/responses/response-of-lead-field'
+import type { ResponseOfLeadPartition } from '../../lead-database-definitions/responses/response-of-lead-partition'
+import type { ResponseOfLists } from '../../lead-database-definitions/responses/response-of-lists'
+import type { ResponseOfProgramMemberAttributes } from '../../lead-database-definitions/responses/response-of-program-member-attributes'
+import type { ResponseOfPrograms } from '../../lead-database-definitions/responses/response-of-programs'
+import type { ResponseOfPushLeadToMarketo } from '../../lead-database-definitions/responses/response-of-push-lead-to-marketo'
+import type { ResponseOfSmartCampaigns } from '../../lead-database-definitions/responses/response-of-smart-campaigns'
+import type { ResponseOfSubmitForm } from '../../lead-database-definitions/responses/response-of-submit-form'
+import type { ResponseOfUpdateLeadField } from '../../lead-database-definitions/responses/response-of-update-lead-field'
+import type { ResponseWithoutResult } from '../../lead-database-definitions/models/response-without-result'
+import type { SubmitFormRequest } from '../../lead-database-definitions/requests/submit-form-request'
+import type { SyncLeadRequest } from '../../lead-database-definitions/requests/sync-lead-request'
+import type { UpdateLeadFieldRequest } from '../../lead-database-definitions/requests/update-lead-field-request'
+import type { UpdateLeadPartitionRequest } from '../../lead-database-definitions/requests/update-lead-partition-request'
+
+@Controller()
+export class LeadsController {
+  constructor(private readonly leadsService: LeadsService) {}
+
+  @Get('rest/v1/lead/:leadId.json')
+  async getLeadByIdUsingGET(
+    @Param('leadId') leadId: number,
+    @Query('fields') fields?: Array<string>,
+  ): Promise<ResponseOfLead> {
+    return this.leadsService.getLeadByIdUsingGET(leadId, fields)
+  }
+
+  @Get('rest/v1/leads.json')
+  async getLeadsByFilterUsingGET(
+    @Query('filterType') filterType: string,
+    @Query('filterValues') filterValues: Array<string>,
+    @Query('fields') fields?: Array<string>,
+    @Query('batchSize') batchSize?: number,
+    @Query('nextPageToken') nextPageToken?: string,
+  ): Promise<ResponseOfLead> {
+    return this.leadsService.getLeadsByFilterUsingGET(
+      filterType,
+      filterValues,
+      fields,
+      batchSize,
+      nextPageToken,
+    )
+  }
+
+  @Post('rest/v1/leads.json')
+  @HttpCode(200)
+  async syncLeadUsingPOST(
+    @Body() syncLeadRequest: SyncLeadRequest,
+  ): Promise<ResponseOfLead> {
+    return this.leadsService.syncLeadUsingPOST(syncLeadRequest)
+  }
+
+  @Post('rest/v1/leads/delete.json')
+  @HttpCode(200)
+  async deleteLeadsUsingPOST(
+    @Body() deleteLeadRequest?: DeleteLeadRequest,
+    @Query('id') id?: Array<number>,
+  ): Promise<ResponseOfLead> {
+    return this.leadsService.deleteLeadsUsingPOST(deleteLeadRequest, id)
+  }
+
+  @Get('rest/v1/leads/describe.json')
+  async describeUsingGET_2(): Promise<ResponseOfLeadAttribute> {
+    return this.leadsService.describeUsingGET_2()
+  }
+
+  @Get('rest/v1/leads/describe2.json')
+  async describeUsingGET_6(): Promise<ResponseOfLeadAttribute2> {
+    return this.leadsService.describeUsingGET_6()
+  }
+
+  @Get('rest/v1/leads/schema/fields/:fieldApiName.json')
+  async getLeadFieldByNameUsingGET(
+    @Param('fieldApiName') fieldApiName: string,
+  ): Promise<ResponseOfLeadField> {
+    return this.leadsService.getLeadFieldByNameUsingGET(fieldApiName)
+  }
+
+  @Post('rest/v1/leads/schema/fields/:fieldApiName.json')
+  @HttpCode(200)
+  async updateLeadFieldUsingPOST(
+    @Param('fieldApiName') fieldApiName: string,
+    @Body() updateLeadFieldRequest: UpdateLeadFieldRequest,
+  ): Promise<ResponseOfUpdateLeadField> {
+    return this.leadsService.updateLeadFieldUsingPOST(
+      fieldApiName,
+      updateLeadFieldRequest,
+    )
+  }
+
+  @Get('rest/v1/leads/schema/fields.json')
+  async getLeadFieldsUsingGET(
+    @Query('batchSize') batchSize?: number,
+    @Query('nextPageToken') nextPageToken?: string,
+  ): Promise<ResponseOfLeadField> {
+    return this.leadsService.getLeadFieldsUsingGET(batchSize, nextPageToken)
+  }
+
+  @Post('rest/v1/leads/schema/fields.json')
+  @HttpCode(200)
+  async createLeadFieldUsingPOST(
+    @Body() createLeadFieldRequest: CreateLeadFieldRequest,
+  ): Promise<ResponseOfCreateLeadField> {
+    return this.leadsService.createLeadFieldUsingPOST(createLeadFieldRequest)
+  }
+
+  @Get('rest/v1/program/members/describe.json')
+  async describeProgramMemberUsingGET(): Promise<ResponseOfProgramMemberAttributes> {
+    return this.leadsService.describeProgramMemberUsingGET()
+  }
+
+  @Get('rest/v1/leads/partitions.json')
+  async getLeadPartitionsUsingGET(): Promise<ResponseOfLeadPartition> {
+    return this.leadsService.getLeadPartitionsUsingGET()
+  }
+
+  @Post('rest/v1/leads/partitions.json')
+  @HttpCode(200)
+  async updatePartitionsUsingPOST(
+    @Body() updateLeadPartitionRequest: UpdateLeadPartitionRequest,
+  ): Promise<ResponseOfLead> {
+    return this.leadsService.updatePartitionsUsingPOST(
+      updateLeadPartitionRequest,
+    )
+  }
+
+  @Get('rest/v1/leads/programs/:programId.json')
+  async getLeadsByProgramIdUsingGET(
+    @Param('programId') programId: number,
+    @Query('fields') fields?: Array<string>,
+    @Query('batchSize') batchSize?: number,
+    @Query('nextPageToken') nextPageToken?: string,
+  ): Promise<ResponseOfLead> {
+    return this.leadsService.getLeadsByProgramIdUsingGET(
+      programId,
+      fields,
+      batchSize,
+      nextPageToken,
+    )
+  }
+
+  @Post('rest/v1/leads/programs/:programId/status.json')
+  @HttpCode(200)
+  async changeLeadProgramStatusUsingPOST(
+    @Param('programId') programId: number,
+    @Body() changeLeadProgramStatusRequest: ChangeLeadProgramStatusRequest,
+  ): Promise<ResponseOfChangeLeadProgramStatusOutputData> {
+    return this.leadsService.changeLeadProgramStatusUsingPOST(
+      programId,
+      changeLeadProgramStatusRequest,
+    )
+  }
+
+  @Post('rest/v1/leads/push.json')
+  @HttpCode(200)
+  async pushToMarketoUsingPOST(
+    @Body() pushLeadToMarketoRequest: PushLeadToMarketoRequest,
+  ): Promise<ResponseOfPushLeadToMarketo> {
+    return this.leadsService.pushToMarketoUsingPOST(pushLeadToMarketoRequest)
+  }
+
+  @Post('rest/v1/leads/submitForm.json')
+  @HttpCode(200)
+  async SubmitFormUsingPOST(
+    @Body() submitFormRequest: SubmitFormRequest,
+  ): Promise<ResponseOfSubmitForm> {
+    return this.leadsService.SubmitFormUsingPOST(submitFormRequest)
+  }
+
+  @Post('rest/v1/leads/:leadId/associate.json')
+  @HttpCode(200)
+  async associateLeadUsingPOST(
+    @Param('leadId') leadId: number,
+    @Query('cookie') cookie: string,
+  ): Promise<ResponseWithoutResult> {
+    return this.leadsService.associateLeadUsingPOST(leadId, cookie)
+  }
+
+  @Post('rest/v1/leads/:leadId/merge.json')
+  @HttpCode(200)
+  async mergeLeadsUsingPOST(
+    @Param('leadId') leadId: number,
+    @Query('leadId') leadId1?: number,
+    @Query('leadIds') leadIds?: Array<number>,
+    @Query('mergeInCRM') mergeInCRM?: boolean,
+  ): Promise<ResponseWithoutResult> {
+    return this.leadsService.mergeLeadsUsingPOST(
+      leadId,
+      leadId1,
+      leadIds,
+      mergeInCRM,
+    )
+  }
+
+  @Get('rest/v1/leads/:leadId/listMembership.json')
+  async getListMembershipUsingGET(
+    @Param('leadId') leadId: number,
+    @Query('nextPageToken') nextPageToken?: string,
+    @Query('batchSize') batchSize?: number,
+  ): Promise<ResponseOfLists> {
+    return this.leadsService.getListMembershipUsingGET(
+      leadId,
+      nextPageToken,
+      batchSize,
+    )
+  }
+
+  @Get('rest/v1/leads/:leadId/programMembership.json')
+  async getProgramMembershipUsingGET(
+    @Param('leadId') leadId: number,
+    @Query('nextPageToken') nextPageToken?: string,
+    @Query('batchSize') batchSize?: number,
+    @Query('earliestUpdatedAt') earliestUpdatedAt?: string,
+    @Query('latestUpdatedAt') latestUpdatedAt?: string,
+    @Query('filterType') filterType?: string,
+    @Query('filterValues') filterValues?: Array<string>,
+  ): Promise<ResponseOfPrograms> {
+    return this.leadsService.getProgramMembershipUsingGET(
+      leadId,
+      nextPageToken,
+      batchSize,
+      earliestUpdatedAt,
+      latestUpdatedAt,
+      filterType,
+      filterValues,
+    )
+  }
+
+  @Get('rest/v1/leads/:leadId/smartCampaignMembership.json')
+  async getSmartCampaignMembershipUsingGET(
+    @Param('leadId') leadId: number,
+    @Query('nextPageToken') nextPageToken?: string,
+    @Query('batchSize') batchSize?: number,
+    @Query('earliestUpdatedAt') earliestUpdatedAt?: string,
+    @Query('latestUpdatedAt') latestUpdatedAt?: string,
+  ): Promise<ResponseOfSmartCampaigns> {
+    return this.leadsService.getSmartCampaignMembershipUsingGET(
+      leadId,
+      nextPageToken,
+      batchSize,
+      earliestUpdatedAt,
+      latestUpdatedAt,
+    )
+  }
+}

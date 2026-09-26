@@ -1,6 +1,6 @@
 import { faker } from '@faker-js/faker'
-import { mockRequestId } from '../request-id'
-import type { ResponseOfBrowseAllPrograms } from '../../asset-definitions/models/response-of-browse-all-programs'
+import { mockRequestId } from '../../../mocks/request-id'
+import type { ResponseOfBrowseAllPrograms } from '../../asset-definitions/responses/response-of-browse-all-programs'
 import { makeBrowseAllPrograms } from './browse-all-programs'
 
 export function makeResponseOfBrowseAllPrograms(

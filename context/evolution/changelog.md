@@ -4,6 +4,101 @@ Uma entrada por mudança mergeada, da mais nova para a mais antiga, escrita no p
 
 ---
 
+## 2026-09-26: Reescrita multi-API, cinco documentos Swagger em main (#6, PR #21)
+
+**Fase**: Learn
+**Tipo**: Feature
+
+### O que foi construído / corrigido
+
+- **Cinco alvos, uma área cada.** O registro `TARGETS` de `scripts/marketo_codegen.py` liga cada documento de `docs/` a uma área de `src/`: assets, Data Ingestion (em OpenAPI 3), Identity, Lead Database e User Management. O mock passou de 220 para 388 operações, e a Track A ganhou as rotas de que o R3 e o R4 dependem, `/identity/oauth/token` e `/userservice/management/...`.
+- **Os geradores do dono.** Eles aceitam `--target`, ou `--swagger` com `--area`, leem Swagger 2.0 e OpenAPI 3, calculam os imports com `relative_import()`, mandam `ResponseOf*` para `responses/` e põem o seed e o `requestId` num `src/mocks/` comum. A saída veio de `npm run generate:all`, sem nenhum ajuste à mão.
+- **O `check:all` passou.** Além dos caminhos, faltava uma causa: o Prettier 3 lê o `.gitignore`, que lista `/.codegen-tmp/`, e não formatava a cópia que o `--check` compara. O Prettier dos geradores passou a ler só o `.prettierignore`.
+- **O status documentado.** O controller ganha `@HttpCode` quando o menor 2xx declarado difere do padrão do Nest: os 139 POSTs de assets passaram de 201 para 200, e os 7 de Data Ingestion respondem 202 sem corpo.
+- **Um e2e novo** confere as 388 rotas contra os documentos, recusa método+caminho repetido e faz um pedido por área.
+- **O `--area` ficou restrito.** As revisões do Copilot apontaram que ele aceitava uma área registrada, um `..`, um caminho absoluto ou uma pasta com arquivos escritos à mão, e o gerador apagaria a pasta. Agora ele só aceita uma pasta em kebab-case, direto em `src/`, que não guarde nada além das três pastas de gerador, e dentro delas o gerador recusa apagar um arquivo que não vá escrever de novo.
+- **O contexto.** A ADR 0004 passou a uma fonte por área, com a origem e o sha256 dos cinco documentos. As ADRs de 0005 a 0009 ganharam emendas, e os patterns, os anti-patterns, o glossário, o `AGENTS.md`, o fluxo e o project intent acompanharam.
+
+### Números medidos
+
+- **Os documentos**, contados com python: 459 schemas, 335 caminhos, 388 operações e 49 tags, sem método+caminho repetido entre eles. Os quatro novos são os blobs de AdobeDocs/marketo-apis em `89c8e262` (`git hash-object`). O de assets tem o mesmo JSON que o blob de lá, que tem 8 bytes a mais de espaço no fim de duas linhas.
+- **A saída.** 1.083 arquivos gerados. Os 604 que a reescrita trouxe batem por sha256 com os que o dono gerou, e um segundo `npm run generate:all` não muda nenhum arquivo.
+- **O `check:all`.** Sem a correção do Prettier, 14 dos 16 checks falhavam e acusavam 829 arquivos. Com ela, os 16 saem com 0, também num clone limpo.
+- **As rotas.** As 220 de assets ficam na mesma ordem. Pelo roteador do Express, 13 das 388 são sombreadas: as 11 de assets e 2 de Lead Database. Por HTTP, as 2 de Lead Database caem no handler de `rest/v1/customobjects/:customObjectName.json`, e a medição foi para a #8.
+- **Os checks**, depois do merge de `main` com a #9: `npm run check` com 1.345 testes, e o e2e com 14 (2 do smoke da #9 e 12 da #6). O Python 3.9.9 local reproduz a saída.
+- **A verificação adversarial**, feita por um revisor independente num clone da branch: as 388 operações, mandadas com 40 seeds, respondem um 2xx declarado, e só as 13 rotas sombreadas caem no handler errado. O `check:all` passa com o `PYTHONHASHSEED` padrão e com outros dois.
+
+### Decisões tomadas
+
+- [0004: O Swagger como fonte única, com o código gerado commitado](../decisions/0004-swagger-as-single-source-with-committed-generated-code.md): uma fonte por área, com a origem e o sha256 de cada documento.
+- [0005: NestJS sobre Express, com um módulo por tag](../decisions/0005-nestjs-express-one-module-per-tag.md): um módulo de recursos por área e o status 2xx documentado.
+- [0006: DTOs como interfaces TypeScript](../decisions/0006-dtos-as-typescript-interfaces.md): 459 interfaces e uma regra só de pasta.
+- [0007: Factories faker com overrides e seed](../decisions/0007-faker-factories-with-overrides-and-seed.md): o seed e o `requestId` comuns em `src/mocks/`.
+- [0008: A toolchain](../decisions/0008-toolchain.md): o Prettier dos geradores lê só o `.prettierignore`.
+- A branch nasceu antes do merge da #5, pela resposta nova do dono à pergunta 4, na #6.
+
+### Patterns aplicados ou criados
+
+- [Gerar e conferir](../knowledge/patterns/generate-and-check.md): o commit dos geradores e o da saída separados; o da saída passou a levar a linha escrita à mão que a importa, quando ela muda de lugar.
+- [A fronteira do código gerado](../knowledge/patterns/generated-code-boundary.md), agora por área.
+- [A forma de um módulo de recurso](../knowledge/patterns/resource-module-shape.md), [Factory com overrides](../knowledge/patterns/factory-with-overrides.md) e [Revisão classificada por risco](../knowledge/patterns/risk-classified-review.md).
+- [Mover as pastas geradas sem o gerador](../knowledge/anti-patterns/moving-generated-folders-without-the-generator.md): "todo commit compila" decidiu a ordem dos commits.
+
+### Aprendizados / surpresas
+
+- **Medir a causa antes de corrigir.** O plano atribuía o `check:all` defasado à pasta ser oculta, e a causa era o `.gitignore`. Renomear a pasta também passava, mas deixaria a pasta temporária fora do `.gitignore` por um motivo errado.
+- **A ordem dos commits do plano não compilava.** A ligação escrita à mão ia no commit dos geradores, onde importaria pastas que só existem depois da regeneração. Ela foi para depois da saída, e a linha de `src/main.ts` que importa o seed foi junto com a saída.
+- **Os documentos repetem nomes.** 7 schemas e 4 tags aparecem em mais de um, e as áreas separadas guardam cada um.
+- **O e2e lê a API interna do roteador do Express** (`router.stack`), como o teste que a #8 planeja. Uma troca de versão do Express pode quebrá-lo, e ele falha em vez de passar em vazio.
+- **A verificação adversarial achou o que os checks não viam.** Três formas de schema saem diferentes do documento (um array de topo, uma resposta string e os headers de resposta), e isso foi para a #24. Um corpo acima de 100 KiB responde 413, o que já existia, e foi para a #25. O e2e contava só os métodos que o próprio gerador trata, e passou a contar os oito do OpenAPI em `4ed897b`. O `check:all` e o e2e passavam com as três formas erradas: provar que a saída é a do gerador não prova que ela é a do documento.
+- **A #9 entrou em `main` durante a revisão, e o merge tocou 19 arquivos.** Quase todos eram de contexto, porque as duas PRs corrigiram as mesmas citações de linha do README, do `src/main.ts` e do `src/app.module.ts`. Resolver o texto não bastou: as citações foram conferidas de novo contra a árvore mesclada. Nas ADRs, uma nota que prendia as citações a um commit deu lugar a um prefixo por citação, como a #9 já fazia.
+- **Um teste intermitente, sem relação com a #6.** Com a máquina carregada, dois casos de `test/scripts/check-context.spec.ts` estouram o timeout padrão de 5 s do vitest, e o processo filho que eles esperam tem 30 s. Isso foi para a #23.
+
+---
+
+## 2026-09-26: Nada sai da máquina por padrão, e as sobras do starter saíram (#9)
+
+**Fase**: Learn
+**Tipo**: Feature
+
+### O que foi construído / corrigido
+
+- **A telemetria saiu.** O `@nestjs/observe` saiu do `AppModule`, do `src/main.ts` e das dependências. A guarda `test/runtime-defaults.spec.ts` falha se ele voltar ao `package.json` ou a um import em `src/`.
+- **O servidor escuta em loopback.** O endereço vem de `listenAddress(process.env)`, com `HOST` padrão `127.0.0.1` e `PORT` padrão 3000. Uma variável vazia conta como ausente.
+- **As sobras do starter saíram.** O Hello World deu lugar a um smoke e2e: `GET /rest/asset/v1/folders.json` responde 200 com o envelope, e `GET /` responde 404. Também saíram o `deploy`, o `@nestjs/mau` e o boilerplate do README. O pacote virou `marketo-sandbox`, e o lockfile foi regenerado com o faker como dependência de runtime.
+- **O `format:check` entrou no `npm run check`,** logo depois do lint. Ele cobre `src`, `test` e `scripts`, o mesmo escopo do `format`.
+- **O CI e o fluxo rodam o e2e sem `OBSERVE_ENDPOINT`.** O teste de drift que casava o endereço saiu, e o de paridade passou a exigir o passo `e2e` sem `env`.
+
+### Números medidos
+
+- `npm run check`: exit 0, com 1.345 testes em 8 arquivos. O lint não deu nenhum aviso (antes, 1 em `src/app.module.ts:16`), e o `format:check`, o typecheck, o `check:context` e o build passaram.
+- `npm run test:e2e`, sem variável nenhuma: 2 testes passaram. Com o caminho do smoke trocado por um inexistente, o teste falha com 404.
+- `npm install --package-lock-only`, rodado duas vezes: nenhuma mudança na segunda. O lockfile foi de 395 para 348 entradas (`git diff --numstat 610e101 -- package-lock.json`: +6/−683), e o `npm ci` instala 305 pacotes em vez de 352.
+- `node dist/main` por 75 s, com um preload que registra toda conexão: escuta só em `127.0.0.1`, 8 threads (13 em `610e101`), nenhuma worker thread e nenhuma conexão para fora do loopback. O `/api-json` foi de 221 para 220 operações.
+- Em `610e101`, com a telemetria apontada para um listener local: 2 `POST /applications/telemetry` em 20 s com 5 GETs, e 1 por minuto com o app ocioso, com as chaves vazias.
+
+### Decisões tomadas
+
+- [0010: O mock só fala com a própria máquina por padrão](../decisions/0010-loopback-only-by-default.md): o Observe foi removido em vez de virar opt-in, e o `HOST` tem padrão `127.0.0.1`. Isso fecha a decisão em aberto do project intent.
+- As ADRs 0002, 0004, 0005, 0006, 0007 e 0008 ganharam uma linha `Atualizado`, com as citações que a mudança deslocou.
+
+### Patterns aplicados ou criados
+
+- [Padrão com `??` para uma variável de ambiente](../knowledge/anti-patterns/nullish-default-for-an-env-var.md), novo.
+- [A fronteira do código gerado](../knowledge/patterns/generated-code-boundary.md): a lista de arquivos escritos à mão mudou.
+- [Revisão classificada por risco](../knowledge/patterns/risk-classified-review.md): o `HOST` entrou no que o lite-campaign consome.
+
+### Aprendizados / surpresas
+
+- **O contorno do CI não fazia o que dizia.** O e2e de um teste nunca mandou telemetria, porque o `TestingModule` não recebe o `instrument`. E a porta 9 funcionava porque o `fetch` a recusa como "bad port", sem abrir socket.
+- **Um preload de rede vê as worker threads,** ao contrário do que o plano supunha. Ele serviu de prova na Verificação.
+- **`??` não protege uma variável vazia.** `HOST=` com `??` escutaria em todas as interfaces, que é o contrário do padrão.
+- **Uma linha citada anda sem avisar.** Tirar o cabeçalho do README, 47 pacotes do lockfile e as linhas do Observe fez a #9 trocar 52 citações `arquivo:linha` em 14 arquivos de contexto, e o `check:context` não confere essas linhas. A varredura comparou o conteúdo de `610e101` com o da branch. A primeira passada deixou 4 citações para trás, e a revisão adversarial as achou. Uma citação que descreve um commit antigo leva o SHA na frente (`fb4a804:src/main.ts:7`), para não andar de novo.
+- **Planos em paralelo.** Enquanto uma sessão media para escrever o plano, outra publicou um plano da #9 e o dono o aprovou. Reler o timeline da issue logo antes de postar evita um `# Plano` que revogaria o Approve.
+- **Telemetria na instalação.** O `@scarf/scarf` manda um evento a cada `npm ci`, e isso ficou na #20.
+
+---
+
 ## 2026-09-25: Plano publicado passa a aguardar validação (#17)
 
 **Fase**: Learn

@@ -1,4 +1,12 @@
-import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common'
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  Param,
+  Post,
+  Query,
+} from '@nestjs/common'
 import { StaticListsService } from './static-lists.service'
 
 import type { CreateStaticListRequest } from '../../asset-definitions/requests/create-static-list-request'
@@ -18,6 +26,7 @@ export class StaticListsController {
   }
 
   @Post('rest/asset/v1/staticList/:id.json')
+  @HttpCode(200)
   async updateStaticListUsingPOST(
     @Param('id') id: number,
     @Body() updateStaticListRequest: UpdateStaticListRequest,
@@ -46,6 +55,7 @@ export class StaticListsController {
   }
 
   @Post('rest/asset/v1/staticLists.json')
+  @HttpCode(200)
   async createStaticListUsingPOST(
     @Body() createStaticListRequest: CreateStaticListRequest,
   ): Promise<ResponseOfStaticListResponse> {
@@ -62,6 +72,7 @@ export class StaticListsController {
   }
 
   @Post('rest/asset/v1/staticList/:id/delete.json')
+  @HttpCode(200)
   async deleteStaticListByIdUsingPOST(
     @Param('id') id: number,
   ): Promise<ResponseOfIdResponse> {

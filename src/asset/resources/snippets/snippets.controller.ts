@@ -1,4 +1,12 @@
-import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common'
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  Param,
+  Post,
+  Query,
+} from '@nestjs/common'
 import { SnippetsService } from './snippets.service'
 
 import type { CloneSnippetRequest } from '../../asset-definitions/requests/clone-snippet-request'
@@ -23,6 +31,7 @@ export class SnippetsController {
   }
 
   @Post('rest/asset/v1/snippet/:id.json')
+  @HttpCode(200)
   async updateSnippetUsingPOST(
     @Param('id') id: number,
     @Body() updateSnippetRequest: UpdateSnippetRequest,
@@ -31,6 +40,7 @@ export class SnippetsController {
   }
 
   @Post('rest/asset/v1/snippet/:id/approveDraft.json')
+  @HttpCode(200)
   async approveSnippetUsingPOST(
     @Param('id') id: number,
   ): Promise<ResponseOfSnippetResponse> {
@@ -38,6 +48,7 @@ export class SnippetsController {
   }
 
   @Post('rest/asset/v1/snippet/:id/clone.json')
+  @HttpCode(200)
   async cloneSnippetUsingPOST(
     @Param('id') id: number,
     @Body() cloneSnippetRequest?: CloneSnippetRequest,
@@ -54,6 +65,7 @@ export class SnippetsController {
   }
 
   @Post('rest/asset/v1/snippet/:id/content.json')
+  @HttpCode(200)
   async updateContentUsingPOST_1(
     @Param('id') id: number,
     @Query('content') content: string,
@@ -63,6 +75,7 @@ export class SnippetsController {
   }
 
   @Post('rest/asset/v1/snippet/:id/delete.json')
+  @HttpCode(200)
   async deleteSnippetUsingPOST(
     @Param('id') id: number,
   ): Promise<ResponseOfIdResponse> {
@@ -70,6 +83,7 @@ export class SnippetsController {
   }
 
   @Post('rest/asset/v1/snippet/:id/discardDraft.json')
+  @HttpCode(200)
   async discardSnippetUsingPOST(
     @Param('id') id: number,
   ): Promise<ResponseOfIdResponse> {
@@ -85,6 +99,7 @@ export class SnippetsController {
   }
 
   @Post('rest/asset/v1/snippet/:id/dynamicContent/:segmentId.json')
+  @HttpCode(200)
   async updateDynamicContentUsingPOST(
     @Param('id') id: number,
     @Param('segmentId') segmentId: number,
@@ -98,6 +113,7 @@ export class SnippetsController {
   }
 
   @Post('rest/asset/v1/snippet/:id/unapprove.json')
+  @HttpCode(200)
   async unapproveSnippetUsingPOST(
     @Param('id') id: number,
   ): Promise<ResponseOfSnippetResponse> {
@@ -114,6 +130,7 @@ export class SnippetsController {
   }
 
   @Post('rest/asset/v1/snippets.json')
+  @HttpCode(200)
   async createSnippetUsingPOST(
     @Body() createSnippetRequest: CreateSnippetRequest,
   ): Promise<ResponseOfSnippetResponse> {

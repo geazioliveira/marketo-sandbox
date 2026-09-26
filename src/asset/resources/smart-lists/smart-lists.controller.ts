@@ -1,13 +1,21 @@
-import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common'
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  Param,
+  Post,
+  Query,
+} from '@nestjs/common'
 import { SmartListsService } from './smart-lists.service'
 
 import type { CloneSmartListRequest } from '../../asset-definitions/requests/clone-smart-list-request'
 import type { CreateSmartListRequest } from '../../asset-definitions/requests/create-smart-list-request'
-import type { ResponseOfAutoSuggestValue } from '../../asset-definitions/models/response-of-auto-suggest-value'
+import type { ResponseOfAutoSuggestValue } from '../../asset-definitions/responses/response-of-auto-suggest-value'
 import type { ResponseOfIdResponse } from '../../asset-definitions/responses/response-of-id-response'
 import type { ResponseOfSmartListResponse } from '../../asset-definitions/responses/response-of-smart-list-response'
-import type { ResponseOfSmartListResponseWithRules } from '../../asset-definitions/models/response-of-smart-list-response-with-rules'
-import type { ResponseOfSmartListRuleType } from '../../asset-definitions/models/response-of-smart-list-rule-type'
+import type { ResponseOfSmartListResponseWithRules } from '../../asset-definitions/responses/response-of-smart-list-response-with-rules'
+import type { ResponseOfSmartListRuleType } from '../../asset-definitions/responses/response-of-smart-list-rule-type'
 
 @Controller()
 export class SmartListsController {
@@ -29,6 +37,7 @@ export class SmartListsController {
   }
 
   @Post('rest/asset/v1/smartList/:id/delete.json')
+  @HttpCode(200)
   async deleteSmartListByIdUsingPOST(
     @Param('id') id: number,
   ): Promise<ResponseOfIdResponse> {
@@ -53,6 +62,7 @@ export class SmartListsController {
   }
 
   @Post('rest/asset/v1/smartLists.json')
+  @HttpCode(200)
   async createSmartListUsingPOST(
     @Body() createSmartListRequest: CreateSmartListRequest,
   ): Promise<ResponseOfSmartListResponse> {
@@ -82,6 +92,7 @@ export class SmartListsController {
   }
 
   @Post('rest/asset/v1/smartList/:id/rules.json')
+  @HttpCode(200)
   async addSmartListRuleUsingPOST(
     @Param('id') id: number,
     @Body('ruleId') ruleId: string,
@@ -99,6 +110,7 @@ export class SmartListsController {
   }
 
   @Post('rest/asset/v1/smartList/:id/rule/:ruleId.json')
+  @HttpCode(200)
   async updateSmartListRuleUsingPOST(
     @Param('id') id: number,
     @Param('ruleId') ruleId: number,
@@ -116,6 +128,7 @@ export class SmartListsController {
   }
 
   @Post('rest/asset/v1/smartList/:id/filterLogic.json')
+  @HttpCode(200)
   async updateSmartListFilterLogicUsingPOST(
     @Param('id') id: number,
     @Body('matchType') matchType: 'all' | 'any' | 'custom',
@@ -129,6 +142,7 @@ export class SmartListsController {
   }
 
   @Post('rest/asset/v1/smartList/:id/rule/:ruleId/delete.json')
+  @HttpCode(200)
   async deleteSmartListRuleUsingPOST(
     @Param('id') id: number,
     @Param('ruleId') ruleId: number,
@@ -137,6 +151,7 @@ export class SmartListsController {
   }
 
   @Post('rest/asset/v1/smartList/:id/rule/:ruleId/removeConstraint.json')
+  @HttpCode(200)
   async removeSmartListRuleConstraintUsingPOST(
     @Param('id') id: number,
     @Param('ruleId') ruleId: number,
@@ -150,6 +165,7 @@ export class SmartListsController {
   }
 
   @Post('rest/asset/v1/smartList/:id/reorder.json')
+  @HttpCode(200)
   async reorderSmartListRulesUsingPOST(
     @Param('id') id: number,
     @Body('order') order: string,
@@ -158,6 +174,7 @@ export class SmartListsController {
   }
 
   @Post('rest/asset/v1/smartList/:id/rules/delete.json')
+  @HttpCode(200)
   async deleteAllSmartListRulesUsingPOST(
     @Param('id') id: number,
   ): Promise<ResponseOfSmartListResponseWithRules> {
@@ -165,6 +182,7 @@ export class SmartListsController {
   }
 
   @Post('rest/asset/v1/smartList/:id/clone.json')
+  @HttpCode(200)
   async cloneSmartListUsingPOST(
     @Param('id') id: number,
     @Body() cloneSmartListRequest: CloneSmartListRequest,

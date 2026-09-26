@@ -1,0 +1,24 @@
+import { faker } from '@faker-js/faker'
+import type { LeadChange } from '../../lead-database-definitions/models/lead-change'
+import { makeAttribute } from './attribute'
+import { makeLeadChangeField } from './lead-change-field'
+
+export function makeLeadChange(
+  overrides: Partial<LeadChange> = {},
+): LeadChange {
+  return {
+    activityDate: faker.date.recent().toISOString(),
+    activityTypeId: faker.number.int({ min: 1, max: 99999 }),
+    attributes: faker.helpers.multiple(() => makeAttribute(), {
+      count: { min: 1, max: 3 },
+    }),
+    campaignId: faker.number.int({ min: 1, max: 99999 }),
+    fields: faker.helpers.multiple(() => makeLeadChangeField(), {
+      count: { min: 1, max: 3 },
+    }),
+    id: faker.number.int({ min: 1, max: 99999 }),
+    leadId: faker.number.int({ min: 1, max: 99999 }),
+    marketoGUID: faker.lorem.word(),
+    ...overrides,
+  }
+}

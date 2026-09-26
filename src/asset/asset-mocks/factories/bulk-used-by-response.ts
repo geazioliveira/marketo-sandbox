@@ -1,5 +1,5 @@
 import { faker } from '@faker-js/faker'
-import { mockRequestId } from '../request-id'
+import { mockRequestId } from '../../../mocks/request-id'
 import type { BulkUsedByResponse } from '../../asset-definitions/responses/bulk-used-by-response'
 import { makeBulkUsedByItemDTO } from './bulk-used-by-item-dto'
 

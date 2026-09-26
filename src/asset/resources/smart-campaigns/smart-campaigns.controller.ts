@@ -1,17 +1,25 @@
-import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common'
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  Param,
+  Post,
+  Query,
+} from '@nestjs/common'
 import { SmartCampaignsService } from './smart-campaigns.service'
 
 import type { CloneSmartCampaignRequest } from '../../asset-definitions/requests/clone-smart-campaign-request'
 import type { CreateSmartCampaignRequest } from '../../asset-definitions/requests/create-smart-campaign-request'
-import type { ResponseOfAutoSuggestValue } from '../../asset-definitions/models/response-of-auto-suggest-value'
+import type { ResponseOfAutoSuggestValue } from '../../asset-definitions/responses/response-of-auto-suggest-value'
 import type { ResponseOfIdResponse } from '../../asset-definitions/responses/response-of-id-response'
-import type { ResponseOfSmartCampaignFlowStepActionType } from '../../asset-definitions/models/response-of-smart-campaign-flow-step-action-type'
-import type { ResponseOfSmartCampaignFlowStepType } from '../../asset-definitions/models/response-of-smart-campaign-flow-step-type'
+import type { ResponseOfSmartCampaignFlowStepActionType } from '../../asset-definitions/responses/response-of-smart-campaign-flow-step-action-type'
+import type { ResponseOfSmartCampaignFlowStepType } from '../../asset-definitions/responses/response-of-smart-campaign-flow-step-type'
 import type { ResponseOfSmartCampaignResponse } from '../../asset-definitions/responses/response-of-smart-campaign-response'
-import type { ResponseOfSmartCampaignResponseWithFlow } from '../../asset-definitions/models/response-of-smart-campaign-response-with-flow'
-import type { ResponseOfSmartCampaignRuleType } from '../../asset-definitions/models/response-of-smart-campaign-rule-type'
-import type { ResponseOfSmartCampaignUsedBy } from '../../asset-definitions/models/response-of-smart-campaign-used-by'
-import type { ResponseOfSmartListResponseWithRules } from '../../asset-definitions/models/response-of-smart-list-response-with-rules'
+import type { ResponseOfSmartCampaignResponseWithFlow } from '../../asset-definitions/responses/response-of-smart-campaign-response-with-flow'
+import type { ResponseOfSmartCampaignRuleType } from '../../asset-definitions/responses/response-of-smart-campaign-rule-type'
+import type { ResponseOfSmartCampaignUsedBy } from '../../asset-definitions/responses/response-of-smart-campaign-used-by'
+import type { ResponseOfSmartListResponseWithRules } from '../../asset-definitions/responses/response-of-smart-list-response-with-rules'
 import type { UpdateSmartCampaignRequest } from '../../asset-definitions/requests/update-smart-campaign-request'
 
 @Controller()
@@ -30,6 +38,7 @@ export class SmartCampaignsController {
   }
 
   @Post('rest/asset/v1/smartCampaign/:id.json')
+  @HttpCode(200)
   async updateSmartCampaignUsingPOST(
     @Param('id') id: number,
     @Body() updateSmartCampaignRequest: UpdateSmartCampaignRequest,
@@ -101,6 +110,7 @@ export class SmartCampaignsController {
   }
 
   @Post('rest/asset/v1/smartCampaign/:id/flows.json')
+  @HttpCode(200)
   async addSmartCampaignFlowStepUsingPOST(
     @Param('id') id: number,
     @Body('activityType') activityType: string,
@@ -114,6 +124,7 @@ export class SmartCampaignsController {
   }
 
   @Post('rest/asset/v1/smartCampaign/:id/flow/:stepId/addChoice.json')
+  @HttpCode(200)
   async addSmartCampaignFlowStepChoiceUsingPOST(
     @Param('id') id: number,
     @Param('stepId') stepId: number,
@@ -125,6 +136,7 @@ export class SmartCampaignsController {
   }
 
   @Post('rest/asset/v1/smartCampaign/:id/flow/:stepId/choice/:choiceId.json')
+  @HttpCode(200)
   async updateSmartCampaignFlowStepChoiceUsingPOST(
     @Param('id') id: number,
     @Param('stepId') stepId: number,
@@ -146,6 +158,7 @@ export class SmartCampaignsController {
   }
 
   @Post('rest/asset/v1/smartCampaign/:id/flow/:stepId/remove.json')
+  @HttpCode(200)
   async removeSmartCampaignFlowStepUsingPOST(
     @Param('id') id: number,
     @Param('stepId') stepId: number,
@@ -159,6 +172,7 @@ export class SmartCampaignsController {
   @Post(
     'rest/asset/v1/smartCampaign/:id/flow/:stepId/choice/:choiceId/remove.json',
   )
+  @HttpCode(200)
   async removeSmartCampaignFlowStepChoiceUsingPOST(
     @Param('id') id: number,
     @Param('stepId') stepId: number,
@@ -174,6 +188,7 @@ export class SmartCampaignsController {
   @Post(
     'rest/asset/v1/smartCampaign/:id/flow/:stepId/choice/:choiceId/reorder.json',
   )
+  @HttpCode(200)
   async reorderSmartCampaignFlowStepChoiceUsingPOST(
     @Param('id') id: number,
     @Param('stepId') stepId: number,
@@ -219,6 +234,7 @@ export class SmartCampaignsController {
   }
 
   @Post('rest/asset/v1/smartCampaigns.json')
+  @HttpCode(200)
   async createSmartCampaignUsingPOST(
     @Body() createSmartCampaignRequest: CreateSmartCampaignRequest,
   ): Promise<ResponseOfSmartCampaignResponse> {
@@ -228,6 +244,7 @@ export class SmartCampaignsController {
   }
 
   @Post('rest/asset/v1/smartCampaign/:id/activate.json')
+  @HttpCode(200)
   async activateSmartCampaignUsingPOST(
     @Param('id') id: number,
   ): Promise<ResponseOfIdResponse> {
@@ -235,6 +252,7 @@ export class SmartCampaignsController {
   }
 
   @Post('rest/asset/v1/smartCampaign/:id/deactivate.json')
+  @HttpCode(200)
   async deactivateSmartCampaignUsingPOST(
     @Param('id') id: number,
   ): Promise<ResponseOfIdResponse> {
@@ -242,6 +260,7 @@ export class SmartCampaignsController {
   }
 
   @Post('rest/asset/v1/smartCampaign/:id/clone.json')
+  @HttpCode(200)
   async cloneSmartCampaignUsingPOST(
     @Param('id') id: number,
     @Body() cloneSmartCampaignRequest: CloneSmartCampaignRequest,
@@ -253,6 +272,7 @@ export class SmartCampaignsController {
   }
 
   @Post('rest/asset/v1/smartCampaign/:id/delete.json')
+  @HttpCode(200)
   async deleteSmartCampaignUsingPOST(
     @Param('id') id: number,
   ): Promise<ResponseOfIdResponse> {

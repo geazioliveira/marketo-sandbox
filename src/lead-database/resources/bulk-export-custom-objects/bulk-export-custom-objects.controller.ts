@@ -1,0 +1,105 @@
+import {
+  Body,
+  Controller,
+  Get,
+  Headers,
+  HttpCode,
+  Param,
+  Post,
+  Query,
+} from '@nestjs/common'
+import { BulkExportCustomObjectsService } from './bulk-export-custom-objects.service'
+
+import type { ExportCustomObjectRequest } from '../../lead-database-definitions/requests/export-custom-object-request'
+import type { ObservableOfInputStreamRangeContent } from '../../lead-database-definitions/models/observable-of-input-stream-range-content'
+import type { ResponseOfExportResponse } from '../../lead-database-definitions/responses/response-of-export-response'
+import type { ResponseOfExportResponseWithToken } from '../../lead-database-definitions/responses/response-of-export-response-with-token'
+
+@Controller()
+export class BulkExportCustomObjectsController {
+  constructor(
+    private readonly bulkExportCustomObjectsService: BulkExportCustomObjectsService,
+  ) {}
+
+  @Get('bulk/v1/customobjects/:apiName/export.json')
+  async getExportCustomObjectsUsingGET(
+    @Param('apiName') apiName: string,
+    @Query('status')
+    status?:
+      | 'created'
+      | 'queued'
+      | 'processing'
+      | 'cancelled'
+      | 'completed'
+      | 'failed',
+    @Query('batchSize') batchSize?: number,
+    @Query('nextPageToken') nextPageToken?: string,
+  ): Promise<ResponseOfExportResponseWithToken> {
+    return this.bulkExportCustomObjectsService.getExportCustomObjectsUsingGET(
+      apiName,
+      status,
+      batchSize,
+      nextPageToken,
+    )
+  }
+
+  @Post('bulk/v1/customobjects/:apiName/export/create.json')
+  @HttpCode(200)
+  async createExportCustomObjectsUsingPOST(
+    @Param('apiName') apiName: string,
+    @Body() exportCustomObjectRequest?: ExportCustomObjectRequest,
+  ): Promise<ResponseOfExportResponse> {
+    return this.bulkExportCustomObjectsService.createExportCustomObjectsUsingPOST(
+      apiName,
+      exportCustomObjectRequest,
+    )
+  }
+
+  @Post('bulk/v1/customobjects/:apiName/export/:exportId/cancel.json')
+  @HttpCode(200)
+  async cancelExportCustomObjectsUsingPOST(
+    @Param('apiName') apiName: string,
+    @Param('exportId') exportId: string,
+  ): Promise<ResponseOfExportResponse> {
+    return this.bulkExportCustomObjectsService.cancelExportCustomObjectsUsingPOST(
+      apiName,
+      exportId,
+    )
+  }
+
+  @Post('bulk/v1/customobjects/:apiName/export/:exportId/enqueue.json')
+  @HttpCode(200)
+  async enqueueExportCustomObjectsUsingPOST(
+    @Param('apiName') apiName: string,
+    @Param('exportId') exportId: string,
+  ): Promise<ResponseOfExportResponse> {
+    return this.bulkExportCustomObjectsService.enqueueExportCustomObjectsUsingPOST(
+      apiName,
+      exportId,
+    )
+  }
+
+  @Get('bulk/v1/customobjects/:apiName/export/:exportId/file.json')
+  async getExportCustomObjectsFileUsingGET(
+    @Param('apiName') apiName: string,
+    @Param('exportId') exportId: string,
+    @Headers('Range') range?: string,
+  ): Promise<ObservableOfInputStreamRangeContent> {
+    return this.bulkExportCustomObjectsService.getExportCustomObjectsFileUsingGET(
+      apiName,
+      exportId,
+      range,
+    )
+  }
+
+  @Get('bulk/v1/customobjects/:apiName/export/:exportId/status.json')
+  async getExportCustomObjectsStatusUsingGET(
+    @Param('apiName') apiName: string,
+    @Param('exportId') exportId: string,
+  ): Promise<ResponseOfExportResponse> {
+    return this.bulkExportCustomObjectsService.getExportCustomObjectsStatusUsingGET(
+      apiName,
+      exportId,
+    )
+  }
+}

@@ -1,0 +1,34 @@
+import {
+  Body,
+  Controller,
+  Headers,
+  HttpCode,
+  Param,
+  Post,
+} from '@nestjs/common'
+import { PersonsService } from './persons.service'
+
+import type { SyncPersonsRequest } from '../../data-ingestion-definitions/requests/sync-persons-request'
+
+@Controller()
+export class PersonsController {
+  constructor(private readonly personsService: PersonsService) {}
+
+  @Post('subscriptions/:munchkinId/persons')
+  @HttpCode(202)
+  async syncPersons(
+    @Param('munchkinId') munchkinId: string,
+    @Headers('X-Mkto-User-Token') xMktoUserToken: string,
+    @Body() body: SyncPersonsRequest,
+    @Headers('X-Correlation-Id') xCorrelationId?: string,
+    @Headers('X-Request-Source') xRequestSource?: string,
+  ): Promise<void> {
+    return this.personsService.syncPersons(
+      munchkinId,
+      xMktoUserToken,
+      body,
+      xCorrelationId,
+      xRequestSource,
+    )
+  }
+}

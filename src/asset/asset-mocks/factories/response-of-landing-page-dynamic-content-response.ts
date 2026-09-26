@@ -1,5 +1,5 @@
 import { faker } from '@faker-js/faker'
-import { mockRequestId } from '../request-id'
+import { mockRequestId } from '../../../mocks/request-id'
 import type { ResponseOfLandingPageDynamicContentResponse } from '../../asset-definitions/responses/response-of-landing-page-dynamic-content-response'
 import { makeLandingPageDynamicContentResponse } from './landing-page-dynamic-content-response'
 

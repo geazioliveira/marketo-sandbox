@@ -1,0 +1,119 @@
+import { Injectable } from '@nestjs/common'
+import { makeResponseOfCustomObject } from '../../lead-database-mocks/factories/response-of-custom-object'
+import { makeResponseOfCustomObjectType } from '../../lead-database-mocks/factories/response-of-custom-object-type'
+import { makeResponseOfCustomObjectTypeFieldDataTypes } from '../../lead-database-mocks/factories/response-of-custom-object-type-field-data-types'
+import { makeResponseOfObjectDependentAssets } from '../../lead-database-mocks/factories/response-of-object-dependent-assets'
+import { makeResponseOfObjectLinkableObject } from '../../lead-database-mocks/factories/response-of-object-linkable-object'
+import { makeResponseOfObjectMetaData } from '../../lead-database-mocks/factories/response-of-object-meta-data'
+
+import type { ResponseOfCustomObject } from '../../lead-database-definitions/responses/response-of-custom-object'
+import type { ResponseOfCustomObjectType } from '../../lead-database-definitions/responses/response-of-custom-object-type'
+import type { ResponseOfCustomObjectTypeFieldDataTypes } from '../../lead-database-definitions/responses/response-of-custom-object-type-field-data-types'
+import type { ResponseOfObjectDependentAssets } from '../../lead-database-definitions/responses/response-of-object-dependent-assets'
+import type { ResponseOfObjectLinkableObject } from '../../lead-database-definitions/responses/response-of-object-linkable-object'
+import type { ResponseOfObjectMetaData } from '../../lead-database-definitions/responses/response-of-object-meta-data'
+
+@Injectable()
+export class CustomObjectsService {
+  async listCustomObjectsUsingGET(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfObjectMetaData> {
+    return makeResponseOfObjectMetaData()
+  }
+
+  async getCustomObjectsUsingGET(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfCustomObject> {
+    return makeResponseOfCustomObject()
+  }
+
+  async syncCustomObjectsUsingPOST(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfCustomObject> {
+    return makeResponseOfCustomObject()
+  }
+
+  async deleteCustomObjectsUsingPOST(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfCustomObject> {
+    return makeResponseOfCustomObject()
+  }
+
+  async describeUsingGET_1(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfObjectMetaData> {
+    return makeResponseOfObjectMetaData()
+  }
+
+  async listCustomObjectTypesUsingGET(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfObjectMetaData> {
+    return makeResponseOfObjectMetaData()
+  }
+
+  async syncCustomObjectTypeUsingPOST(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfCustomObjectType> {
+    return makeResponseOfCustomObjectType()
+  }
+
+  async approveCustomObjectTypeUsingPOST(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfCustomObjectType> {
+    return makeResponseOfCustomObjectType()
+  }
+
+  async discardCustomObjectTypeUsingPOST(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfCustomObjectType> {
+    return makeResponseOfCustomObjectType()
+  }
+
+  async deleteCustomObjectTypeUsingPOST(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfCustomObjectType> {
+    return makeResponseOfCustomObjectType()
+  }
+
+  async describeCustomObjectTypeUsingGET(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfObjectMetaData> {
+    return makeResponseOfObjectMetaData()
+  }
+
+  async addCustomObjectTypeFieldsUsingPOST(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfCustomObjectType> {
+    return makeResponseOfCustomObjectType()
+  }
+
+  async deleteCustomObjectTypeFieldsUsingPOST(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfCustomObjectType> {
+    return makeResponseOfCustomObjectType()
+  }
+
+  async updateCustomObjectTypeFieldUsingPOST(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfCustomObjectType> {
+    return makeResponseOfCustomObjectType()
+  }
+
+  async getCustomObjectTypeFieldDataTypesUsingGET(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfCustomObjectTypeFieldDataTypes> {
+    return makeResponseOfCustomObjectTypeFieldDataTypes()
+  }
+
+  async getCustomObjectTypeLinkableObjectsUsingGET(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfObjectLinkableObject> {
+    return makeResponseOfObjectLinkableObject()
+  }
+
+  async getCustomObjectTypeDependentAssetsUsingGET(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfObjectDependentAssets> {
+    return makeResponseOfObjectDependentAssets()
+  }
+}

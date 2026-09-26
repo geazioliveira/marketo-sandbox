@@ -1,0 +1,18 @@
+export interface VisitorData {
+  /**
+   * Web page that hosts the form. Must be a fully formed URL
+   */
+  pageURL?: string
+  /**
+   * Web page query string. Contains one or more ampersand delimited key=value pairs
+   */
+  queryString?: string
+  /**
+   * Client IP address. IPv4 format. Used to populate inferred fields on upserted lead record.
+   */
+  leadClientIpAddress?: string
+  /**
+   * User agent of browser hosting the form
+   */
+  userAgentString?: string
+}

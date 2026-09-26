@@ -1,0 +1,40 @@
+import type { Reason } from './reason'
+
+export type NamedAccountListStatus =
+  'created' | 'updated' | 'deleted' | 'skipped' | 'added' | 'removed'
+
+export interface NamedAccountList {
+  /**
+   * Datetime when the named account list was created
+   */
+  createdAt?: string
+  /**
+   * Unique GUID of the custom object records
+   */
+  marketoGUID: string
+  /**
+   * Name of named account list
+   */
+  name?: string
+  /**
+   * List of reasons why an operation did not succeed. Reasons are only present in API responses and should not be submitted
+   */
+  reasons?: Array<Reason>
+  /**
+   * Integer indicating the sequence of the record in response. This value is correlated to the order of the records included in the request input. Seq should only be part of responses and should not be submitted.
+   */
+  seq: number
+  status?: NamedAccountListStatus
+  /**
+   * Type of named account list ("default" if created by user or API, "external" if managed by CRM-View)
+   */
+  type?: string
+  /**
+   * Whether the list is updateable (true if created by user or API, false if managed by CRM-View)
+   */
+  updateable?: boolean
+  /**
+   * Datetime when the named account list was most recently updated
+   */
+  updatedAt?: string
+}

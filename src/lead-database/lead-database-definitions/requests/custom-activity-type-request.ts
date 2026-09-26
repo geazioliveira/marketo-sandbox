@@ -1,0 +1,22 @@
+import type { CustomActivityTypeAttribute } from '../models/custom-activity-type-attribute'
+
+export interface CustomActivityTypeRequest {
+  apiName: string
+  description?: string
+  /**
+   * Human-readable name of the associated filter
+   */
+  filterName: string
+  /**
+   * Human-readable display name of the activity type
+   */
+  name: string
+  /**
+   * Primary attribute of the activity type
+   */
+  primaryAttribute: CustomActivityTypeAttribute
+  /**
+   * Human-readable name of the associated trigger
+   */
+  triggerName: string
+}

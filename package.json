@@ -1,13 +1,13 @@
 {
-  "name": "nest-typescript-starter",
+  "name": "marketo-sandbox",
   "version": "1.0.0",
-  "description": "Nest TypeScript starter repository",
+  "description": "Local mock of the Marketo Engage REST API, generated from Marketo's official Swagger documentation",
   "private": true,
   "license": "MIT",
   "scripts": {
     "build": "nest build",
-    "deploy": "nest deploy",
-    "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
+    "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\" \"scripts/**/*.{mjs,mts}\" \".claude/hooks/**/*.mjs\"",
+    "format:check": "prettier --check \"src/**/*.ts\" \"test/**/*.ts\" \"scripts/**/*.{mjs,mts}\" \".claude/hooks/**/*.mjs\"",
     "generate:definitions": "python3 scripts/generate-marketo-definitions.py",
     "check:definitions": "python3 scripts/generate-marketo-definitions.py --check",
     "generate:resources": "python3 scripts/generate-marketo-resources.py",
@@ -29,13 +29,12 @@
     "test:e2e": "vitest run --config ./vitest.config.e2e.ts",
     "gate": "node scripts/gate.mjs",
     "check:context": "node scripts/check-context.mjs",
-    "check": "npm run lint && npm run typecheck && npm test && npm run check:context && npm run build"
+    "check": "npm run lint && npm run format:check && npm run typecheck && npm test && npm run check:context && npm run build"
   },
   "dependencies": {
     "@faker-js/faker": "^10.6.0",
     "@nestjs/common": "^12.0.1",
     "@nestjs/core": "^12.0.1",
-    "@nestjs/observe": "^0.3.0",
     "@nestjs/platform-express": "^12.0.1",
     "@nestjs/swagger": "^12.0.2",
     "reflect-metadata": "^0.2.2",
@@ -43,7 +42,6 @@
   },
   "devDependencies": {
     "@nestjs/cli": "^12.0.0",
-    "@nestjs/mau": "^0.2.6",
     "@nestjs/schematics": "^12.0.0",
     "@nestjs/testing": "^12.0.1",
     "@types/express": "^5.0.0",

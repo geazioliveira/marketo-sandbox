@@ -1,0 +1,22 @@
+import type { Reason } from '../models/reason'
+
+export type ProgramMemberDataResponseStatus = 'created' | 'updated' | 'skipped'
+
+export interface ProgramMemberDataResponse {
+  /**
+   * Status of the operation performed on the record
+   */
+  status: ProgramMemberDataResponseStatus
+  /**
+   * List of reasons why an operation did not succeed. Reasons are only present in API responses and should not be submitted
+   */
+  reasons?: Array<Reason>
+  /**
+   * Id of the lead associated to the program member
+   */
+  leadId: number
+  /**
+   * Integer indicating the sequence of the record in response. This value is correlated to the order of the records included in the request input. Seq should only be part of responses and should not be submitted.
+   */
+  seq: number
+}

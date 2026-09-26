@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
-"""Generate TypeScript definition interfaces from the Marketo Swagger document."""
+"""Generate TypeScript definition interfaces from the Marketo Swagger documents."""
 
 from __future__ import annotations
 
 import argparse
 import json
-import re
 import sys
 from pathlib import Path
 from typing import Any
@@ -13,39 +12,20 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from marketo_codegen import (  # noqa: E402
-    ROOT,
+    Target,
+    add_target_arguments,
     check_output,
-    load_document,
+    definition_category as category,
+    definition_file as file_name,
+    pascal_case,
+    property_key as property_name,
+    reference_name,
+    resolve_targets,
     write_output,
 )
 
 
-OUTPUT = ROOT / "src" / "asset-definitions"
 CATEGORIES = ("models", "requests", "responses")
-
-
-def category(name: str) -> str:
-    if name.endswith("Request"):
-        return "requests"
-    if name.endswith("Response"):
-        return "responses"
-    return "models"
-
-
-def file_name(name: str) -> str:
-    return re.sub(
-        r"([a-z0-9])([A-Z])",
-        r"\1-\2",
-        re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1-\2", name),
-    ).lower()
-
-
-def reference_name(reference: str) -> str:
-    return reference.rsplit("/", maxsplit=1)[-1]
-
-
-def property_name(name: str) -> str:
-    return name if re.match(r"^[A-Za-z_$][A-Za-z0-9_$]*$", name) and name != "default" else json.dumps(name)
 
 
 def description_comment(description: str, indent: str = "") -> list[str]:
@@ -128,7 +108,7 @@ class TypeScriptGenerator:
         for property_name_value, property_schema in properties.items():
             type_name = self.type_name(property_schema, set())
             if "enum" in property_schema:
-                enum_name = f"{name}{property_name_value[:1].upper()}{property_name_value[1:]}"
+                enum_name = f"{name}{pascal_case(property_name_value)}"
                 inline_types.append(
                     f"export type {enum_name} = {' | '.join(literal(value) for value in property_schema['enum'])};"
                 )
@@ -158,22 +138,30 @@ class TypeScriptGenerator:
         return f'./{target_file}' if source_category == target_category else f'../{target_category}/{target_file}'
 
 
-def generated_files(definitions: dict[str, dict[str, Any]]) -> dict[Path, str]:
+def generated_files(target: Target, definitions: dict[str, dict[str, Any]]) -> dict[Path, str]:
     generator = TypeScriptGenerator(definitions)
     return {
-        OUTPUT / category(name) / f"{file_name(name)}.ts": generator.render(name, schema)
+        target.definitions / category(name) / f"{file_name(name)}.ts": generator.render(name, schema)
         for name, schema in definitions.items()
     }
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--check", action="store_true", help="fail if generated definitions are stale")
+    add_target_arguments(parser)
     arguments = parser.parse_args()
 
-    files = generated_files(load_document()["definitions"])
-    label = "TypeScript definitions"
-    return check_output(OUTPUT, files, label) if arguments.check else write_output(OUTPUT, files, label)
+    status = 0
+    for target in resolve_targets(arguments):
+        files = generated_files(target, target.schemas())
+        label = f"{target.key} TypeScript definitions"
+        status |= (
+            check_output(target.definitions, files, label)
+            if arguments.check
+            else write_output(target.definitions, files, label)
+        )
+    return status
 
 
 if __name__ == "__main__":

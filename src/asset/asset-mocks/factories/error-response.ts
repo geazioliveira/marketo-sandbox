@@ -1,4 +1,4 @@
-import { mockRequestId } from '../request-id'
+import { mockRequestId } from '../../../mocks/request-id'
 import type { ErrorResponse } from '../../asset-definitions/responses/error-response'
 
 export function makeErrorResponse(

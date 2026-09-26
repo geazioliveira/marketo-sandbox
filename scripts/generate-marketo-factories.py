@@ -12,20 +12,21 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from marketo_codegen import (  # noqa: E402
-    ROOT,
+    SHARED_MOCKS,
+    Target,
+    add_target_arguments,
     camel_case,
     check_output,
     definition_category,
     definition_file,
-    load_document,
+    property_key,
     quote,
     reference_name,
+    relative_import,
+    resolve_targets,
     write_output,
 )
 
-
-OUTPUT = ROOT / "src" / "asset-mocks"
-FACTORIES = OUTPUT / "factories"
 
 #: Marketo response envelopes must look like a successful call, not random noise.
 ENVELOPE_VALUES = {
@@ -64,14 +65,20 @@ def factory_name(name: str) -> str:
     return f"make{name[:1].upper()}{name[1:]}"
 
 
-def definition_import(name: str) -> str:
-    return f"../../asset-definitions/{definition_category(name)}/{definition_file(name)}"
-
-
 class FactoryGenerator:
-    def __init__(self, definitions: dict[str, dict[str, Any]]) -> None:
+    def __init__(self, target: Target, definitions: dict[str, dict[str, Any]]) -> None:
+        self.target = target
         self.definitions = definitions
         self.dependencies = {name: self._dependencies(schema) for name, schema in definitions.items()}
+
+    def definition_import(self, name: str) -> str:
+        return relative_import(
+            self.target.factories,
+            self.target.definitions / definition_category(name) / f"{definition_file(name)}.ts",
+        )
+
+    def shared_import(self, module: str) -> str:
+        return relative_import(self.target.factories, SHARED_MOCKS / f"{module}.ts")
 
     def _dependencies(self, schema: Any, acc: set[str] | None = None) -> set[str]:
         acc = acc if acc is not None else set()
@@ -143,7 +150,7 @@ class FactoryGenerator:
             for nested_name, nested_schema in properties.items():
                 nested_value = self.value(owner, nested_name, nested_schema, imports)
                 if nested_value is not None:
-                    members.append(f"{nested_name}: {nested_value}")
+                    members.append(f"{property_key(nested_name)}: {nested_value}")
             return "{ " + ", ".join(members) + " }"
 
         if schema_type == "boolean":
@@ -192,11 +199,11 @@ class FactoryGenerator:
             if property_name in ENVELOPE_VALUES and "$ref" not in property_schema:
                 expression = ENVELOPE_VALUES[property_name]
                 uses_envelope = uses_envelope or expression == "mockRequestId()"
-                members.append(f"{property_name}: {expression}")
+                members.append(f"{property_key(property_name)}: {expression}")
                 continue
             expression = self.value(name, property_name, property_schema, imports)
             if expression is not None:
-                members.append(f"{property_name}: {expression}")
+                members.append(f"{property_key(property_name)}: {expression}")
 
         imports.discard(name)
         uses_faker = any("faker." in member for member in members)
@@ -205,8 +212,8 @@ class FactoryGenerator:
         if uses_faker:
             lines.append("import { faker } from '@faker-js/faker'")
         if uses_envelope:
-            lines.append("import { mockRequestId } from '../request-id'")
-        lines.append(f"import type {{ {name} }} from '{definition_import(name)}'")
+            lines.append(f"import {{ mockRequestId }} from '{self.shared_import('request-id')}'")
+        lines.append(f"import type {{ {name} }} from '{self.definition_import(name)}'")
         for dependency in sorted(imports):
             lines.append(
                 f"import {{ {factory_name(dependency)} }} from './{definition_file(dependency)}'",
@@ -276,35 +283,49 @@ def render_index(definitions: dict[str, dict[str, Any]]) -> str:
     return "\n".join(lines) + "\n"
 
 
-def generated_files(document: dict[str, Any]) -> dict[Path, str]:
-    definitions = document["definitions"]
-    generator = FactoryGenerator(definitions)
+def shared_files() -> dict[Path, str]:
+    """Seeding and request ids are area-agnostic, so they live in one shared module."""
+    return {
+        SHARED_MOCKS / "request-id.ts": render_request_id(),
+        SHARED_MOCKS / "seed.ts": render_seed(),
+        SHARED_MOCKS / "index.ts": "export * from './request-id'\nexport * from './seed'\n",
+    }
+
+
+def generated_files(target: Target) -> dict[Path, str]:
+    definitions = target.schemas()
+    generator = FactoryGenerator(target, definitions)
     files: dict[Path, str] = {
-        FACTORIES / f"{definition_file(name)}.ts": generator.render(name, schema)
+        target.factories / f"{definition_file(name)}.ts": generator.render(name, schema)
         for name, schema in definitions.items()
     }
-    files[FACTORIES / "index.ts"] = render_index(definitions)
-    files[OUTPUT / "request-id.ts"] = render_request_id()
-    files[OUTPUT / "seed.ts"] = render_seed()
-    files[OUTPUT / "index.ts"] = "\n".join(
-        [
-            "export * from './factories'",
-            "export * from './request-id'",
-            "export * from './seed'",
-            "",
-        ],
-    )
+    files[target.factories / "index.ts"] = render_index(definitions)
+    files[target.mocks / "index.ts"] = "export * from './factories'\n"
     return files
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--check", action="store_true", help="fail if generated factories are stale")
+    add_target_arguments(parser)
     arguments = parser.parse_args()
 
-    files = generated_files(load_document())
-    label = "mock factories"
-    return check_output(OUTPUT, files, label) if arguments.check else write_output(OUTPUT, files, label)
+    shared = shared_files()
+    status = (
+        check_output(SHARED_MOCKS, shared, "shared mock helpers")
+        if arguments.check
+        else write_output(SHARED_MOCKS, shared, "shared mock helpers")
+    )
+
+    for target in resolve_targets(arguments):
+        files = generated_files(target)
+        label = f"{target.key} mock factories"
+        status |= (
+            check_output(target.mocks, files, label)
+            if arguments.check
+            else write_output(target.mocks, files, label)
+        )
+    return status
 
 
 if __name__ == "__main__":

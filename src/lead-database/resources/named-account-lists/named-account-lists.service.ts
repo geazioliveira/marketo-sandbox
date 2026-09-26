@@ -1,0 +1,45 @@
+import { Injectable } from '@nestjs/common'
+import { makeResponseOfNamedAccount } from '../../lead-database-mocks/factories/response-of-named-account'
+import { makeResponseOfNamedAccountList } from '../../lead-database-mocks/factories/response-of-named-account-list'
+
+import type { ResponseOfNamedAccount } from '../../lead-database-definitions/responses/response-of-named-account'
+import type { ResponseOfNamedAccountList } from '../../lead-database-definitions/responses/response-of-named-account-list'
+
+@Injectable()
+export class NamedAccountListsService {
+  async getNamedAccountListMembersUsingGET(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfNamedAccount> {
+    return makeResponseOfNamedAccount()
+  }
+
+  async addNamedAccountListMembersUsingPOST(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfNamedAccount> {
+    return makeResponseOfNamedAccount()
+  }
+
+  async removeNamedAccountListMembersUsingPOST(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfNamedAccount> {
+    return makeResponseOfNamedAccount()
+  }
+
+  async getNamedAccountListsUsingGET(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfNamedAccountList> {
+    return makeResponseOfNamedAccountList()
+  }
+
+  async syncNamedAccountListsUsingPOST(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfNamedAccountList> {
+    return makeResponseOfNamedAccountList()
+  }
+
+  async deleteNamedAccountListsUsingPOST(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfNamedAccountList> {
+    return makeResponseOfNamedAccountList()
+  }
+}

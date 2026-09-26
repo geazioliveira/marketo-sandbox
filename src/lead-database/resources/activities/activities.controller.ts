@@ -1,0 +1,199 @@
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  Param,
+  Post,
+  Query,
+} from '@nestjs/common'
+import { ActivitiesService } from './activities.service'
+
+import type { CustomActivityRequest } from '../../lead-database-definitions/requests/custom-activity-request'
+import type { CustomActivityTypeAttributeRequest } from '../../lead-database-definitions/requests/custom-activity-type-attribute-request'
+import type { CustomActivityTypeRequest } from '../../lead-database-definitions/requests/custom-activity-type-request'
+import type { ResponseOfActivity } from '../../lead-database-definitions/responses/response-of-activity'
+import type { ResponseOfActivityType } from '../../lead-database-definitions/responses/response-of-activity-type'
+import type { ResponseOfCustomActivity } from '../../lead-database-definitions/responses/response-of-custom-activity'
+import type { ResponseOfCustomActivityType } from '../../lead-database-definitions/responses/response-of-custom-activity-type'
+import type { ResponseOfLeadChange } from '../../lead-database-definitions/responses/response-of-lead-change'
+import type { ResponseOfVoid } from '../../lead-database-definitions/responses/response-of-void'
+
+@Controller()
+export class ActivitiesController {
+  constructor(private readonly activitiesService: ActivitiesService) {}
+
+  @Get('rest/v1/activities.json')
+  async getLeadActivitiesUsingGET(
+    @Query('nextPageToken') nextPageToken: string,
+    @Query('activityTypeIds') activityTypeIds: Array<number>,
+    @Query('assetIds') assetIds?: Array<number>,
+    @Query('listId') listId?: number,
+    @Query('leadIds') leadIds?: Array<number>,
+    @Query('batchSize') batchSize?: number,
+  ): Promise<ResponseOfActivity> {
+    return this.activitiesService.getLeadActivitiesUsingGET(
+      nextPageToken,
+      activityTypeIds,
+      assetIds,
+      listId,
+      leadIds,
+      batchSize,
+    )
+  }
+
+  @Get('rest/v1/activities/deletedleads.json')
+  async getDeletedLeadsUsingGET(
+    @Query('nextPageToken') nextPageToken: string,
+    @Query('batchSize') batchSize?: number,
+  ): Promise<ResponseOfActivity> {
+    return this.activitiesService.getDeletedLeadsUsingGET(
+      nextPageToken,
+      batchSize,
+    )
+  }
+
+  @Post('rest/v1/activities/external.json')
+  @HttpCode(200)
+  async addCustomActivityUsingPOST(
+    @Body() customActivityRequest: CustomActivityRequest,
+  ): Promise<ResponseOfCustomActivity> {
+    return this.activitiesService.addCustomActivityUsingPOST(
+      customActivityRequest,
+    )
+  }
+
+  @Post('rest/v1/activities/external/type.json')
+  @HttpCode(200)
+  async createCustomActivityTypeUsingPOST(
+    @Body() customActivityTypeRequest: CustomActivityTypeRequest,
+  ): Promise<ResponseOfCustomActivityType> {
+    return this.activitiesService.createCustomActivityTypeUsingPOST(
+      customActivityTypeRequest,
+    )
+  }
+
+  @Post('rest/v1/activities/external/type/:apiName.json')
+  @HttpCode(200)
+  async updateCustomActivityTypeUsingPOST(
+    @Param('apiName') apiName: string,
+    @Body() customActivityTypeRequest: CustomActivityTypeRequest,
+  ): Promise<ResponseOfCustomActivityType> {
+    return this.activitiesService.updateCustomActivityTypeUsingPOST(
+      apiName,
+      customActivityTypeRequest,
+    )
+  }
+
+  @Post('rest/v1/activities/external/type/:apiName/approve.json')
+  @HttpCode(200)
+  async approveCustomActivityTypeUsingPOST(
+    @Param('apiName') apiName: string,
+  ): Promise<ResponseOfCustomActivityType> {
+    return this.activitiesService.approveCustomActivityTypeUsingPOST(apiName)
+  }
+
+  @Post('rest/v1/activities/external/type/:apiName/attributes/create.json')
+  @HttpCode(200)
+  async createCustomActivityTypeAttributesUsingPOST(
+    @Param('apiName') apiName: string,
+    @Body()
+    customActivityTypeAttributeRequest: CustomActivityTypeAttributeRequest,
+  ): Promise<ResponseOfCustomActivityType> {
+    return this.activitiesService.createCustomActivityTypeAttributesUsingPOST(
+      apiName,
+      customActivityTypeAttributeRequest,
+    )
+  }
+
+  @Post('rest/v1/activities/external/type/:apiName/attributes/delete.json')
+  @HttpCode(200)
+  async deleteCustomActivityTypeAttributesUsingPOST(
+    @Param('apiName') apiName: string,
+    @Body()
+    customActivityTypeAttributeRequest: CustomActivityTypeAttributeRequest,
+  ): Promise<ResponseOfCustomActivityType> {
+    return this.activitiesService.deleteCustomActivityTypeAttributesUsingPOST(
+      apiName,
+      customActivityTypeAttributeRequest,
+    )
+  }
+
+  @Post('rest/v1/activities/external/type/:apiName/attributes/update.json')
+  @HttpCode(200)
+  async updateCustomActivityTypeAttributesUsingPOST(
+    @Param('apiName') apiName: string,
+    @Body()
+    customActivityTypeAttributeRequest: CustomActivityTypeAttributeRequest,
+  ): Promise<ResponseOfCustomActivityType> {
+    return this.activitiesService.updateCustomActivityTypeAttributesUsingPOST(
+      apiName,
+      customActivityTypeAttributeRequest,
+    )
+  }
+
+  @Post('rest/v1/activities/external/type/:apiName/delete.json')
+  @HttpCode(200)
+  async deleteCustomActivityTypeUsingPOST(
+    @Param('apiName') apiName: string,
+  ): Promise<ResponseOfCustomActivityType> {
+    return this.activitiesService.deleteCustomActivityTypeUsingPOST(apiName)
+  }
+
+  @Get('rest/v1/activities/external/type/:apiName/describe.json')
+  async describeCustomActivityTypeUsingGET(
+    @Param('apiName') apiName: string,
+    @Query('draft') draft?: boolean,
+  ): Promise<ResponseOfCustomActivityType> {
+    return this.activitiesService.describeCustomActivityTypeUsingGET(
+      apiName,
+      draft,
+    )
+  }
+
+  @Post('rest/v1/activities/external/type/:apiName/discardDraft.json')
+  @HttpCode(200)
+  async discardDraftofCustomActivityTypeUsingPOST(
+    @Param('apiName') apiName: string,
+  ): Promise<ResponseOfCustomActivityType> {
+    return this.activitiesService.discardDraftofCustomActivityTypeUsingPOST(
+      apiName,
+    )
+  }
+
+  @Get('rest/v1/activities/external/types.json')
+  async getCustomActivityTypeUsingGET(): Promise<ResponseOfCustomActivityType> {
+    return this.activitiesService.getCustomActivityTypeUsingGET()
+  }
+
+  @Get('rest/v1/activities/leadchanges.json')
+  async getLeadChangesUsingGET(
+    @Query('nextPageToken') nextPageToken: string,
+    @Query('fields') fields: Array<string>,
+    @Query('listId') listId?: number,
+    @Query('leadIds') leadIds?: Array<number>,
+    @Query('batchSize') batchSize?: number,
+  ): Promise<ResponseOfLeadChange> {
+    return this.activitiesService.getLeadChangesUsingGET(
+      nextPageToken,
+      fields,
+      listId,
+      leadIds,
+      batchSize,
+    )
+  }
+
+  @Get('rest/v1/activities/pagingtoken.json')
+  async getActivitiesPagingTokenUsingGET(
+    @Query('sinceDatetime') sinceDatetime: string,
+  ): Promise<ResponseOfVoid> {
+    return this.activitiesService.getActivitiesPagingTokenUsingGET(
+      sinceDatetime,
+    )
+  }
+
+  @Get('rest/v1/activities/types.json')
+  async getAllActivityTypesUsingGET(): Promise<ResponseOfActivityType> {
+    return this.activitiesService.getAllActivityTypesUsingGET()
+  }
+}

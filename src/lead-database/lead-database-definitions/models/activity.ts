@@ -1,0 +1,40 @@
+import type { Attribute } from './attribute'
+
+export interface Activity {
+  /**
+   * Datetime of the activity
+   */
+  activityDate: string
+  /**
+   * Id of the activity type
+   */
+  activityTypeId: number
+  /**
+   * List of secondary attributes
+   */
+  attributes: Array<Attribute>
+  /**
+   * Id of the associated Smart Campaign, if applicable
+   */
+  campaignId?: number
+  /**
+   * Integer id of the activity. This value could exceed Int.MAX. For instances which have been migrated to Activity Service, this field may not be present, and should not be treated as unique.
+   */
+  id: number
+  /**
+   * Id of the lead associated to the activity
+   */
+  leadId: number
+  /**
+   * Unique id of the activity (128 character string)
+   */
+  marketoGUID?: string
+  /**
+   * Value of the primary attribute
+   */
+  primaryAttributeValue?: string
+  /**
+   * Id of the primary attribute field
+   */
+  primaryAttributeValueId?: number
+}

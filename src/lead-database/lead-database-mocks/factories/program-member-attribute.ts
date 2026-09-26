@@ -1,0 +1,15 @@
+import { faker } from '@faker-js/faker'
+import type { ProgramMemberAttribute } from '../../lead-database-definitions/models/program-member-attribute'
+import { makeLeadAttribute2Fields } from './lead-attribute2-fields'
+
+export function makeProgramMemberAttribute(
+  overrides: Partial<ProgramMemberAttribute> = {},
+): ProgramMemberAttribute {
+  return {
+    name: faker.lorem.words({ min: 2, max: 3 }),
+    fields: faker.helpers.multiple(() => makeLeadAttribute2Fields(), {
+      count: { min: 1, max: 3 },
+    }),
+    ...overrides,
+  }
+}
