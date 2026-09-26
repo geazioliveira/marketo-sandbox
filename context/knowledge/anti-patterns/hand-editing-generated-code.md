@@ -6,7 +6,7 @@ Editar à mão um arquivo que um gerador emite separa o que está commitado do q
 
 ## Problema
 
-- **A regra já estava escrita.** Desde `01ee283`, o README manda nunca editar à mão as pastas geradas e regenerá-las (`01ee283:README.md:60-61`; hoje `README.md:71-72`). Nenhum arquivo gerado diz que é gerado: não há cabeçalho, e a regra só existe no README. Prosa não recusa nada.
+- **A regra já estava escrita.** Desde `01ee283`, o README manda nunca editar à mão as pastas geradas e regenerá-las (`01ee283:README.md:60-61`; hoje `README.md:61-62`). Nenhum arquivo gerado diz que é gerado: não há cabeçalho, e a regra só existe no README. Prosa não recusa nada.
 - **`5cc5e09` editou a saída do gerador de resources.** A mensagem fala só de exportar os services. O commit também:
   - trocou o prefixo dos imports dos 23 controllers, de `../../../asset-definitions` para `../../asset-definitions`;
   - trocou os stubs `NotImplementedException` dos 23 services por `return makeX()`, com imports novos de `../../asset-definitions/*` e `../../asset-mocks/factories/*`. Antes, os services só importavam `@nestjs/common`.

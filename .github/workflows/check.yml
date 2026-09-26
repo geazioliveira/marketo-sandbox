@@ -2,10 +2,10 @@
 #
 # One job, so the required check keeps its name (`Qualidade / check`, pinned in
 # scripts/loop-sections.mjs as requiredChecks). `npm run check` is what a
-# person runs before the PR: lint, typecheck, unit tests, check:context and the
-# build, in that order. The e2e is a step of its own, because it boots the app.
-# Should it fail on a clean runner, it leaves this job as a known failure and
-# the fix goes to #9 (the owner's answer 1 on #3).
+# person runs before the PR: lint, format:check, typecheck, unit tests,
+# check:context and the build, in that order. The e2e is a step of its own,
+# because it boots the app. It needs no environment of its own: since #9 the
+# app sends no telemetry.
 #
 # Still left out: check:all, and with it Python. The generators still write to
 # the old layout, so it cannot pass today (#7).
@@ -50,10 +50,6 @@ jobs:
       - run: npm ci
       - run: npm run check
       - name: e2e
-        env:
-          # ObserveModule sends telemetry by default; #9 tracks making it
-          # opt-in. A closed loopback port keeps the runner from calling out.
-          OBSERVE_ENDPOINT: http://127.0.0.1:9
         run: npm run test:e2e
       # A step that rewrote a tracked file, or left a file that is not ignored,
       # passes on its own. `git diff` sees only tracked files, so read the status.

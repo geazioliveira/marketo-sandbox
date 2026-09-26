@@ -7,7 +7,7 @@ Uma rota literal registrada depois de uma rota com parâmetro que também casa c
 ## Problema
 
 - **O gerador emite as rotas na ordem do Swagger.** `scripts/generate-marketo-resources.py:340-343` percorre os caminhos na ordem do documento e agrupa as operações por tag. Nada põe os segmentos literais antes dos segmentos com parâmetro (#8).
-- **11 rotas literais vêm depois de uma rota `:id` que casa com elas.** A varredura da #4 usou o `match()` do path-to-regexp 8.4.2, a versão travada no lockfile (`package-lock.json:4574-4575`). Achou as 11, todas dentro do mesmo controller:
+- **11 rotas literais vêm depois de uma rota `:id` que casa com elas.** A varredura da #4 usou o `match()` do path-to-regexp 8.4.2, a versão travada no lockfile (`package-lock.json:3996-3997`). Achou as 11, todas dentro do mesmo controller:
 
   | Controller, em `src/asset/resources/` | Rota com parâmetro (linha) | Rotas literais depois dela (linha) |
   | --- | --- | --- |

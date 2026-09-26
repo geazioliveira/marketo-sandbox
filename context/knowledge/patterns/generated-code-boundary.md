@@ -6,7 +6,7 @@ Em cada área de `src/`, três pastas são saída de gerador, e `src/mocks/` tam
 
 ## Problema
 
-- O README diz para nunca editar essas pastas à mão (`README.md:71-72`), mas nada nos arquivos diz que eles são gerados: não há cabeçalho de "gerado, não edite". Pôr um é parte da correção planejada na #7.
+- O README diz para nunca editar essas pastas à mão (`README.md:61-62`), mas nada nos arquivos diz que eles são gerados: não há cabeçalho de "gerado, não edite". Pôr um é parte da correção planejada na #7.
 - Antes do loop, a fronteira foi cruzada duas vezes:
   - o `e7a0bb6` moveu as 255 definições para `src/asset/asset-definitions/` sem mudar os geradores ([mover as pastas geradas sem o gerador](../anti-patterns/moving-generated-folders-without-the-generator.md));
   - o `5cc5e09` mudou os 69 arquivos de `src/asset/resources/` e deixou em 46 deles um prefixo de import que nenhuma versão do gerador emitia ([editar código gerado à mão](../anti-patterns/hand-editing-generated-code.md)).
@@ -40,14 +40,14 @@ As cinco áreas, com os arquivos medidos na #6:
 
 - Os arquivos de cada pasta são os que o gerador lista em `generated_files` ou em `files()` (`scripts/generate-marketo-definitions.py:141-146`, `scripts/generate-marketo-resources.py:340-356`, `scripts/generate-marketo-factories.py:286-304`).
 - `seed.ts` e `request-id.ts` também são gerados (`scripts/generate-marketo-factories.py:234-291`). Mudar o seed é mudar o gerador.
-- O resto de `src/` é escrito à mão: `src/main.ts`, `src/app.module.ts`, `src/app.controller.ts`, `src/app.controller.spec.ts`, `src/app.service.ts` e os cinco `src/<área>/<área>.module.ts`, que só importam o `<Área>ResourcesModule` (`src/identity/identity.module.ts:1-7`). Nenhum gerador os emite.
+- O resto de `src/` é escrito à mão: `src/main.ts`, `src/listen-address.ts`, `src/app.module.ts` e os cinco `src/<área>/<área>.module.ts`, que só importam o `<Área>ResourcesModule` (`src/identity/identity.module.ts:1-7`). Nenhum gerador os emite.
 
 ### A regra
 
 - **Nada nas pastas geradas muda à mão.** Nem um import, nem um arquivo novo, nem a formatação. Uma mudança ali sai do gerador ou do Swagger ([gerar e conferir](generate-and-check.md)).
 - **Uma pasta gerada só muda de lugar junto com o gerador**, na mesma PR, com o `check:*` provando a saída.
 - **Um arquivo gerado se reconhece pela pasta.** Enquanto a #7 não põe o cabeçalho, as tabelas acima são a única marca.
-- **Uma área nova entra pelo registro.** Um `Target` em `TARGETS`, o `src/<área>/<área>.module.ts` escrito à mão e uma linha no `AppModule` (`README.md:101-103`). As tabelas acima mudam na mesma PR.
+- **Uma área nova entra pelo registro.** Um `Target` em `TARGETS`, o `src/<área>/<área>.module.ts` escrito à mão e uma linha no `AppModule` (`README.md:91-93`). As tabelas acima mudam na mesma PR.
 - **A revisão recusa** um diff numa pasta gerada sem a mudança de gerador ou de Swagger que o explica e sem a saída do `check:*` na Verificação. Uma PR que toca uma delas é HIGH ([revisão classificada por risco](risk-classified-review.md)).
 
 ### O comportamento fica ao lado

@@ -68,14 +68,14 @@
   | `src/user-management` | 12 | 4 | 14 |
   | `src/mocks` | | | 3 |
 
-- **Ninguém edita a saída à mão.** O [README](../../README.md#mock-marketo-api) diz que as pastas geradas de cada área nunca se editam à mão: regenera-se (`README.md:71-72`). Ele indica `npm run check:all` para o CI (`README.md:90-91`) e diz como registrar um documento novo (`README.md:101-103`).
+- **Ninguém edita a saída à mão.** O [README](../../README.md#mock-marketo-api) diz que as pastas geradas de cada área nunca se editam à mão: regenera-se (`README.md:61-62`). Ele indica `npm run check:all` para o CI (`README.md:80-81`) e diz como registrar um documento novo (`README.md:91-93`).
 
 ## Racional
 
 - **Fonte única contra deriva.** O project intent pede um único serviço, gerado a partir do Swagger oficial, em que toda rota documentada existe e responde no formato documentado. Um simulador à mão se afasta da API, como aconteceu no lite-campaign.
 - **Uma área por documento.** Os cinco documentos repetem nomes. Medido na #6: 7 schemas aparecem em mais de um (`Company`, `CustomObject`, `Error`, `ErrorResponse`, `Lead`, `ListOperationRequest` e `ProgramMember`), e 4 tags também (`Static Lists`, `Custom Objects`, `Companies` e `Program Members`). Numa pasta só, dois arquivos teriam o mesmo nome, e as áreas separadas guardam cada um.
-- **Um registro, não cinco geradores.** Um alvo novo é uma linha em `TARGETS`, e os três geradores o pegam (`README.md:101-103`).
-- **Commitar a saída.** O `--check` pressupõe isso: ele compara os arquivos da árvore com o que o gerador emite (`scripts/marketo_codegen.py:265-270`), e o README o indica para o CI (`README.md:90-91`), onde a árvore é o commit. Commitar também deixa o mock compilar e rodar sem Python (inferido; confirmar), e deixa a revisão ver como diff o efeito de uma mudança no Swagger ou num gerador (inferido; confirmar).
+- **Um registro, não cinco geradores.** Um alvo novo é uma linha em `TARGETS`, e os três geradores o pegam (`README.md:91-93`).
+- **Commitar a saída.** O `--check` pressupõe isso: ele compara os arquivos da árvore com o que o gerador emite (`scripts/marketo_codegen.py:265-270`), e o README o indica para o CI (`README.md:80-81`), onde a árvore é o commit. Commitar também deixa o mock compilar e rodar sem Python (inferido; confirmar), e deixa a revisão ver como diff o efeito de uma mudança no Swagger ou num gerador (inferido; confirmar).
 - **`--check` em vez de confiança.** A saída pode se afastar da fonte por uma edição à mão ou por um gerador mudado sem regenerar. O `--check` mostra isso num comando.
 - **Geradores próprios.** A saída segue uma forma que é deste projeto: um módulo Nest por tag e factories faker. Um gerador genérico não a emitiria (inferido; confirmar).
 - **A cópia de assets fica.** Trocá-la pelo blob atual da Adobe mudaria só espaços, sem mudar nenhum arquivo gerado, e trocaria o sha256 que o lite-campaign compara com o dele.
@@ -133,4 +133,5 @@ O histórico não registra alternativas para a decisão de `0c8e760`. As linhas 
 
 - **Criado**: 2026-09-25 (Fase: Build), registro retroativo de `0c8e760`..`fb4a804` (#4)
 - **Status**: Accepted
+- **Atualizado**: 2026-09-26 (Fase: Learn), as citações do `README.md` seguiram as linhas novas depois que a #9 tirou o boilerplate do starter (#9)
 - **Atualizado**: 2026-09-26 (Fase: Learn), a fonte passou a ser um documento por área, com os cinco alvos de `TARGETS`, a origem e o sha256 de cada documento, o suporte a OpenAPI 3 e o `check:all` passando (#6)

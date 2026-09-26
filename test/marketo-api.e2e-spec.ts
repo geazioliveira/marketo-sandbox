@@ -123,11 +123,11 @@ describe('Marketo API mock (e2e)', () => {
       expect(duplicates(registeredRoutes(app))).toEqual([])
     })
 
-    it('registers nothing outside the documents but the starter root (#9)', () => {
+    it('registers nothing outside the documents', () => {
       const known = new Set(documented)
       expect(
         registeredRoutes(app).filter((route) => !known.has(route)),
-      ).toEqual(['GET /'])
+      ).toEqual([])
     })
   })
 

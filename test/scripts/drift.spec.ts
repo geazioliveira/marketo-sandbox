@@ -318,17 +318,6 @@ describe('docs against the audit of main and the quality check', () => {
     expect(stated).toEqual(chain)
   })
 
-  it.each([workflowGuide, adr0002])(
-    '%s points the e2e telemetry where check.yml does',
-    (file) => {
-      const endpoint = /^\s*OBSERVE_ENDPOINT:\s*(\S+)\s*$/m.exec(
-        read('.github/workflows/check.yml'),
-      )?.[1]
-      expect(endpoint).toBe('http://127.0.0.1:9')
-      expect(read(file)).toContain(`OBSERVE_ENDPOINT=${endpoint}`)
-    },
-  )
-
   it('no doc says the audit reads a branch’s intent or Learn commits', () => {
     // The audit reads main's first-parent line only: a merged PR is one
     // commit there, and the branch's own commits are the gate's to judge.

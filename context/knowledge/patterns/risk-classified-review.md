@@ -36,7 +36,7 @@ Uma mudança é HIGH quando toca pelo menos um destes:
   - os forms e o template de PR (`.github/ISSUE_TEMPLATE/`, `.github/pull_request_template.md`);
   - os hooks do Claude Code, quando chegarem (#5);
   - os testes de tudo isso, em `test/scripts/` (inferido; confirmar).
-- **Tudo o que o lite-campaign consome.** As rotas e os métodos, os status HTTP, o formato das respostas, o seed e a data de referência (`MARKETO_MOCK_SEED`, `MARKETO_MOCK_REF_DATE`), a porta (`PORT`, 3000 por padrão, `src/main.ts:21`) e, quando existirem, a release com tag e o comando que a sobe ([project intent](../../intent/project-intent.md)).
+- **Tudo o que o lite-campaign consome.** As rotas e os métodos, os status HTTP, o formato das respostas, o seed e a data de referência (`MARKETO_MOCK_SEED`, `MARKETO_MOCK_REF_DATE`), o endereço (`HOST` e `PORT`, `127.0.0.1:3000` por padrão, `src/listen-address.ts:2-3,19-21`) e, quando existirem, a release com tag e o comando que a sobe ([project intent](../../intent/project-intent.md)).
 
 As issues já seguem isso. A #6 e a #7 são HIGH porque mexem nos geradores e em toda a saída gerada, e a #8, porque muda o roteamento que os consumidores usam. A #2, a #3, a #5, a #12 e a #13, do harness, também são HIGH.
 
