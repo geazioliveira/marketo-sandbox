@@ -35,7 +35,7 @@ Mover a pasta de saída de um gerador sem mudar o gerador deixa dois layouts, o 
 - **Um layout novo é uma mudança no gerador.** Mude a constante de saída e os imports relativos num commit, rode `npm run generate:all` e commite a saída regenerada no seguinte. O `npm run check:all` sai com 0 no commit da saída ([Gerar e conferir](../patterns/generate-and-check.md)).
 - **Um movimento é um commit só, sem mudar o conteúdo.** O git não registra renomeações: ele as deduz por similaridade na hora do diff. Em `e7a0bb6`, a reformatação no mesmo commit deixou os 154 renomeados com 50% a 90% de similaridade, e os 101 apagados em `a19d9d3` voltaram como arquivos novos. A reformatação vai em outro commit ([Mensagem de commit que diz menos do que o commit faz](commit-message-understating-its-content.md)).
 - **Todo commit compila.** Nenhum commit do meio deixa um import apontando para uma pasta que não existe. Quando a saída muda de lugar, o commit da saída leva junto a linha escrita à mão que a importa, e a mensagem diz isso: na #6, o import do seed em `src/main.ts` ([Gerar e conferir](../patterns/generate-and-check.md)).
-- **Uma fonte só para os caminhos.** Desde a #6, a saída e os imports relativos saem do registro de alvos (`scripts/marketo_codegen.py:24-70`, `:153-156`), e mover uma pasta é mudar um valor ([A fronteira do código gerado](../patterns/generated-code-boundary.md)).
+- **Uma fonte só para os caminhos.** Desde a #6, a saída e os imports relativos saem do registro de alvos (`scripts/marketo_codegen.py:25-71`, `:154-157`), e mover uma pasta é mudar um valor ([A fronteira do código gerado](../patterns/generated-code-boundary.md)).
 
 A [ADR 0004](../../decisions/0004-swagger-as-single-source-with-committed-generated-code.md) registra que o código gerado é commitado e que o Swagger é a fonte única.
 
@@ -57,4 +57,4 @@ OUTPUT = ROOT / "src" / "asset-mocks"
 
 - **Criado**: 2026-09-25 (Fase: Build), registro retroativo de `0c8e760`..`fb4a804` (#4)
 - **Status**: Active
-- **Atualizado**: 2026-09-26 (Fase: Learn), a #6 levou os geradores ao layout das áreas, com um registro de alvos, e o texto passou a descrever o estado de antes dela no passado (#6)
+- **Atualizado**: 2026-09-26 (Fase: Build), as citações dos arquivos gerados e dos geradores seguiram as linhas novas, depois do cabeçalho de gerado (#7)

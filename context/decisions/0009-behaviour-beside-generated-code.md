@@ -4,14 +4,14 @@
 
 - **O que falta construir.** O [project intent](../intent/project-intent.md) quer um mock que, além das rotas, reproduza o comportamento que um cliente precisa provar. Um critério de aceite pede espaços isolados, autenticação, modelo com estado, log de requisições, falhas roteirizadas e validação estrita, como pede a Track A do lite-campaign (R1–R8). A decisão em aberto "[Onde vive o comportamento com estado](../intent/project-intent.md#decisões-em-aberto)" dizia "ao lado do código gerado, nunca dentro dele" e mandava registrar a decisão na #4. Agora ela aponta para esta ADR.
 - **Hoje não há comportamento.**
-  - Os 220 métodos de serviço ignoram os argumentos (`..._arguments: unknown[]`) e devolvem uma factory sem override (`src/asset/resources/snippets/snippets.service.ts:14-18`).
-  - O controller passa os argumentos ao serviço (`src/asset/resources/snippets/snippets.controller.ts:30`), sem pipe: `@Param('id') id: number` não tem `ParseIntPipe` (`:27`).
+  - Os 220 métodos de serviço ignoram os argumentos (`..._arguments: unknown[]`) e devolvem uma factory sem override (`src/asset/resources/snippets/snippets.service.ts:17-21`).
+  - O controller passa os argumentos ao serviço (`src/asset/resources/snippets/snippets.controller.ts:33`), sem pipe: `@Param('id') id: number` não tem `ParseIntPipe` (`:30`).
   - Nenhuma biblioteca de validação é usada ([ADR 0006](0006-dtos-as-typescript-interfaces.md)).
-- **Regenerar apaga a pasta de saída.** `write_output` roda `shutil.rmtree(output)` antes de escrever (`scripts/marketo_codegen.py:242-244`), e `check_output` acusa como inesperado todo `*.ts` da pasta de saída que o gerador não emitiu (`:271`). Um arquivo escrito à mão em `src/asset/resources/` some no próximo `npm run generate:resources` e reprova o `check:resources`.
+- **Regenerar apaga a pasta de saída.** `write_output` roda `shutil.rmtree(output)` antes de escrever (`scripts/marketo_codegen.py:313-315`), e `check_output` acusa como inesperado todo `*.ts` da pasta de saída que o gerador não emitiu (`:343`). Um arquivo escrito à mão em `src/asset/resources/` some no próximo `npm run generate:resources` e reprova o `check:resources`.
 - **O histórico já mostra o custo de misturar.** O `5cc5e09` mudou a saída gerada sem o gerador: nesse commit o gerador de resources nem rodava, porque o `marketo_codegen.py` que ele importa só chegou no `0ef242d`, e ele emitiu `../../../`, onde os arquivos commitados têm `../../`, até a #6 (`610e101:scripts/generate-marketo-resources.py:59`, `:63`). O `e7a0bb6` moveu as definições para `src/asset/` sem mudar o gerador, e o `b91681a` commitou as factories fora da pasta que o gerador delas escreve. Por isso o `npm run check:all` não passava antes da #6 (#7).
 - **Os pontos de encaixe que já existem.**
   - `src/asset/asset.module.ts` fica fora de toda pasta que um gerador escreve e importa o `AssetResourcesModule` (`src/asset/asset.module.ts:1-7`). Ele veio no `0c8e760`, e nenhum gerador o emite.
-  - Cada módulo gerado exporta o próprio serviço, como `exports: [SnippetsService]` (`src/asset/resources/snippets/snippets.module.ts:8`). O gerador faz isso desde o `a967f26` (`scripts/generate-marketo-resources.py:313`).
+  - Cada módulo gerado exporta o próprio serviço, como `exports: [SnippetsService]` (`src/asset/resources/snippets/snippets.module.ts:11`). O gerador faz isso desde o `a967f26` (`scripts/generate-marketo-resources.py:314`).
   - As factories aceitam overrides ([ADR 0007](0007-faker-factories-with-overrides-and-seed.md)).
 - **O layout mudou na #6.** A reescrita multi-API trouxe as áreas `src/{data-ingestion,identity,lead-database,user-management}/` e o `src/mocks/` comum, cada área com as próprias pastas geradas ([ADR 0004](0004-swagger-as-single-source-with-committed-generated-code.md)). O R3 da Track A depende de `identity/oauth/token`, e o R4 do `userservice`, que desde a #6 têm rota.
 
@@ -46,7 +46,7 @@
 
 | Opção | Por que não |
 | --- | --- |
-| Editar os serviços gerados à mão | O próximo `generate:resources` apaga a edição (`scripts/marketo_codegen.py:242-244`), e o `check:resources` acusa a diferença. É o que o `5cc5e09` fez ([anti-pattern](../knowledge/anti-patterns/hand-editing-generated-code.md)) |
+| Editar os serviços gerados à mão | O próximo `generate:resources` apaga a edição (`scripts/marketo_codegen.py:313-315`), e o `check:resources` acusa a diferença. É o que o `5cc5e09` fez ([anti-pattern](../knowledge/anti-patterns/hand-editing-generated-code.md)) |
 | O gerador emitir o comportamento | O comportamento não está no Swagger, e cada mudança nele viraria uma regeneração de dezenas de arquivos gerados (inferido; confirmar) |
 | Um processo à parte, um proxy na frente do mock | Seriam dois processos para o consumidor subir, e o project intent pede subir o mock com um comando documentado (inferido; confirmar) |
 | O comportamento no consumidor | O project intent pede a correção aqui, nunca um contorno no consumidor. O simulador escrito à mão do lite-campaign foi a origem de brunohab/lite-campaign#47, #54, #60 e #61 |
@@ -59,8 +59,8 @@
   - o `check:all` continua querendo dizer "o gerado é exatamente o que o gerador emite";
   - o comportamento é revisado nos próprios arquivos, e o código gerado, no gerador.
 - **Mais difícil**:
-  - **o comportamento acompanha a superfície gerada.** Os nomes de método vêm do `operationId`, como `getSnippetByIdUsingGET` (`src/asset/resources/snippets/snippets.service.ts:14`), e uma mudança no Swagger pode quebrar o comportamento. O typecheck pega a quebra quando o comportamento usa os tipos gerados (inferido; confirmar);
-  - **trocar o serviço gerado não é direto hoje.** Cada módulo gerado declara o próprio serviço como provider (`src/asset/resources/snippets/snippets.module.ts:5-10`), e o controller gerado o recebe no construtor (`src/asset/resources/snippets/snippets.controller.ts:23`). Trocá-lo sem tocar no módulo gerado provavelmente pede um gancho no gerador (inferido; confirmar);
+  - **o comportamento acompanha a superfície gerada.** Os nomes de método vêm do `operationId`, como `getSnippetByIdUsingGET` (`src/asset/resources/snippets/snippets.service.ts:17`), e uma mudança no Swagger pode quebrar o comportamento. O typecheck pega a quebra quando o comportamento usa os tipos gerados (inferido; confirmar);
+  - **trocar o serviço gerado não é direto hoje.** Cada módulo gerado declara o próprio serviço como provider (`src/asset/resources/snippets/snippets.module.ts:8-13`), e o controller gerado o recebe no construtor (`src/asset/resources/snippets/snippets.controller.ts:26`). Trocá-lo sem tocar no módulo gerado provavelmente pede um gancho no gerador (inferido; confirmar);
   - **as rotas sombreadas atrapalham.** As 11 rotas literais declaradas depois de uma rota `:id` caem no handler da `:id`, como a #4 mediu em runtime ([ADR 0005](0005-nestjs-express-one-module-per-tag.md), [anti-pattern](../knowledge/anti-patterns/literal-route-after-param-route.md)). Um comportamento preso a uma dessas rotas não roda até a #8 corrigir a ordem;
   - **a prova depende dos geradores.** O teste do item 5 pede `generate:all` e `check:all` funcionando, e eles funcionam desde a #6.
 
@@ -84,3 +84,4 @@
 - **Criado**: 2026-09-25 (Fase: Build), registro retroativo de `0c8e760`..`fb4a804` (#4)
 - **Status**: Proposed
 - **Atualizado**: 2026-09-26 (Fase: Learn), o layout das cinco áreas chegou com a #6, e o `generate:all` e o `check:all` passaram a funcionar para a prova; as citações seguiram as linhas novas, e a do prefixo de import antigo passou a levar o commit `610e101` (#6)
+- **Atualizado**: 2026-09-26 (Fase: Build), as citações dos arquivos gerados e dos geradores seguiram as linhas novas, depois do cabeçalho de gerado (#7)

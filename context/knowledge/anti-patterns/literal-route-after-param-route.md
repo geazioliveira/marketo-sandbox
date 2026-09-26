@@ -6,7 +6,7 @@ Uma rota literal registrada depois de uma rota com parâmetro que também casa c
 
 ## Problema
 
-- **O gerador emite as rotas na ordem do Swagger.** `scripts/generate-marketo-resources.py:340-343` percorre os caminhos na ordem do documento e agrupa as operações por tag. Nada põe os segmentos literais antes dos segmentos com parâmetro (#8).
+- **O gerador emite as rotas na ordem do Swagger.** `scripts/generate-marketo-resources.py:341-344` percorre os caminhos na ordem do documento e agrupa as operações por tag. Nada põe os segmentos literais antes dos segmentos com parâmetro (#8).
 - **11 rotas literais vêm depois de uma rota `:id` que casa com elas.** A varredura da #4 usou o `match()` do path-to-regexp 8.4.2, a versão travada no lockfile (`package-lock.json:3996-3997`). Achou as 11, todas dentro do mesmo controller:
 
   | Controller, em `src/asset/resources/` | Rota com parâmetro (linha) | Rotas literais depois dela (linha) |
@@ -19,8 +19,8 @@ Uma rota literal registrada depois de uma rota com parâmetro que também casa c
 
   A tabela omite o prefixo das rotas: `rest/asset/v1/` antes das v1, e `rest/asset/` antes das que começam com `v2/`. As linhas são as da saída da #6, que acrescentou os `@HttpCode` e quebrou os imports longos; a ordem das rotas é a mesma.
 - **A rota `:id` vence.** O Express entrega a requisição ao primeiro handler registrado cuja rota casa, e `:id` aceita `byName`, `rules`, `ccFields` ou `bulk`. Medido na #4, numa cópia de `origin/main` compilada com `tsc`, com o `AssetResourcesModule` servido em loopback e cada método de service trocado por um que devolve o próprio nome: as 11 chamadas chegam ao handler da rota `:id`, e as rotas literais nunca são alcançadas. De controle, `GET smartCampaign/12.json` e `GET smartCampaigns.json` chegam ao próprio handler. A #8 fica com o teste e2e e a correção.
-- **Entre controllers, só a ordem dos módulos salva.** `GET form/fields.json` e `GET form/programMemberFields.json`, de `form-fields/`, também casam com `GET form/:id.json`, de `forms/`. Na mesma medição, as duas chegam ao próprio handler, porque o `FormFieldsModule` é importado antes do `FormsModule` (`src/asset/resources/asset-resources.module.ts:36-37`), na ordem alfabética que o gerador dá (`scripts/generate-marketo-resources.py:353-355`). Renomear uma tag pode inverter isso (inferido; confirmar). A #8 não lista esse caso.
-- **Nada recusa o id errado.** `@Param('id') id: number` não tem `ParseIntPipe` (`smart-campaigns.controller.ts:31`), e o service ignora os argumentos e devolve uma factory (`src/asset/resources/smart-campaigns/smart-campaigns.service.ts:24-28`). Na medição, `byName.json` responde 200 pelo handler da rota `:id`, sem erro. Em `smartCampaign`, as duas rotas devolvem o mesmo tipo, `ResponseOfSmartCampaignResponseWithFlow` (`smart-campaigns.controller.ts:33` e `:56`), então nem a forma da resposta denuncia o erro.
+- **Entre controllers, só a ordem dos módulos salva.** `GET form/fields.json` e `GET form/programMemberFields.json`, de `form-fields/`, também casam com `GET form/:id.json`, de `forms/`. Na mesma medição, as duas chegam ao próprio handler, porque o `FormFieldsModule` é importado antes do `FormsModule` (`src/asset/resources/asset-resources.module.ts:39-40`), na ordem alfabética que o gerador dá (`scripts/generate-marketo-resources.py:354-356`). Renomear uma tag pode inverter isso (inferido; confirmar). A #8 não lista esse caso.
+- **Nada recusa o id errado.** `@Param('id') id: number` não tem `ParseIntPipe` (`smart-campaigns.controller.ts:34`), e o service ignora os argumentos e devolve uma factory (`src/asset/resources/smart-campaigns/smart-campaigns.service.ts:27-31`). Na medição, `byName.json` responde 200 pelo handler da rota `:id`, sem erro. Em `smartCampaign`, as duas rotas devolvem o mesmo tipo, `ResponseOfSmartCampaignResponseWithFlow` (`smart-campaigns.controller.ts:36` e `:59`), então nem a forma da resposta denuncia o erro.
 - **A #6 trouxe mais 2, em `lead-database`.** `GET` e `POST rest/v1/customobjects/schema.json` vêm depois de `rest/v1/customobjects/:customObjectName.json`, no mesmo controller. Medido na #6 com o app inteiro servido: para cada rota registrada, a primeira camada do router do Express que casa com o caminho dela, com os parâmetros trocados por `1`, é a de outra rota em 13 casos, as 11 de assets e essas 2.
 - **O risco cresce com o comportamento.** Hoje toda rota devolve uma factory. Quando o mock ganhar estado, como pede a Track A, `byName.json` buscaria um recurso de id `byName` (inferido; confirmar).
 
@@ -45,4 +45,4 @@ async getSmartCampaignByNameUsingGET(@Query('name') name: string, ...)
 
 - **Criado**: 2026-09-25 (Fase: Build), registro retroativo de `0c8e760`..`fb4a804` (#4)
 - **Status**: Active
-- **Atualizado**: 2026-09-26 (Fase: Learn), as linhas passaram às da saída da #6, e as 2 rotas sombreadas de `lead-database` entraram (#6)
+- **Atualizado**: 2026-09-26 (Fase: Build), as citações dos arquivos gerados e dos geradores seguiram as linhas novas, depois do cabeçalho de gerado (#7)
