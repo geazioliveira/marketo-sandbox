@@ -1,4 +1,12 @@
-import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common'
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  Param,
+  Post,
+  Query,
+} from '@nestjs/common'
 import { FormFieldsService } from './form-fields.service'
 
 import type { AddFormFieldRequest } from '../../asset-definitions/requests/add-form-field-request'
@@ -36,6 +44,7 @@ export class FormFieldsController {
   }
 
   @Post('rest/asset/v1/form/:formId/field/:fieldId/visibility.json')
+  @HttpCode(200)
   async addFormFieldVisibilityRuleUsingPOST(
     @Param('formId') formId: number,
     @Param('fieldId') fieldId: string,
@@ -49,6 +58,7 @@ export class FormFieldsController {
   }
 
   @Post('rest/asset/v1/form/:id/field/:fieldId.json')
+  @HttpCode(200)
   async updateFormFieldUsingPOST(
     @Param('id') id: number,
     @Param('fieldId') fieldId: string,
@@ -62,6 +72,7 @@ export class FormFieldsController {
   }
 
   @Post('rest/asset/v1/form/:id/field/:fieldId/delete.json')
+  @HttpCode(200)
   async deleteFormFieldUsingPOST(
     @Param('id') id: number,
     @Param('fieldId') fieldId: string,
@@ -70,6 +81,7 @@ export class FormFieldsController {
   }
 
   @Post('rest/asset/v1/form/:id/fieldSet.json')
+  @HttpCode(200)
   async addFieldSetUsingPOST(
     @Param('id') id: number,
     @Body() addFormFieldSetRequest: AddFormFieldSetRequest,
@@ -83,6 +95,7 @@ export class FormFieldsController {
   @Post(
     'rest/asset/v1/form/:id/fieldSet/:fieldSetId/field/:fieldId/delete.json',
   )
+  @HttpCode(200)
   async deleteFormFieldFromFieldSetUsingPOST(
     @Param('id') id: number,
     @Param('fieldSetId') fieldSetId: string,
@@ -104,6 +117,7 @@ export class FormFieldsController {
   }
 
   @Post('rest/asset/v1/form/:id/fields.json')
+  @HttpCode(200)
   async addFieldToAFormUsingPOST(
     @Param('id') id: number,
     @Body() addFormFieldSetRequest: AddFormFieldRequest,
@@ -115,6 +129,7 @@ export class FormFieldsController {
   }
 
   @Post('rest/asset/v1/form/:id/reArrange.json')
+  @HttpCode(200)
   async updateFieldPositionsUsingPOST(
     @Param('id') id: number,
     @Body() reArrangeRequest?: ReArrangeRequest,
@@ -126,6 +141,7 @@ export class FormFieldsController {
   }
 
   @Post('rest/asset/v1/form/:id/richText.json')
+  @HttpCode(200)
   async addRichTextFieldUsingPOST(
     @Param('id') id: number,
     @Body() addRichTextRequest: AddRichTextRequest,

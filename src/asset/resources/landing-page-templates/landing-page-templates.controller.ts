@@ -1,4 +1,12 @@
-import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common'
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  Param,
+  Post,
+  Query,
+} from '@nestjs/common'
 import { LandingPageTemplatesService } from './landing-page-templates.service'
 
 import type { CloneLpTemplateRequest } from '../../asset-definitions/requests/clone-lp-template-request'
@@ -35,6 +43,7 @@ export class LandingPageTemplatesController {
   }
 
   @Post('rest/asset/v1/landingPageTemplate/:id.json')
+  @HttpCode(200)
   async updateLpTemplateUsingPOST(
     @Param('id') id: number,
     @Body() updateLpTemplateRequest: UpdateLpTemplateRequest,
@@ -46,6 +55,7 @@ export class LandingPageTemplatesController {
   }
 
   @Post('rest/asset/v1/landingPageTemplate/:id/approveDraft.json')
+  @HttpCode(200)
   async approveLandingPageTemplateUsingPOST(
     @Param('id') id: number,
   ): Promise<ResponseOfLpTemplateResponse> {
@@ -55,6 +65,7 @@ export class LandingPageTemplatesController {
   }
 
   @Post('rest/asset/v1/landingPageTemplate/:id/clone.json')
+  @HttpCode(200)
   async cloneLpTemplateUsingPOST(
     @Param('id') id: number,
     @Body() cloneLpTemplateRequest: CloneLpTemplateRequest,
@@ -77,6 +88,7 @@ export class LandingPageTemplatesController {
   }
 
   @Post('rest/asset/v1/landingPageTemplate/:id/content.json')
+  @HttpCode(200)
   async updateLandingPageTemplateContentUsingPOST(
     @Param('id') id: number,
     @Body('content') content: string,
@@ -88,6 +100,7 @@ export class LandingPageTemplatesController {
   }
 
   @Post('rest/asset/v1/landingPageTemplate/:id/delete.json')
+  @HttpCode(200)
   async deleteLpTemplateUsingPOST(
     @Param('id') id: number,
   ): Promise<ResponseOfIdResponse> {
@@ -95,6 +108,7 @@ export class LandingPageTemplatesController {
   }
 
   @Post('rest/asset/v1/landingPageTemplate/:id/discardDraft.json')
+  @HttpCode(200)
   async discardDraftUsingPOST_2(
     @Param('id') id: number,
   ): Promise<ResponseOfIdResponse> {
@@ -102,6 +116,7 @@ export class LandingPageTemplatesController {
   }
 
   @Post('rest/asset/v1/landingPageTemplate/:id/unapprove.json')
+  @HttpCode(200)
   async unapproveLandingPageTemplateUsingPOST(
     @Param('id') id: number,
   ): Promise<ResponseOfLpTemplateResponse> {
@@ -126,6 +141,7 @@ export class LandingPageTemplatesController {
   }
 
   @Post('rest/asset/v1/landingPageTemplates.json')
+  @HttpCode(200)
   async createLpTemplateUsingPOST(
     @Body() createLpTemplateRequest: CreateLpTemplateRequest,
   ): Promise<ResponseOfLpTemplateResponse> {

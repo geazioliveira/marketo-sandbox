@@ -1,5 +1,5 @@
 import { faker } from '@faker-js/faker'
-import { mockRequestId } from '../request-id'
+import { mockRequestId } from '../../../mocks/request-id'
 import type { ResponseOfFormUsedByResponse } from '../../asset-definitions/responses/response-of-form-used-by-response'
 import { makeFormUsedByResponse } from './form-used-by-response'
 

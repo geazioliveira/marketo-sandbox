@@ -274,7 +274,7 @@ npm run check && npm run test:e2e && npm run gate
   - no template de PR, qualquer link relativo. O template vira o corpo da PR, onde um link relativo resolve a partir da página da PR e dá 404. Lá o link aponta para `https://github.com/geazioliveira/marketo-sandbox/blob/main/<caminho>`, que o check confere como um link relativo, ou não há link.
 - **O e2e** (`npm run test:e2e`) sobe o app inteiro e confere que uma rota de assets responde com o envelope do Marketo e que `/` responde 404. Desde a #9 o app não manda telemetria, então o e2e roda sem variável de ambiente nenhuma.
 - **No CI**, o job `check` (`Qualidade / check`) roda em toda PR, em todo push em `main` e à mão. Os passos são `npm ci`, `npm run check`, o passo `e2e` (`npm run test:e2e`) e a conferência de que a árvore ficou limpa. Numa PR, um push novo cancela a run velha. Em `main`, nenhuma run é cancelada nem substituída: cada commit tem o seu grupo de concorrência, e todo push em `main` que dispara run ganha um veredito; o que um push sem run trouxe entra na auditoria seguinte ([Auditoria de main](#auditoria-de-main)).
-- O `npm run check:all`, que confere se o código gerado é o que os geradores emitem, é uma falha conhecida, acompanhada na #7. Ele fica fora do `check` até lá.
+- O `npm run check:all`, que confere se o código gerado é o que os geradores emitem, passa desde a #6, mas fica fora do `check` e do CI até a #7, que também faz os geradores falharem sem o Prettier. Rode-o à mão numa PR que toca um gerador, um Swagger ou uma pasta gerada ([gerar e conferir](../../context/knowledge/patterns/generate-and-check.md)).
 
 ## Auditoria de main
 

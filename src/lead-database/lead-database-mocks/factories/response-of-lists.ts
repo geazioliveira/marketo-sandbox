@@ -1,0 +1,21 @@
+import { faker } from '@faker-js/faker'
+import { mockRequestId } from '../../../mocks/request-id'
+import type { ResponseOfLists } from '../../lead-database-definitions/responses/response-of-lists'
+import { makeList } from './list'
+
+export function makeResponseOfLists(
+  overrides: Partial<ResponseOfLists> = {},
+): ResponseOfLists {
+  return {
+    errors: [],
+    moreResult: faker.datatype.boolean(),
+    nextPageToken: faker.lorem.word(),
+    requestId: mockRequestId(),
+    result: faker.helpers.multiple(() => makeList(), {
+      count: { min: 1, max: 3 },
+    }),
+    success: true,
+    warnings: [],
+    ...overrides,
+  }
+}

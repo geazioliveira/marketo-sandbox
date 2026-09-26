@@ -1,6 +1,6 @@
 import { faker } from '@faker-js/faker'
-import { mockRequestId } from '../request-id'
-import type { ResponseOfSmartListResponseWithRules } from '../../asset-definitions/models/response-of-smart-list-response-with-rules'
+import { mockRequestId } from '../../../mocks/request-id'
+import type { ResponseOfSmartListResponseWithRules } from '../../asset-definitions/responses/response-of-smart-list-response-with-rules'
 import { makeSmartListResponseWithRules } from './smart-list-response-with-rules'
 
 export function makeResponseOfSmartListResponseWithRules(

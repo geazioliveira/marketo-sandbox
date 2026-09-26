@@ -1,0 +1,34 @@
+import {
+  Body,
+  Controller,
+  Headers,
+  HttpCode,
+  Param,
+  Post,
+} from '@nestjs/common'
+import { CompaniesService } from './companies.service'
+
+import type { SyncCompaniesRequest } from '../../data-ingestion-definitions/requests/sync-companies-request'
+
+@Controller()
+export class CompaniesController {
+  constructor(private readonly companiesService: CompaniesService) {}
+
+  @Post('subscriptions/:munchkinId/companies')
+  @HttpCode(202)
+  async syncCompanies(
+    @Param('munchkinId') munchkinId: string,
+    @Headers('X-Mkto-User-Token') xMktoUserToken: string,
+    @Body() body: SyncCompaniesRequest,
+    @Headers('X-Correlation-Id') xCorrelationId?: string,
+    @Headers('X-Request-Source') xRequestSource?: string,
+  ): Promise<void> {
+    return this.companiesService.syncCompanies(
+      munchkinId,
+      xMktoUserToken,
+      body,
+      xCorrelationId,
+      xRequestSource,
+    )
+  }
+}

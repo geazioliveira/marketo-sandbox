@@ -1,0 +1,77 @@
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  Param,
+  Post,
+  Query,
+} from '@nestjs/common'
+import { CompaniesService } from './companies.service'
+
+import type { DeleteCompanyRequest } from '../../lead-database-definitions/requests/delete-company-request'
+import type { ResponseOfCompany } from '../../lead-database-definitions/responses/response-of-company'
+import type { ResponseOfLeadField } from '../../lead-database-definitions/responses/response-of-lead-field'
+import type { ResponseOfObjectMetaData } from '../../lead-database-definitions/responses/response-of-object-meta-data'
+import type { SyncCompanyRequest } from '../../lead-database-definitions/requests/sync-company-request'
+
+@Controller()
+export class CompaniesController {
+  constructor(private readonly companiesService: CompaniesService) {}
+
+  @Get('rest/v1/companies.json')
+  async getCompaniesUsingGET(
+    @Query('filterType') filterType: string,
+    @Query('filterValues') filterValues: Array<string>,
+    @Query('fields') fields?: Array<string>,
+    @Query('batchSize') batchSize?: number,
+    @Query('nextPageToken') nextPageToken?: string,
+  ): Promise<ResponseOfCompany> {
+    return this.companiesService.getCompaniesUsingGET(
+      filterType,
+      filterValues,
+      fields,
+      batchSize,
+      nextPageToken,
+    )
+  }
+
+  @Post('rest/v1/companies.json')
+  @HttpCode(200)
+  async syncCompaniesUsingPOST(
+    @Body() syncCompanyRequest: SyncCompanyRequest,
+  ): Promise<ResponseOfCompany> {
+    return this.companiesService.syncCompaniesUsingPOST(syncCompanyRequest)
+  }
+
+  @Post('rest/v1/companies/delete.json')
+  @HttpCode(200)
+  async deleteCompaniesUsingPOST(
+    @Body() deleteCompanyRequest: DeleteCompanyRequest,
+  ): Promise<ResponseOfCompany> {
+    return this.companiesService.deleteCompaniesUsingPOST(deleteCompanyRequest)
+  }
+
+  @Get('rest/v1/companies/describe.json')
+  async describeUsingGET(): Promise<ResponseOfObjectMetaData> {
+    return this.companiesService.describeUsingGET()
+  }
+
+  @Get('rest/v1/companies/schema/fields/:fieldApiName.json')
+  async getCompanyFieldByNameUsingGET(
+    @Param('fieldApiName') fieldApiName: string,
+  ): Promise<ResponseOfLeadField> {
+    return this.companiesService.getCompanyFieldByNameUsingGET(fieldApiName)
+  }
+
+  @Get('rest/v1/companies/schema/fields.json')
+  async getCompanyFieldsUsingGET(
+    @Query('batchSize') batchSize?: number,
+    @Query('nextPageToken') nextPageToken?: string,
+  ): Promise<ResponseOfLeadField> {
+    return this.companiesService.getCompanyFieldsUsingGET(
+      batchSize,
+      nextPageToken,
+    )
+  }
+}

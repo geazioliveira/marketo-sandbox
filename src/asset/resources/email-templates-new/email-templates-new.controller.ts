@@ -3,6 +3,7 @@ import {
   Controller,
   Get,
   Headers,
+  HttpCode,
   Param,
   Post,
   Query,
@@ -30,6 +31,7 @@ export class EmailTemplatesNewController {
   ) {}
 
   @Post('rest/asset/v2/emailtemplate')
+  @HttpCode(200)
   async createContentUsingPOST_emailtemplate(
     @Query('access_token') accessToken: string,
     @Headers('x-app-type') xAppType: 'marketo',
@@ -43,6 +45,7 @@ export class EmailTemplatesNewController {
   }
 
   @Post('rest/asset/v2/emailtemplate/clone')
+  @HttpCode(200)
   async cloneContentUsingPOST_emailtemplate(
     @Query('access_token') accessToken: string,
     @Headers('x-app-type') xAppType: 'marketo',
@@ -103,6 +106,7 @@ export class EmailTemplatesNewController {
   }
 
   @Post('rest/asset/v2/emailtemplate/state/transition')
+  @HttpCode(200)
   async stateTransitionUsingPOST_emailtemplate(
     @Query('access_token') accessToken: string,
     @Headers('x-app-type') xAppType: 'marketo',
@@ -116,6 +120,7 @@ export class EmailTemplatesNewController {
   }
 
   @Post('rest/asset/v2/emailtemplate/usedby')
+  @HttpCode(200)
   async getContentUsedByUsingPOST_emailtemplate(
     @Query('access_token') accessToken: string,
     @Headers('x-app-type') xAppType: 'marketo',
@@ -142,6 +147,7 @@ export class EmailTemplatesNewController {
   }
 
   @Post('rest/asset/v2/emailtemplate/:id/delete')
+  @HttpCode(200)
   async deleteContentUsingPOST_emailtemplate(
     @Query('access_token') accessToken: string,
     @Headers('x-app-type') xAppType: 'marketo',
@@ -155,6 +161,7 @@ export class EmailTemplatesNewController {
   }
 
   @Post('rest/asset/v2/emailtemplate/:id/update')
+  @HttpCode(200)
   async updateContentUsingPOST_emailtemplate(
     @Query('access_token') accessToken: string,
     @Headers('x-app-type') xAppType: 'marketo',
@@ -170,6 +177,7 @@ export class EmailTemplatesNewController {
   }
 
   @Post('rest/asset/v2/emailtemplate/bulk/get')
+  @HttpCode(200)
   async bulkGetUsingPOST_emailtemplate(
     @Query('access_token') accessToken: string,
     @Headers('x-app-type') xAppType: string,
@@ -183,6 +191,7 @@ export class EmailTemplatesNewController {
   }
 
   @Post('rest/asset/v2/emailtemplate/bulk/delete')
+  @HttpCode(200)
   async bulkDeleteUsingPOST_emailtemplate(
     @Query('access_token') accessToken: string,
     @Headers('x-app-type') xAppType: string,
@@ -196,6 +205,7 @@ export class EmailTemplatesNewController {
   }
 
   @Post('rest/asset/v2/emailtemplate/bulk/usedby')
+  @HttpCode(200)
   async bulkUsedByUsingPOST_emailtemplate(
     @Query('access_token') accessToken: string,
     @Headers('x-app-type') xAppType: string,

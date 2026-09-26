@@ -1,6 +1,6 @@
 import { faker } from '@faker-js/faker'
-import { mockRequestId } from '../request-id'
-import type { ResponseOfLandingPageRedirectRules } from '../../asset-definitions/models/response-of-landing-page-redirect-rules'
+import { mockRequestId } from '../../../mocks/request-id'
+import type { ResponseOfLandingPageRedirectRules } from '../../asset-definitions/responses/response-of-landing-page-redirect-rules'
 import { makeLandingPageRedirectRule } from './landing-page-redirect-rule'
 
 export function makeResponseOfLandingPageRedirectRules(

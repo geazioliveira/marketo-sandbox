@@ -1,0 +1,12 @@
+import type { Company } from '../models/company'
+
+export interface DeleteCompanyRequest {
+  /**
+   * Field to delete company records by. Key may be "dedupeFields" or "idField"
+   */
+  deleteBy?: string
+  /**
+   * List of company objects. Companies in the list should only contain a member matching the dedupeBy value. Each 'Company' object contains a 'searchableField' for lookup purposes which can be retrieved using the Describe Companies endpoint
+   */
+  input?: Array<Company>
+}

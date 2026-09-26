@@ -1,0 +1,21 @@
+import type { ColumnHeaderNames } from '../models/column-header-names'
+import type { ExportCustomObjectFilter } from '../models/export-custom-object-filter'
+
+export interface ExportCustomObjectRequest {
+  /**
+   * File header field names override (corresponds with REST API name)
+   */
+  columnHeaderNames?: ColumnHeaderNames
+  /**
+   * Comma-separated list of custom object attributes to include in the file
+   */
+  fields: Array<string>
+  /**
+   * Custom object record selection criteria. Can be one of the following: "updatedAt", "staticListName", "staticListId", "smartListName", "smartListId"
+   */
+  filter: ExportCustomObjectFilter
+  /**
+   * File format to create("CSV", "TSV", "SSV"). Default is "CSV"
+   */
+  format?: string
+}

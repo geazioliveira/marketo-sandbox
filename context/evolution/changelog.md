@@ -4,6 +4,58 @@ Uma entrada por mudança mergeada, da mais nova para a mais antiga, escrita no p
 
 ---
 
+## 2026-09-26: Reescrita multi-API, cinco documentos Swagger em main (#6, PR #21)
+
+**Fase**: Learn
+**Tipo**: Feature
+
+### O que foi construído / corrigido
+
+- **Cinco alvos, uma área cada.** O registro `TARGETS` de `scripts/marketo_codegen.py` liga cada documento de `docs/` a uma área de `src/`: assets, Data Ingestion (em OpenAPI 3), Identity, Lead Database e User Management. O mock passou de 220 para 388 operações, e a Track A ganhou as rotas de que o R3 e o R4 dependem, `/identity/oauth/token` e `/userservice/management/...`.
+- **Os geradores do dono.** Eles aceitam `--target`, ou `--swagger` com `--area`, leem Swagger 2.0 e OpenAPI 3, calculam os imports com `relative_import()`, mandam `ResponseOf*` para `responses/` e põem o seed e o `requestId` num `src/mocks/` comum. A saída veio de `npm run generate:all`, sem nenhum ajuste à mão.
+- **O `check:all` passou.** Além dos caminhos, faltava uma causa: o Prettier 3 lê o `.gitignore`, que lista `/.codegen-tmp/`, e não formatava a cópia que o `--check` compara. O Prettier dos geradores passou a ler só o `.prettierignore`.
+- **O status documentado.** O controller ganha `@HttpCode` quando o menor 2xx declarado difere do padrão do Nest: os 139 POSTs de assets passaram de 201 para 200, e os 7 de Data Ingestion respondem 202 sem corpo.
+- **Um e2e novo** confere as 388 rotas contra os documentos, recusa método+caminho repetido e faz um pedido por área.
+- **O `--area` ficou restrito.** As revisões do Copilot apontaram que ele aceitava uma área registrada, um `..`, um caminho absoluto ou uma pasta com arquivos escritos à mão, e o gerador apagaria a pasta. Agora ele só aceita uma pasta em kebab-case, direto em `src/`, que não guarde nada além das três pastas de gerador, e dentro delas o gerador recusa apagar um arquivo que não vá escrever de novo.
+- **O contexto.** A ADR 0004 passou a uma fonte por área, com a origem e o sha256 dos cinco documentos. As ADRs de 0005 a 0009 ganharam emendas, e os patterns, os anti-patterns, o glossário, o `AGENTS.md`, o fluxo e o project intent acompanharam.
+
+### Números medidos
+
+- **Os documentos**, contados com python: 459 schemas, 335 caminhos, 388 operações e 49 tags, sem método+caminho repetido entre eles. Os quatro novos são os blobs de AdobeDocs/marketo-apis em `89c8e262` (`git hash-object`). O de assets tem o mesmo JSON que o blob de lá, que tem 8 bytes a mais de espaço no fim de duas linhas.
+- **A saída.** 1.083 arquivos gerados. Os 604 que a reescrita trouxe batem por sha256 com os que o dono gerou, e um segundo `npm run generate:all` não muda nenhum arquivo.
+- **O `check:all`.** Sem a correção do Prettier, 14 dos 16 checks falhavam e acusavam 829 arquivos. Com ela, os 16 saem com 0, também num clone limpo.
+- **As rotas.** As 220 de assets ficam na mesma ordem. Pelo roteador do Express, 13 das 388 são sombreadas: as 11 de assets e 2 de Lead Database. Por HTTP, as 2 de Lead Database caem no handler de `rest/v1/customobjects/:customObjectName.json`, e a medição foi para a #8.
+- **Os checks**, depois do merge de `main` com a #9: `npm run check` com 1.345 testes, e o e2e com 14 (2 do smoke da #9 e 12 da #6). O Python 3.9.9 local reproduz a saída.
+- **A verificação adversarial**, feita por um revisor independente num clone da branch: as 388 operações, mandadas com 40 seeds, respondem um 2xx declarado, e só as 13 rotas sombreadas caem no handler errado. O `check:all` passa com o `PYTHONHASHSEED` padrão e com outros dois.
+
+### Decisões tomadas
+
+- [0004: O Swagger como fonte única, com o código gerado commitado](../decisions/0004-swagger-as-single-source-with-committed-generated-code.md): uma fonte por área, com a origem e o sha256 de cada documento.
+- [0005: NestJS sobre Express, com um módulo por tag](../decisions/0005-nestjs-express-one-module-per-tag.md): um módulo de recursos por área e o status 2xx documentado.
+- [0006: DTOs como interfaces TypeScript](../decisions/0006-dtos-as-typescript-interfaces.md): 459 interfaces e uma regra só de pasta.
+- [0007: Factories faker com overrides e seed](../decisions/0007-faker-factories-with-overrides-and-seed.md): o seed e o `requestId` comuns em `src/mocks/`.
+- [0008: A toolchain](../decisions/0008-toolchain.md): o Prettier dos geradores lê só o `.prettierignore`.
+- A branch nasceu antes do merge da #5, pela resposta nova do dono à pergunta 4, na #6.
+
+### Patterns aplicados ou criados
+
+- [Gerar e conferir](../knowledge/patterns/generate-and-check.md): o commit dos geradores e o da saída separados; o da saída passou a levar a linha escrita à mão que a importa, quando ela muda de lugar.
+- [A fronteira do código gerado](../knowledge/patterns/generated-code-boundary.md), agora por área.
+- [A forma de um módulo de recurso](../knowledge/patterns/resource-module-shape.md), [Factory com overrides](../knowledge/patterns/factory-with-overrides.md) e [Revisão classificada por risco](../knowledge/patterns/risk-classified-review.md).
+- [Mover as pastas geradas sem o gerador](../knowledge/anti-patterns/moving-generated-folders-without-the-generator.md): "todo commit compila" decidiu a ordem dos commits.
+
+### Aprendizados / surpresas
+
+- **Medir a causa antes de corrigir.** O plano atribuía o `check:all` defasado à pasta ser oculta, e a causa era o `.gitignore`. Renomear a pasta também passava, mas deixaria a pasta temporária fora do `.gitignore` por um motivo errado.
+- **A ordem dos commits do plano não compilava.** A ligação escrita à mão ia no commit dos geradores, onde importaria pastas que só existem depois da regeneração. Ela foi para depois da saída, e a linha de `src/main.ts` que importa o seed foi junto com a saída.
+- **Os documentos repetem nomes.** 7 schemas e 4 tags aparecem em mais de um, e as áreas separadas guardam cada um.
+- **O e2e lê a API interna do roteador do Express** (`router.stack`), como o teste que a #8 planeja. Uma troca de versão do Express pode quebrá-lo, e ele falha em vez de passar em vazio.
+- **A verificação adversarial achou o que os checks não viam.** Três formas de schema saem diferentes do documento (um array de topo, uma resposta string e os headers de resposta), e isso foi para a #24. Um corpo acima de 100 KiB responde 413, o que já existia, e foi para a #25. O e2e contava só os métodos que o próprio gerador trata, e passou a contar os oito do OpenAPI em `4ed897b`. O `check:all` e o e2e passavam com as três formas erradas: provar que a saída é a do gerador não prova que ela é a do documento.
+- **A #9 entrou em `main` durante a revisão, e o merge tocou 19 arquivos.** Quase todos eram de contexto, porque as duas PRs corrigiram as mesmas citações de linha do README, do `src/main.ts` e do `src/app.module.ts`. Resolver o texto não bastou: as citações foram conferidas de novo contra a árvore mesclada. Nas ADRs, uma nota que prendia as citações a um commit deu lugar a um prefixo por citação, como a #9 já fazia.
+- **Um teste intermitente, sem relação com a #6.** Com a máquina carregada, dois casos de `test/scripts/check-context.spec.ts` estouram o timeout padrão de 5 s do vitest, e o processo filho que eles esperam tem 30 s. Isso foi para a #23.
+
+---
+
 ## 2026-09-26: Nada sai da máquina por padrão, e as sobras do starter saíram (#9)
 
 **Fase**: Learn

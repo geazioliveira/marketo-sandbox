@@ -5,11 +5,11 @@ import { makeResponseOfSmartListResponse } from '../../asset-mocks/factories/res
 import { makeResponseOfSmartListResponseWithRules } from '../../asset-mocks/factories/response-of-smart-list-response-with-rules'
 import { makeResponseOfSmartListRuleType } from '../../asset-mocks/factories/response-of-smart-list-rule-type'
 
-import type { ResponseOfAutoSuggestValue } from '../../asset-definitions/models/response-of-auto-suggest-value'
+import type { ResponseOfAutoSuggestValue } from '../../asset-definitions/responses/response-of-auto-suggest-value'
 import type { ResponseOfIdResponse } from '../../asset-definitions/responses/response-of-id-response'
 import type { ResponseOfSmartListResponse } from '../../asset-definitions/responses/response-of-smart-list-response'
-import type { ResponseOfSmartListResponseWithRules } from '../../asset-definitions/models/response-of-smart-list-response-with-rules'
-import type { ResponseOfSmartListRuleType } from '../../asset-definitions/models/response-of-smart-list-rule-type'
+import type { ResponseOfSmartListResponseWithRules } from '../../asset-definitions/responses/response-of-smart-list-response-with-rules'
+import type { ResponseOfSmartListRuleType } from '../../asset-definitions/responses/response-of-smart-list-rule-type'
 
 @Injectable()
 export class SmartListsService {

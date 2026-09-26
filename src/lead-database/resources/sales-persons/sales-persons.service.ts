@@ -1,0 +1,33 @@
+import { Injectable } from '@nestjs/common'
+import { makeResponseOfObjectMetaData } from '../../lead-database-mocks/factories/response-of-object-meta-data'
+import { makeResponseOfSalesPerson } from '../../lead-database-mocks/factories/response-of-sales-person'
+
+import type { ResponseOfObjectMetaData } from '../../lead-database-definitions/responses/response-of-object-meta-data'
+import type { ResponseOfSalesPerson } from '../../lead-database-definitions/responses/response-of-sales-person'
+
+@Injectable()
+export class SalesPersonsService {
+  async getSalesPersonUsingGET(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfSalesPerson> {
+    return makeResponseOfSalesPerson()
+  }
+
+  async syncSalesPersonsUsingPOST(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfSalesPerson> {
+    return makeResponseOfSalesPerson()
+  }
+
+  async deleteSalesPersonUsingPOST(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfSalesPerson> {
+    return makeResponseOfSalesPerson()
+  }
+
+  async describeUsingGET_5(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfObjectMetaData> {
+    return makeResponseOfObjectMetaData()
+  }
+}

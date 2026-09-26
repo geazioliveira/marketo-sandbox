@@ -1,0 +1,30 @@
+import type { DateRange } from './date-range'
+
+export type ExportProgramMemberFilterNurtureCadence = 'paused' | 'normal'
+
+export interface ExportProgramMemberFilter {
+  /**
+   * Id of program to retrieve members from. Cannot be used in combination with "programIds" filter
+   */
+  programId?: number
+  /**
+   * Array of program ids to retrieve members from. Cannot be used in combination with "programId" filter
+   */
+  programIds?: Array<number>
+  /**
+   * Filter program membership records for people who have exhausted content
+   */
+  isExhausted?: boolean
+  /**
+   * Filter program membership records for a given nurture cadence
+   */
+  nurtureCadence?: ExportProgramMemberFilterNurtureCadence
+  /**
+   * Array of program member status names. Can be default and/or user-defined. Multiple status names are ORed together.
+   */
+  statusNames?: Array<string>
+  /**
+   * Date range to filter program members on
+   */
+  updatedAt?: DateRange
+}

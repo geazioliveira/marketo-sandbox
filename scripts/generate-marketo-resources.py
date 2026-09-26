@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate NestJS asset resource contracts from the Marketo Swagger paths."""
+"""Generate NestJS resource contracts from the Marketo Swagger paths."""
 
 from __future__ import annotations
 
@@ -7,28 +7,31 @@ import argparse
 import re
 import sys
 from collections import defaultdict
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from marketo_codegen import (  # noqa: E402
-    ROOT,
+    Target,
+    add_target_arguments,
     camel_case,
     check_output,
     definition_category,
     definition_file,
     kebab_case,
-    load_document,
+    operation_parameters,
+    operations,
     pascal_case,
     quote,
     reference_name,
+    relative_import,
+    resolve_targets,
+    success_schemas,
     write_output,
 )
 
-
-OUTPUT = ROOT / "src" / "asset" / "resources"
-HTTP_METHODS = {"get", "post", "put", "patch", "delete"}
 
 DECORATORS = {
     "body": "Body",
@@ -37,6 +40,8 @@ DECORATORS = {
     "header": "Headers",
     "formData": "Body",
 }
+
+RESERVED_IDENTIFIERS = {"default", "new", "delete", "function", "class", "return"}
 
 
 def schema_type(schema: dict[str, Any]) -> str:
@@ -55,14 +60,6 @@ def schema_type(schema: dict[str, Any]) -> str:
     }.get(schema.get("type"), "unknown")
 
 
-def definition_import(name: str) -> str:
-    return f"../../../asset-definitions/{definition_category(name)}/{definition_file(name)}"
-
-
-def factory_import(name: str) -> str:
-    return f"../../../asset-mocks/factories/{definition_file(name)}"
-
-
 def factory_name(name: str) -> str:
     return f"make{name[:1].upper()}{name[1:]}"
 
@@ -75,7 +72,7 @@ def parameter_identifier(name: str, index: int) -> str:
     identifier = camel_case(name)
     if not identifier or not re.match(r"^[A-Za-z_$]", identifier):
         identifier = f"parameter{index}"
-    return identifier if identifier not in {"default", "new", "delete"} else f"{identifier}Value"
+    return identifier if identifier not in RESERVED_IDENTIFIERS else f"{identifier}Value"
 
 
 def decorator_for(parameter: dict[str, Any]) -> str:
@@ -85,211 +82,296 @@ def decorator_for(parameter: dict[str, Any]) -> str:
     return f"@{DECORATORS[location]}('{parameter['name']}')"
 
 
-def operation_response(operation: dict[str, Any]) -> tuple[str, str | None]:
-    """Return the success type plus the definition that backs it, when there is one."""
-    types: list[str] = []
-    backing: str | None = None
-    for status, response in operation.get("responses", {}).items():
-        if not status.startswith("2"):
-            continue
-        schema = response.get("schema")
-        if schema is None:
-            continue
-        types.append(schema_type(schema))
-        if backing is None and "$ref" in schema:
-            backing = reference_name(schema["$ref"])
-    return (" | ".join(dict.fromkeys(types)) or "void", backing)
+def success_status(operation: dict[str, Any], method: str) -> int | None:
+    """The declared 2xx status, when it differs from the one Nest would send by default."""
+    codes = sorted(
+        int(status) for status in operation.get("responses", {}) if status.isdigit() and status.startswith("2")
+    )
+    if not codes:
+        return None
+    default = 201 if method == "post" else 200
+    return codes[0] if codes[0] != default else None
 
 
-def render_controller(tag: str, operations: list[tuple[str, str, dict[str, Any]]]) -> str:
-    resource_name = pascal_case(tag)
-    service_name = f"{resource_name}Service"
-    service_property = f"{camel_case(resource_name)}Service"
-    imports = {"Controller"}
-    definition_imports: set[str] = set()
-    methods: list[str] = []
+def schema_references(schema: Any, acc: set[str] | None = None) -> set[str]:
+    """Every definition name referenced anywhere inside a schema."""
+    acc = acc if acc is not None else set()
+    if not isinstance(schema, dict):
+        return acc
+    if "$ref" in schema:
+        acc.add(reference_name(schema["$ref"]))
+    for key in ("items", "additionalProperties"):
+        if key in schema:
+            schema_references(schema[key], acc)
+    for sub_schema in schema.get("allOf", []):
+        schema_references(sub_schema, acc)
+    for property_schema in (schema.get("properties") or {}).values():
+        schema_references(property_schema, acc)
+    return acc
 
-    for method, path, operation in operations:
-        imports.add(method.capitalize())
-        operation_id = operation["operationId"]
-        response_type, backing = operation_response(operation)
-        if backing:
-            definition_imports.add(backing)
 
-        arguments: list[str] = []
-        argument_names: list[str] = []
-        used_names: set[str] = set()
-        # Swagger can list optional parameters before required ones, which is illegal in
-        # TypeScript. Decorators bind by name, so ordering required-first is safe.
-        ordered = sorted(
-            operation.get("parameters", []),
-            key=lambda parameter: not parameter.get("required", False),
+@dataclass(frozen=True)
+class ResponseContract:
+    """The success type of an operation plus how to mock it."""
+
+    type_name: str
+    references: frozenset[str]
+    factory: str | None
+    expression: str | None
+    needs_faker: bool
+
+
+def operation_response(operation: dict[str, Any]) -> ResponseContract:
+    schemas = success_schemas(operation)
+    types = list(dict.fromkeys(schema_type(schema) for schema in schemas))
+    references = set().union(*(schema_references(schema) for schema in schemas)) if schemas else set()
+
+    factory: str | None = None
+    expression: str | None = None
+    needs_faker = False
+    # Only the first 2xx schema is mocked; a union of shapes has no single obvious payload.
+    if schemas:
+        primary = schemas[0]
+        if "$ref" in primary:
+            factory = reference_name(primary["$ref"])
+            expression = f"{factory_name(factory)}()"
+        elif primary.get("type") == "array" and "$ref" in (primary.get("items") or {}):
+            factory = reference_name(primary["items"]["$ref"])
+            expression = (
+                f"faker.helpers.multiple(() => {factory_name(factory)}(), "
+                "{ count: { min: 1, max: 3 } })"
+            )
+            needs_faker = True
+
+    return ResponseContract(
+        type_name=" | ".join(types) or "void",
+        references=frozenset(references),
+        factory=factory,
+        expression=expression,
+        needs_faker=needs_faker,
+    )
+
+
+class ResourceGenerator:
+    """Renders one Nest resource per Swagger tag for a single target."""
+
+    def __init__(self, target: Target) -> None:
+        self.target = target
+        # Every resource file sits one level below `resources/`, so imports resolve from there.
+        self.resource_dir = target.resources / "resource"
+
+    def definition_import(self, name: str) -> str:
+        return relative_import(
+            self.resource_dir,
+            self.target.definitions / definition_category(name) / f"{definition_file(name)}.ts",
         )
-        for index, parameter in enumerate(ordered):
-            imports.add(DECORATORS[parameter["in"]])
-            identifier = parameter_identifier(parameter.get("name", "body"), index)
-            while identifier in used_names:
-                identifier = f"{identifier}{index}"
-            used_names.add(identifier)
-            schema = parameter.get("schema", parameter)
-            type_name = schema_type(schema)
-            if "$ref" in schema:
-                definition_imports.add(type_name)
-            optional = "" if parameter.get("required", False) else "?"
-            arguments.append(f"{decorator_for(parameter)} {identifier}{optional}: {type_name}")
-            argument_names.append(identifier)
 
-        methods.extend(
+    def factory_import(self, name: str) -> str:
+        return relative_import(
+            self.resource_dir,
+            self.target.factories / f"{definition_file(name)}.ts",
+        )
+
+    def render_controller(self, tag: str, tagged: list[tuple[str, str, dict[str, Any]]]) -> str:
+        resource_name = pascal_case(tag)
+        service_name = f"{resource_name}Service"
+        service_property = f"{camel_case(resource_name)}Service"
+        imports = {"Controller"}
+        definition_imports: set[str] = set()
+        methods: list[str] = []
+
+        for method, path, operation in tagged:
+            imports.add(method.capitalize())
+            if success_status(operation, method) is not None:
+                imports.add("HttpCode")
+            response = operation_response(operation)
+            definition_imports.update(response.references)
+
+            arguments: list[str] = []
+            argument_names: list[str] = []
+            used_names: set[str] = set()
+            # Swagger can list optional parameters before required ones, which is illegal in
+            # TypeScript. Decorators bind by name, so ordering required-first is safe.
+            ordered = sorted(
+                operation_parameters(operation),
+                key=lambda parameter: not parameter.get("required", False),
+            )
+            for index, parameter in enumerate(ordered):
+                imports.add(DECORATORS[parameter["in"]])
+                identifier = parameter_identifier(parameter.get("name", "body"), index)
+                while identifier in used_names:
+                    identifier = f"{identifier}{index}"
+                used_names.add(identifier)
+                schema = parameter.get("schema", parameter)
+                type_name = schema_type(schema)
+                definition_imports.update(schema_references(schema))
+                optional = "" if parameter.get("required", False) else "?"
+                arguments.append(f"{decorator_for(parameter)} {identifier}{optional}: {type_name}")
+                argument_names.append(identifier)
+
+            methods.extend(
+                [
+                    f"  @{method.capitalize()}('{nest_route(path)}')",
+                    *(
+                        [f"  @HttpCode({status})"]
+                        if (status := success_status(operation, method)) is not None
+                        else []
+                    ),
+                    f"  async {operation['operationId']}({', '.join(arguments)}): "
+                    f"Promise<{response.type_name}> {{",
+                    f"    return this.{service_property}.{operation['operationId']}"
+                    f"({', '.join(argument_names)})",
+                    "  }",
+                    "",
+                ],
+            )
+
+        lines = [
+            f"import {{ {', '.join(sorted(imports))} }} from '@nestjs/common'",
+            f"import {{ {service_name} }} from './{kebab_case(tag)}.service'",
+        ]
+        if definition_imports:
+            lines.append("")
+            lines.extend(
+                f"import type {{ {name} }} from '{self.definition_import(name)}'"
+                for name in sorted(definition_imports)
+            )
+        lines.extend(
             [
-                f"  @{method.capitalize()}('{nest_route(path)}')",
-                f"  async {operation_id}({', '.join(arguments)}): Promise<{response_type}> {{",
-                f"    return this.{service_property}.{operation_id}({', '.join(argument_names)})",
-                "  }",
                 "",
+                "@Controller()",
+                f"export class {resource_name}Controller {{",
+                f"  constructor(private readonly {service_property}: {service_name}) {{}}",
+                "",
+                *methods[:-1],
+                "}",
             ],
         )
+        return "\n".join(lines) + "\n"
 
-    lines = [
-        f"import {{ {', '.join(sorted(imports))} }} from '@nestjs/common'",
-        f"import {{ {service_name} }} from './{kebab_case(tag)}.service'",
-    ]
-    if definition_imports:
-        lines.append("")
+    def render_service(self, tag: str, tagged: list[tuple[str, str, dict[str, Any]]]) -> str:
+        """Services return faker payloads so the API is usable without a live Marketo tenant."""
+        resource_name = pascal_case(tag)
+        definition_imports: set[str] = set()
+        factory_imports: set[str] = set()
+        needs_faker = False
+        methods: list[str] = []
+
+        for _, _, operation in tagged:
+            response = operation_response(operation)
+            definition_imports.update(response.references)
+            signature = (
+                f"  async {operation['operationId']}(..._arguments: unknown[]): "
+                f"Promise<{response.type_name}> {{"
+            )
+            if response.expression:
+                factory_imports.add(response.factory)
+                needs_faker = needs_faker or response.needs_faker
+                methods.extend([signature, f"    return {response.expression}", "  }", ""])
+            elif response.type_name == "void":
+                # Responses such as `202 Accepted` carry no body at all.
+                methods.extend([signature, "  }", ""])
+            else:
+                methods.extend([signature, "    return undefined as never", "  }", ""])
+
+        lines = ["import { Injectable } from '@nestjs/common'"]
+        if needs_faker:
+            lines.append("import { faker } from '@faker-js/faker'")
         lines.extend(
-            f"import type {{ {name} }} from '{definition_import(name)}'"
-            for name in sorted(definition_imports)
+            f"import {{ {factory_name(name)} }} from '{self.factory_import(name)}'"
+            for name in sorted(factory_imports)
         )
-    lines.extend(
-        [
-            "",
-            "@Controller()",
-            f"export class {resource_name}Controller {{",
-            f"  constructor(private readonly {service_property}: {service_name}) {{}}",
-            "",
-            *methods[:-1],
-            "}",
-        ],
-    )
-    return "\n".join(lines) + "\n"
-
-
-def render_service(tag: str, operations: list[tuple[str, str, dict[str, Any]]]) -> str:
-    """Services return faker-backed payloads so the API is usable without a live Marketo tenant."""
-    resource_name = pascal_case(tag)
-    definition_imports: set[str] = set()
-    factory_imports: set[str] = set()
-    methods: list[str] = []
-
-    for _, _, operation in operations:
-        operation_id = operation["operationId"]
-        response_type, backing = operation_response(operation)
-        if backing:
-            definition_imports.add(backing)
-            factory_imports.add(backing)
-            body = f"return {factory_name(backing)}()"
-        else:
-            body = "return undefined as never"
-        methods.extend(
+        if definition_imports:
+            lines.append("")
+            lines.extend(
+                f"import type {{ {name} }} from '{self.definition_import(name)}'"
+                for name in sorted(definition_imports)
+            )
+        lines.extend(
             [
-                f"  async {operation_id}(..._arguments: unknown[]): Promise<{response_type}> {{",
-                f"    {body}",
-                "  }",
                 "",
+                "@Injectable()",
+                f"export class {resource_name}Service {{",
+                *methods[:-1],
+                "}",
             ],
         )
+        return "\n".join(lines) + "\n"
 
-    lines = ["import { Injectable } from '@nestjs/common'"]
-    lines.extend(
-        f"import {{ {factory_name(name)} }} from '{factory_import(name)}'"
-        for name in sorted(factory_imports)
-    )
-    if definition_imports:
-        lines.append("")
-        lines.extend(
-            f"import type {{ {name} }} from '{definition_import(name)}'"
-            for name in sorted(definition_imports)
-        )
-    lines.extend(
-        [
-            "",
-            "@Injectable()",
-            f"export class {resource_name}Service {{",
-            *methods[:-1],
-            "}",
-        ],
-    )
-    return "\n".join(lines) + "\n"
-
-
-def render_module(tag: str) -> str:
-    resource_name = pascal_case(tag)
-    slug = kebab_case(tag)
-    return "\n".join(
-        [
-            "import { Module } from '@nestjs/common'",
-            f"import {{ {resource_name}Controller }} from './{slug}.controller'",
-            f"import {{ {resource_name}Service }} from './{slug}.service'",
-            "",
-            "@Module({",
-            f"  controllers: [{resource_name}Controller],",
-            f"  providers: [{resource_name}Service],",
-            f"  exports: [{resource_name}Service],",
-            "})",
-            f"export class {resource_name}Module {{}}",
-            "",
-        ],
-    )
-
-
-def render_resources_module(slugs: list[str]) -> str:
-    imports = [
-        f"import {{ {pascal_case(slug)}Module }} from './{slug}/{slug}.module'" for slug in slugs
-    ]
-    modules = ",\n    ".join(f"{pascal_case(slug)}Module" for slug in slugs)
-    return "\n".join(
-        [
-            "import { Module } from '@nestjs/common'",
-            *imports,
-            "",
-            "@Module({",
-            "  imports: [",
-            f"    {modules},",
-            "  ],",
-            "})",
-            "export class AssetResourcesModule {}",
-            "",
-        ],
-    )
-
-
-def generated_files(document: dict[str, Any]) -> dict[Path, str]:
-    grouped: dict[str, list[tuple[str, str, dict[str, Any]]]] = defaultdict(list)
-    for path, path_item in document["paths"].items():
-        for method, operation in path_item.items():
-            if method in HTTP_METHODS:
-                grouped[operation["tags"][0]].append((method, path, operation))
-
-    files: dict[Path, str] = {}
-    for tag, operations in grouped.items():
+    def render_module(self, tag: str) -> str:
+        resource_name = pascal_case(tag)
         slug = kebab_case(tag)
-        directory = OUTPUT / slug
-        files[directory / f"{slug}.controller.ts"] = render_controller(tag, operations)
-        files[directory / f"{slug}.service.ts"] = render_service(tag, operations)
-        files[directory / f"{slug}.module.ts"] = render_module(tag)
-    files[OUTPUT / "asset-resources.module.ts"] = render_resources_module(
-        sorted(kebab_case(tag) for tag in grouped),
-    )
-    return files
+        return "\n".join(
+            [
+                "import { Module } from '@nestjs/common'",
+                f"import {{ {resource_name}Controller }} from './{slug}.controller'",
+                f"import {{ {resource_name}Service }} from './{slug}.service'",
+                "",
+                "@Module({",
+                f"  controllers: [{resource_name}Controller],",
+                f"  providers: [{resource_name}Service],",
+                f"  exports: [{resource_name}Service],",
+                "})",
+                f"export class {resource_name}Module {{}}",
+                "",
+            ],
+        )
+
+    def render_resources_module(self, slugs: list[str]) -> str:
+        imports = [
+            f"import {{ {pascal_case(slug)}Module }} from './{slug}/{slug}.module'" for slug in slugs
+        ]
+        modules = ",\n    ".join(f"{pascal_case(slug)}Module" for slug in slugs)
+        return "\n".join(
+            [
+                "import { Module } from '@nestjs/common'",
+                *imports,
+                "",
+                "@Module({",
+                "  imports: [",
+                f"    {modules},",
+                "  ],",
+                "})",
+                f"export class {pascal_case(self.target.area)}ResourcesModule {{}}",
+                "",
+            ],
+        )
+
+    def files(self) -> dict[Path, str]:
+        grouped: dict[str, list[tuple[str, str, dict[str, Any]]]] = defaultdict(list)
+        for method, path, operation in operations(self.target.document()):
+            grouped[operation["tags"][0]].append((method, path, operation))
+
+        output = self.target.resources
+        files: dict[Path, str] = {}
+        for tag, tagged in grouped.items():
+            slug = kebab_case(tag)
+            directory = output / slug
+            files[directory / f"{slug}.controller.ts"] = self.render_controller(tag, tagged)
+            files[directory / f"{slug}.service.ts"] = self.render_service(tag, tagged)
+            files[directory / f"{slug}.module.ts"] = self.render_module(tag)
+        files[output / f"{self.target.area}-resources.module.ts"] = self.render_resources_module(
+            sorted(kebab_case(tag) for tag in grouped),
+        )
+        return files
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--check", action="store_true", help="fail if generated resources are stale")
+    add_target_arguments(parser)
     arguments = parser.parse_args()
 
-    files = generated_files(load_document())
-    label = "resource files"
-    return check_output(OUTPUT, files, label) if arguments.check else write_output(OUTPUT, files, label)
+    status = 0
+    for target in resolve_targets(arguments):
+        files = ResourceGenerator(target).files()
+        label = f"{target.key} resource files"
+        status |= (
+            check_output(target.resources, files, label)
+            if arguments.check
+            else write_output(target.resources, files, label)
+        )
+    return status
 
 
 if __name__ == "__main__":

@@ -1,5 +1,5 @@
 import { faker } from '@faker-js/faker'
-import { mockRequestId } from '../request-id'
+import { mockRequestId } from '../../../mocks/request-id'
 import type { UsedByResponse } from '../../asset-definitions/responses/used-by-response'
 import { makePageDetailsDTO } from './page-details-dto'
 import { makeUsedByItemDTO } from './used-by-item-dto'

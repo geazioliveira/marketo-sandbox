@@ -1,0 +1,26 @@
+import type { Empty } from '../models/empty'
+import type { Error } from '../models/error'
+import type { Warning } from '../models/warning'
+
+export interface ResponseOfCustomObjectType {
+  /**
+   * Array of errors that occurred if the request was unsuccessful
+   */
+  errors: Array<Error>
+  /**
+   * Id of the request made
+   */
+  requestId: string
+  /**
+   * Empty array
+   */
+  result: Array<Empty>
+  /**
+   * Whether the request succeeded
+   */
+  success: boolean
+  /**
+   * Array of warnings given for the operation
+   */
+  warnings: Array<Warning>
+}

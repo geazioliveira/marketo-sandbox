@@ -1,6 +1,6 @@
 import { faker } from '@faker-js/faker'
-import { mockRequestId } from '../request-id'
-import type { ResponseOfAutoSuggestValue } from '../../asset-definitions/models/response-of-auto-suggest-value'
+import { mockRequestId } from '../../../mocks/request-id'
+import type { ResponseOfAutoSuggestValue } from '../../asset-definitions/responses/response-of-auto-suggest-value'
 import { makeAutoSuggestValue } from './auto-suggest-value'
 
 export function makeResponseOfAutoSuggestValue(

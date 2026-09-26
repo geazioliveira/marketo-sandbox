@@ -1,0 +1,15 @@
+import { faker } from '@faker-js/faker'
+import type { SyncProgramMemberStatusRequest } from '../../lead-database-definitions/requests/sync-program-member-status-request'
+import { makeProgramMemberStatus } from './program-member-status'
+
+export function makeSyncProgramMemberStatusRequest(
+  overrides: Partial<SyncProgramMemberStatusRequest> = {},
+): SyncProgramMemberStatusRequest {
+  return {
+    statusName: faker.lorem.words({ min: 2, max: 3 }),
+    input: faker.helpers.multiple(() => makeProgramMemberStatus(), {
+      count: { min: 1, max: 3 },
+    }),
+    ...overrides,
+  }
+}

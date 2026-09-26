@@ -1,0 +1,17 @@
+import type { LeadAttribute2Fields } from './lead-attribute2-fields'
+import type { LeadAttribute2SearchableFields } from './lead-attribute2-searchable-fields'
+
+export interface LeadAttribute2 {
+  /**
+   * "API Lead"
+   */
+  name: string
+  /**
+   * List of searchable fields
+   */
+  searchableFields: Array<LeadAttribute2SearchableFields>
+  /**
+   * Description of searchable fields
+   */
+  fields: Array<LeadAttribute2Fields>
+}

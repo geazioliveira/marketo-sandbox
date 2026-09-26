@@ -1,0 +1,99 @@
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  Param,
+  Post,
+  Query,
+} from '@nestjs/common'
+import { NamedAccountListsService } from './named-account-lists.service'
+
+import type { AddNamedAccountListMemberRequest } from '../../lead-database-definitions/requests/add-named-account-list-member-request'
+import type { DeleteNamedAccountListRequest } from '../../lead-database-definitions/requests/delete-named-account-list-request'
+import type { RemoveNamedAccountListMemberRequest } from '../../lead-database-definitions/requests/remove-named-account-list-member-request'
+import type { ResponseOfNamedAccount } from '../../lead-database-definitions/responses/response-of-named-account'
+import type { ResponseOfNamedAccountList } from '../../lead-database-definitions/responses/response-of-named-account-list'
+import type { SyncNamedAccountListRequest } from '../../lead-database-definitions/requests/sync-named-account-list-request'
+
+@Controller()
+export class NamedAccountListsController {
+  constructor(
+    private readonly namedAccountListsService: NamedAccountListsService,
+  ) {}
+
+  @Get('rest/v1/namedAccountList/:id/namedAccounts.json')
+  async getNamedAccountListMembersUsingGET(
+    @Param('id') id: string,
+    @Query('fields') fields?: Array<string>,
+    @Query('batchSize') batchSize?: number,
+    @Query('nextPageToken') nextPageToken?: string,
+  ): Promise<ResponseOfNamedAccount> {
+    return this.namedAccountListsService.getNamedAccountListMembersUsingGET(
+      id,
+      fields,
+      batchSize,
+      nextPageToken,
+    )
+  }
+
+  @Post('rest/v1/namedAccountList/:id/namedAccounts.json')
+  @HttpCode(200)
+  async addNamedAccountListMembersUsingPOST(
+    @Param('id') id: string,
+    @Body() addNamedAccountListMemberRequest: AddNamedAccountListMemberRequest,
+  ): Promise<ResponseOfNamedAccount> {
+    return this.namedAccountListsService.addNamedAccountListMembersUsingPOST(
+      id,
+      addNamedAccountListMemberRequest,
+    )
+  }
+
+  @Post('rest/v1/namedAccountList/:id/namedAccounts/remove.json')
+  @HttpCode(200)
+  async removeNamedAccountListMembersUsingPOST(
+    @Param('id') id: string,
+    @Body()
+    removeNamedAccountListMemberRequest: RemoveNamedAccountListMemberRequest,
+  ): Promise<ResponseOfNamedAccount> {
+    return this.namedAccountListsService.removeNamedAccountListMembersUsingPOST(
+      id,
+      removeNamedAccountListMemberRequest,
+    )
+  }
+
+  @Get('rest/v1/namedAccountLists.json')
+  async getNamedAccountListsUsingGET(
+    @Query('filterType') filterType: string,
+    @Query('filterValues') filterValues: Array<string>,
+    @Query('batchSize') batchSize?: number,
+    @Query('nextPageToken') nextPageToken?: string,
+  ): Promise<ResponseOfNamedAccountList> {
+    return this.namedAccountListsService.getNamedAccountListsUsingGET(
+      filterType,
+      filterValues,
+      batchSize,
+      nextPageToken,
+    )
+  }
+
+  @Post('rest/v1/namedAccountLists.json')
+  @HttpCode(200)
+  async syncNamedAccountListsUsingPOST(
+    @Body() syncNamedAccountListRequest: SyncNamedAccountListRequest,
+  ): Promise<ResponseOfNamedAccountList> {
+    return this.namedAccountListsService.syncNamedAccountListsUsingPOST(
+      syncNamedAccountListRequest,
+    )
+  }
+
+  @Post('rest/v1/namedAccountLists/delete.json')
+  @HttpCode(200)
+  async deleteNamedAccountListsUsingPOST(
+    @Body() deleteNamedAccountListRequest: DeleteNamedAccountListRequest,
+  ): Promise<ResponseOfNamedAccountList> {
+    return this.namedAccountListsService.deleteNamedAccountListsUsingPOST(
+      deleteNamedAccountListRequest,
+    )
+  }
+}

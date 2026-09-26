@@ -1,7 +1,7 @@
 import { NestFactory } from '@nestjs/core'
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger'
 import { AppModule } from './app.module'
-import { seedMockData } from './asset/asset-mocks'
+import { seedMockData } from './mocks'
 import { listenAddress } from './listen-address'
 
 async function bootstrap() {

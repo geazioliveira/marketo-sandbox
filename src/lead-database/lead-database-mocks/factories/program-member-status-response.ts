@@ -1,0 +1,17 @@
+import { faker } from '@faker-js/faker'
+import type { ProgramMemberStatusResponse } from '../../lead-database-definitions/responses/program-member-status-response'
+import { makeReason } from './reason'
+
+export function makeProgramMemberStatusResponse(
+  overrides: Partial<ProgramMemberStatusResponse> = {},
+): ProgramMemberStatusResponse {
+  return {
+    status: faker.helpers.arrayElement(['updated', 'skipped'] as const),
+    reasons: faker.helpers.multiple(() => makeReason(), {
+      count: { min: 1, max: 3 },
+    }),
+    leadId: faker.number.int({ min: 1, max: 99999 }),
+    seq: faker.number.int({ min: 1, max: 1000 }),
+    ...overrides,
+  }
+}

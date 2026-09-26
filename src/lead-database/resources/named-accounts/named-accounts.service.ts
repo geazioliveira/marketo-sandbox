@@ -1,0 +1,47 @@
+import { Injectable } from '@nestjs/common'
+import { makeResponseOfLeadField } from '../../lead-database-mocks/factories/response-of-lead-field'
+import { makeResponseOfNamedAccount } from '../../lead-database-mocks/factories/response-of-named-account'
+import { makeResponseOfObjectMetaData } from '../../lead-database-mocks/factories/response-of-object-meta-data'
+
+import type { ResponseOfLeadField } from '../../lead-database-definitions/responses/response-of-lead-field'
+import type { ResponseOfNamedAccount } from '../../lead-database-definitions/responses/response-of-named-account'
+import type { ResponseOfObjectMetaData } from '../../lead-database-definitions/responses/response-of-object-meta-data'
+
+@Injectable()
+export class NamedAccountsService {
+  async getNamedAccountFieldByNameUsingGET(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfLeadField> {
+    return makeResponseOfLeadField()
+  }
+
+  async getNamedAccountFieldsUsingGET(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfLeadField> {
+    return makeResponseOfLeadField()
+  }
+
+  async getNamedAccountsUsingGET(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfNamedAccount> {
+    return makeResponseOfNamedAccount()
+  }
+
+  async syncNamedAccountsUsingPOST(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfNamedAccount> {
+    return makeResponseOfNamedAccount()
+  }
+
+  async deleteNamedAccountsUsingPOST(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfNamedAccount> {
+    return makeResponseOfNamedAccount()
+  }
+
+  async describeUsingGET_3(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfObjectMetaData> {
+    return makeResponseOfObjectMetaData()
+  }
+}

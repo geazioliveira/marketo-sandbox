@@ -1,0 +1,16 @@
+import { faker } from '@faker-js/faker'
+import type { CustomObject } from '../../lead-database-definitions/models/custom-object'
+import { makeReason } from './reason'
+
+export function makeCustomObject(
+  overrides: Partial<CustomObject> = {},
+): CustomObject {
+  return {
+    marketoGUID: faker.lorem.word(),
+    reasons: faker.helpers.multiple(() => makeReason(), {
+      count: { min: 1, max: 3 },
+    }),
+    seq: faker.number.int({ min: 1, max: 1000 }),
+    ...overrides,
+  }
+}

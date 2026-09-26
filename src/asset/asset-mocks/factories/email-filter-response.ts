@@ -1,4 +1,4 @@
-import { mockRequestId } from '../request-id'
+import { mockRequestId } from '../../../mocks/request-id'
 import type { EmailFilterResponse } from '../../asset-definitions/responses/email-filter-response'
 import { makeEmailFilterResult } from './email-filter-result'
 

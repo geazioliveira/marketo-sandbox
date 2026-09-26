@@ -1,0 +1,19 @@
+import { faker } from '@faker-js/faker'
+import type { ResponseOfRole } from '../../user-management-definitions/responses/response-of-role'
+
+export function makeResponseOfRole(
+  overrides: Partial<ResponseOfRole> = {},
+): ResponseOfRole {
+  return {
+    errors: [],
+    description: faker.lorem.sentence(),
+    id: faker.number.int({ min: 1, max: 99999 }),
+    isHidden: faker.datatype.boolean(),
+    isOnlyAllZones: faker.datatype.boolean(),
+    name: faker.lorem.words({ min: 2, max: 3 }),
+    createdAt: faker.date.recent().toISOString(),
+    updatedAt: faker.date.recent().toISOString(),
+    type: faker.lorem.word(),
+    ...overrides,
+  }
+}

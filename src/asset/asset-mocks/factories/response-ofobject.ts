@@ -1,6 +1,6 @@
 import { faker } from '@faker-js/faker'
-import { mockRequestId } from '../request-id'
-import type { ResponseOfobject } from '../../asset-definitions/models/response-ofobject'
+import { mockRequestId } from '../../../mocks/request-id'
+import type { ResponseOfobject } from '../../asset-definitions/responses/response-ofobject'
 
 export function makeResponseOfobject(
   overrides: Partial<ResponseOfobject> = {},

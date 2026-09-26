@@ -1,0 +1,28 @@
+import type { CustomObjectTypeFieldRelatedTo } from '../models/custom-object-type-field-related-to'
+
+export interface UpdateCustomObjectTypeFieldRequest {
+  /**
+   * API Name of custom object field
+   */
+  name?: string
+  /**
+   * UI display-name of the custom object field
+   */
+  displayName?: string
+  /**
+   * Datatype of the custom object field
+   */
+  dataType?: string
+  /**
+   * Description of the custom object field
+   */
+  description?: string
+  /**
+   * Set to true to enable field as unique identifier for deduplicating records. Default is false
+   */
+  isDedupeField?: boolean
+  /**
+   * Define custom object link field
+   */
+  relatedTo?: CustomObjectTypeFieldRelatedTo
+}

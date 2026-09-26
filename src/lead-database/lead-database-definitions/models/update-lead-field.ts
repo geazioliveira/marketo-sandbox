@@ -1,0 +1,22 @@
+export interface UpdateLeadField {
+  /**
+   * UI display-name of the field
+   */
+  displayName?: string
+  /**
+   * Description of the field
+   */
+  description?: string
+  /**
+   * If set to true, the field is hidden. Default is false
+   */
+  isHidden?: boolean
+  /**
+   * If set to true, field is encoded as HTML in email. Default is true
+   */
+  isHtmlEncodingInEmail?: boolean
+  /**
+   * If set to true, field is marked as sensitive. Default is false
+   */
+  isSensitive?: boolean
+}

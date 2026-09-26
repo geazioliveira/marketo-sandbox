@@ -1,4 +1,4 @@
-import { mockRequestId } from '../request-id'
+import { mockRequestId } from '../../../mocks/request-id'
 import type { FragmentFilterResponse } from '../../asset-definitions/responses/fragment-filter-response'
 import { makeFragmentFilterResult } from './fragment-filter-result'
 

@@ -1,0 +1,38 @@
+export interface ImportCustomObjectResponse {
+  /**
+   * Unique integer id of the import batch
+   */
+  batchId: number
+  /**
+   * Time spent on the batch
+   */
+  importTime?: string
+  /**
+   * Status message of the batch
+   */
+  message?: string
+  /**
+   * Number of rows processed so far
+   */
+  numOfObjectsProcessed?: number
+  /**
+   * Number of rows failed so far
+   */
+  numOfRowsFailed?: number
+  /**
+   * Number of rows with a warning so far
+   */
+  numOfRowsWithWarning?: number
+  /**
+   * Object API Name
+   */
+  objectApiName: string
+  /**
+   * Bulk operation type. Can be import or export
+   */
+  operation: string
+  /**
+   * Status of the batch
+   */
+  status: string
+}

@@ -1,5 +1,5 @@
 import { faker } from '@faker-js/faker'
-import { mockRequestId } from '../request-id'
+import { mockRequestId } from '../../../mocks/request-id'
 import type { ResponseOfFieldsMetaDataResponse } from '../../asset-definitions/responses/response-of-fields-meta-data-response'
 import { makeFieldsMetaDataResponse } from './fields-meta-data-response'
 

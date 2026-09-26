@@ -1,6 +1,6 @@
 import { faker } from '@faker-js/faker'
-import { mockRequestId } from '../request-id'
-import type { ResponseOfLandingPageDomains } from '../../asset-definitions/models/response-of-landing-page-domains'
+import { mockRequestId } from '../../../mocks/request-id'
+import type { ResponseOfLandingPageDomains } from '../../asset-definitions/responses/response-of-landing-page-domains'
 import { makeLandingPageDomain } from './landing-page-domain'
 
 export function makeResponseOfLandingPageDomains(

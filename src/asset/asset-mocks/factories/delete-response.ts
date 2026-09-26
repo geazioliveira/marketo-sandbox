@@ -1,4 +1,4 @@
-import { mockRequestId } from '../request-id'
+import { mockRequestId } from '../../../mocks/request-id'
 import type { DeleteResponse } from '../../asset-definitions/responses/delete-response'
 
 export function makeDeleteResponse(

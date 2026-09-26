@@ -1,0 +1,113 @@
+import { Injectable } from '@nestjs/common'
+import { makeResponseOfActivity } from '../../lead-database-mocks/factories/response-of-activity'
+import { makeResponseOfActivityType } from '../../lead-database-mocks/factories/response-of-activity-type'
+import { makeResponseOfCustomActivity } from '../../lead-database-mocks/factories/response-of-custom-activity'
+import { makeResponseOfCustomActivityType } from '../../lead-database-mocks/factories/response-of-custom-activity-type'
+import { makeResponseOfLeadChange } from '../../lead-database-mocks/factories/response-of-lead-change'
+import { makeResponseOfVoid } from '../../lead-database-mocks/factories/response-of-void'
+
+import type { ResponseOfActivity } from '../../lead-database-definitions/responses/response-of-activity'
+import type { ResponseOfActivityType } from '../../lead-database-definitions/responses/response-of-activity-type'
+import type { ResponseOfCustomActivity } from '../../lead-database-definitions/responses/response-of-custom-activity'
+import type { ResponseOfCustomActivityType } from '../../lead-database-definitions/responses/response-of-custom-activity-type'
+import type { ResponseOfLeadChange } from '../../lead-database-definitions/responses/response-of-lead-change'
+import type { ResponseOfVoid } from '../../lead-database-definitions/responses/response-of-void'
+
+@Injectable()
+export class ActivitiesService {
+  async getLeadActivitiesUsingGET(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfActivity> {
+    return makeResponseOfActivity()
+  }
+
+  async getDeletedLeadsUsingGET(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfActivity> {
+    return makeResponseOfActivity()
+  }
+
+  async addCustomActivityUsingPOST(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfCustomActivity> {
+    return makeResponseOfCustomActivity()
+  }
+
+  async createCustomActivityTypeUsingPOST(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfCustomActivityType> {
+    return makeResponseOfCustomActivityType()
+  }
+
+  async updateCustomActivityTypeUsingPOST(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfCustomActivityType> {
+    return makeResponseOfCustomActivityType()
+  }
+
+  async approveCustomActivityTypeUsingPOST(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfCustomActivityType> {
+    return makeResponseOfCustomActivityType()
+  }
+
+  async createCustomActivityTypeAttributesUsingPOST(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfCustomActivityType> {
+    return makeResponseOfCustomActivityType()
+  }
+
+  async deleteCustomActivityTypeAttributesUsingPOST(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfCustomActivityType> {
+    return makeResponseOfCustomActivityType()
+  }
+
+  async updateCustomActivityTypeAttributesUsingPOST(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfCustomActivityType> {
+    return makeResponseOfCustomActivityType()
+  }
+
+  async deleteCustomActivityTypeUsingPOST(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfCustomActivityType> {
+    return makeResponseOfCustomActivityType()
+  }
+
+  async describeCustomActivityTypeUsingGET(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfCustomActivityType> {
+    return makeResponseOfCustomActivityType()
+  }
+
+  async discardDraftofCustomActivityTypeUsingPOST(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfCustomActivityType> {
+    return makeResponseOfCustomActivityType()
+  }
+
+  async getCustomActivityTypeUsingGET(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfCustomActivityType> {
+    return makeResponseOfCustomActivityType()
+  }
+
+  async getLeadChangesUsingGET(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfLeadChange> {
+    return makeResponseOfLeadChange()
+  }
+
+  async getActivitiesPagingTokenUsingGET(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfVoid> {
+    return makeResponseOfVoid()
+  }
+
+  async getAllActivityTypesUsingGET(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfActivityType> {
+    return makeResponseOfActivityType()
+  }
+}

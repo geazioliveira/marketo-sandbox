@@ -1,0 +1,20 @@
+import { faker } from '@faker-js/faker'
+import type { SyncCompanyRequest } from '../../lead-database-definitions/requests/sync-company-request'
+import { makeCompany } from './company'
+
+export function makeSyncCompanyRequest(
+  overrides: Partial<SyncCompanyRequest> = {},
+): SyncCompanyRequest {
+  return {
+    action: faker.helpers.arrayElement([
+      'createOnly',
+      'updateOnly',
+      'createOrUpdate',
+    ] as const),
+    dedupeBy: faker.lorem.word(),
+    input: faker.helpers.multiple(() => makeCompany(), {
+      count: { min: 1, max: 3 },
+    }),
+    ...overrides,
+  }
+}

@@ -1,5 +1,5 @@
 import { faker } from '@faker-js/faker'
-import { mockRequestId } from '../request-id'
+import { mockRequestId } from '../../../mocks/request-id'
 import type { ResponseOfFolderResponse } from '../../asset-definitions/responses/response-of-folder-response'
 import { makeFolderResponse } from './folder-response'
 

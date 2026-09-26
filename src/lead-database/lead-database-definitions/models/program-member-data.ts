@@ -1,0 +1,14 @@
+export interface ProgramMemberData {
+  /**
+   * Unique integer id of a lead record
+   */
+  leadId: number
+  /**
+   * API Name of field to update. Must be updateable as described by <a href="/rest-api/endpoint-reference/lead-database-endpoint-reference/#/Leads/describeProgramMemberUsingGET2">Describe Program Member</a> endpoint.
+   */
+  '{fieldApiName}': string
+  /**
+   * API Name of another field to update (and so forth). Must be updateable as described by <a href="/rest-api/endpoint-reference/lead-database-endpoint-reference/#/Leads/describeProgramMemberUsingGET2">Describe Program Member</a> endpoint.
+   */
+  '{fieldApiName2}'?: string
+}

@@ -1,0 +1,18 @@
+import { faker } from '@faker-js/faker'
+import { mockRequestId } from '../../../mocks/request-id'
+import type { ResponseOfCustomObjectTypeFieldDataTypes } from '../../lead-database-definitions/responses/response-of-custom-object-type-field-data-types'
+
+export function makeResponseOfCustomObjectTypeFieldDataTypes(
+  overrides: Partial<ResponseOfCustomObjectTypeFieldDataTypes> = {},
+): ResponseOfCustomObjectTypeFieldDataTypes {
+  return {
+    errors: [],
+    requestId: mockRequestId(),
+    result: faker.helpers.multiple(() => faker.lorem.word(), {
+      count: { min: 1, max: 3 },
+    }),
+    success: true,
+    warnings: [],
+    ...overrides,
+  }
+}

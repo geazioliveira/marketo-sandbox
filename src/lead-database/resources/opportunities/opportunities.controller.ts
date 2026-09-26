@@ -1,0 +1,130 @@
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  Param,
+  Post,
+  Query,
+} from '@nestjs/common'
+import { OpportunitiesService } from './opportunities.service'
+
+import type { DeleteCustomObjectRequest } from '../../lead-database-definitions/requests/delete-custom-object-request'
+import type { LookupCustomObjectRequest } from '../../lead-database-definitions/requests/lookup-custom-object-request'
+import type { ResponseOfCustomObject } from '../../lead-database-definitions/responses/response-of-custom-object'
+import type { ResponseOfLeadField } from '../../lead-database-definitions/responses/response-of-lead-field'
+import type { ResponseOfObjectMetaData } from '../../lead-database-definitions/responses/response-of-object-meta-data'
+import type { SyncCustomObjectRequest } from '../../lead-database-definitions/requests/sync-custom-object-request'
+
+@Controller()
+export class OpportunitiesController {
+  constructor(private readonly opportunitiesService: OpportunitiesService) {}
+
+  @Get('rest/v1/opportunities/schema/fields/:fieldApiName.json')
+  async getOpportunityFieldByNameUsingGET(
+    @Param('fieldApiName') fieldApiName: string,
+  ): Promise<ResponseOfLeadField> {
+    return this.opportunitiesService.getOpportunityFieldByNameUsingGET(
+      fieldApiName,
+    )
+  }
+
+  @Get('rest/v1/opportunities/schema/fields.json')
+  async getOpportunityFieldsUsingGET(
+    @Query('batchSize') batchSize?: number,
+    @Query('nextPageToken') nextPageToken?: string,
+  ): Promise<ResponseOfLeadField> {
+    return this.opportunitiesService.getOpportunityFieldsUsingGET(
+      batchSize,
+      nextPageToken,
+    )
+  }
+
+  @Get('rest/v1/opportunities.json')
+  async getOpportunitiesUsingGET(
+    @Query('filterType') filterType: string,
+    @Query('filterValues') filterValues: Array<string>,
+    @Body() customObjectLookupRequest?: LookupCustomObjectRequest,
+    @Query('fields') fields?: Array<string>,
+    @Query('batchSize') batchSize?: number,
+    @Query('nextPageToken') nextPageToken?: string,
+  ): Promise<ResponseOfCustomObject> {
+    return this.opportunitiesService.getOpportunitiesUsingGET(
+      filterType,
+      filterValues,
+      customObjectLookupRequest,
+      fields,
+      batchSize,
+      nextPageToken,
+    )
+  }
+
+  @Post('rest/v1/opportunities.json')
+  @HttpCode(200)
+  async syncOpportunitiesUsingPOST(
+    @Body() syncCustomObjectRequest: SyncCustomObjectRequest,
+  ): Promise<ResponseOfCustomObject> {
+    return this.opportunitiesService.syncOpportunitiesUsingPOST(
+      syncCustomObjectRequest,
+    )
+  }
+
+  @Post('rest/v1/opportunities/delete.json')
+  @HttpCode(200)
+  async deleteOpportunitiesUsingPOST(
+    @Body() deleteCustomObjectRequest?: DeleteCustomObjectRequest,
+  ): Promise<ResponseOfCustomObject> {
+    return this.opportunitiesService.deleteOpportunitiesUsingPOST(
+      deleteCustomObjectRequest,
+    )
+  }
+
+  @Get('rest/v1/opportunities/describe.json')
+  async describeUsingGET_4(): Promise<ResponseOfObjectMetaData> {
+    return this.opportunitiesService.describeUsingGET_4()
+  }
+
+  @Get('rest/v1/opportunities/roles.json')
+  async getOpportunityRolesUsingGET(
+    @Query('filterType') filterType: string,
+    @Query('filterValues') filterValues: Array<string>,
+    @Body() customObjectLookupRequest?: LookupCustomObjectRequest,
+    @Query('fields') fields?: Array<string>,
+    @Query('batchSize') batchSize?: number,
+    @Query('nextPageToken') nextPageToken?: string,
+  ): Promise<ResponseOfCustomObject> {
+    return this.opportunitiesService.getOpportunityRolesUsingGET(
+      filterType,
+      filterValues,
+      customObjectLookupRequest,
+      fields,
+      batchSize,
+      nextPageToken,
+    )
+  }
+
+  @Post('rest/v1/opportunities/roles.json')
+  @HttpCode(200)
+  async syncOpportunityRolesUsingPOST(
+    @Body() syncCustomObjectRequest: SyncCustomObjectRequest,
+  ): Promise<ResponseOfCustomObject> {
+    return this.opportunitiesService.syncOpportunityRolesUsingPOST(
+      syncCustomObjectRequest,
+    )
+  }
+
+  @Post('rest/v1/opportunities/roles/delete.json')
+  @HttpCode(200)
+  async deleteOpportunityRolesUsingPOST(
+    @Body() deleteCustomObjectRequest?: DeleteCustomObjectRequest,
+  ): Promise<ResponseOfCustomObject> {
+    return this.opportunitiesService.deleteOpportunityRolesUsingPOST(
+      deleteCustomObjectRequest,
+    )
+  }
+
+  @Get('rest/v1/opportunities/roles/describe.json')
+  async describeOpportunityRoleUsingGET(): Promise<ResponseOfObjectMetaData> {
+    return this.opportunitiesService.describeOpportunityRoleUsingGET()
+  }
+}

@@ -1,0 +1,28 @@
+import type { LeadMapAttribute } from './lead-map-attribute'
+
+export interface LeadAttribute {
+  /**
+   * Datatype of the field
+   */
+  dataType: string
+  /**
+   * UI display-name of the field
+   */
+  displayName: string
+  /**
+   * Unique integer id of the field
+   */
+  id: number
+  /**
+   * Max length of the field. Only applicable to text, string, and text area.
+   */
+  length?: number
+  /**
+   * Description of REST API usage attributes
+   */
+  rest?: LeadMapAttribute
+  /**
+   * Description of SOAP API usage attributes
+   */
+  soap?: LeadMapAttribute
+}

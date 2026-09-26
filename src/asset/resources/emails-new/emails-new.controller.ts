@@ -3,6 +3,7 @@ import {
   Controller,
   Get,
   Headers,
+  HttpCode,
   Param,
   Post,
   Query,
@@ -28,6 +29,7 @@ export class EmailsNewController {
   constructor(private readonly emailsNewService: EmailsNewService) {}
 
   @Post('rest/asset/v2/email')
+  @HttpCode(200)
   async createContentUsingPOST_email(
     @Query('access_token') accessToken: string,
     @Headers('x-app-type') xAppType: 'marketo',
@@ -41,6 +43,7 @@ export class EmailsNewController {
   }
 
   @Post('rest/asset/v2/email/clone')
+  @HttpCode(200)
   async cloneContentUsingPOST_email(
     @Query('access_token') accessToken: string,
     @Headers('x-app-type') xAppType: 'marketo',
@@ -103,6 +106,7 @@ export class EmailsNewController {
   }
 
   @Post('rest/asset/v2/email/state/transition')
+  @HttpCode(200)
   async stateTransitionUsingPOST_email(
     @Query('access_token') accessToken: string,
     @Headers('x-app-type') xAppType: 'marketo',
@@ -116,6 +120,7 @@ export class EmailsNewController {
   }
 
   @Post('rest/asset/v2/email/usedby')
+  @HttpCode(200)
   async getContentUsedByUsingPOST_email(
     @Query('access_token') accessToken: string,
     @Headers('x-app-type') xAppType: 'marketo',
@@ -142,6 +147,7 @@ export class EmailsNewController {
   }
 
   @Post('rest/asset/v2/email/:id/delete')
+  @HttpCode(200)
   async deleteContentUsingPOST_email(
     @Query('access_token') accessToken: string,
     @Headers('x-app-type') xAppType: 'marketo',
@@ -155,6 +161,7 @@ export class EmailsNewController {
   }
 
   @Post('rest/asset/v2/email/:id/update')
+  @HttpCode(200)
   async updateContentUsingPOST_email(
     @Query('access_token') accessToken: string,
     @Headers('x-app-type') xAppType: 'marketo',
@@ -170,6 +177,7 @@ export class EmailsNewController {
   }
 
   @Post('rest/asset/v2/email/bulk/get')
+  @HttpCode(200)
   async bulkGetUsingPOST_email(
     @Query('access_token') accessToken: string,
     @Headers('x-app-type') xAppType: string,
@@ -183,6 +191,7 @@ export class EmailsNewController {
   }
 
   @Post('rest/asset/v2/email/bulk/delete')
+  @HttpCode(200)
   async bulkDeleteUsingPOST_email(
     @Query('access_token') accessToken: string,
     @Headers('x-app-type') xAppType: string,
@@ -196,6 +205,7 @@ export class EmailsNewController {
   }
 
   @Post('rest/asset/v2/email/bulk/usedby')
+  @HttpCode(200)
   async bulkUsedByUsingPOST_email(
     @Query('access_token') accessToken: string,
     @Headers('x-app-type') xAppType: string,

@@ -1,0 +1,53 @@
+import {
+  Body,
+  Controller,
+  Headers,
+  HttpCode,
+  Param,
+  Post,
+} from '@nestjs/common'
+import { ProgramMembersService } from './program-members.service'
+
+import type { DeleteProgramMembersRequest } from '../../data-ingestion-definitions/requests/delete-program-members-request'
+import type { SyncProgramMembersRequest } from '../../data-ingestion-definitions/requests/sync-program-members-request'
+
+@Controller()
+export class ProgramMembersController {
+  constructor(private readonly programMembersService: ProgramMembersService) {}
+
+  @Post('subscriptions/:munchkinId/programmembers')
+  @HttpCode(202)
+  async syncProgramMembers(
+    @Param('munchkinId') munchkinId: string,
+    @Headers('X-Mkto-User-Token') xMktoUserToken: string,
+    @Body() body: SyncProgramMembersRequest,
+    @Headers('X-Correlation-Id') xCorrelationId?: string,
+    @Headers('X-Request-Source') xRequestSource?: string,
+  ): Promise<void> {
+    return this.programMembersService.syncProgramMembers(
+      munchkinId,
+      xMktoUserToken,
+      body,
+      xCorrelationId,
+      xRequestSource,
+    )
+  }
+
+  @Post('subscriptions/:munchkinId/programmembers/delete')
+  @HttpCode(202)
+  async deleteProgramMembers(
+    @Param('munchkinId') munchkinId: string,
+    @Headers('X-Mkto-User-Token') xMktoUserToken: string,
+    @Body() body: DeleteProgramMembersRequest,
+    @Headers('X-Correlation-Id') xCorrelationId?: string,
+    @Headers('X-Request-Source') xRequestSource?: string,
+  ): Promise<void> {
+    return this.programMembersService.deleteProgramMembers(
+      munchkinId,
+      xMktoUserToken,
+      body,
+      xCorrelationId,
+      xRequestSource,
+    )
+  }
+}

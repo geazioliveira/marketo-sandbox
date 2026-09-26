@@ -1,4 +1,12 @@
-import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common'
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  Param,
+  Post,
+  Query,
+} from '@nestjs/common'
 import { FoldersService } from './folders.service'
 
 import type { CreateFolderRequest } from '../../asset-definitions/requests/create-folder-request'
@@ -35,6 +43,7 @@ export class FoldersController {
   }
 
   @Post('rest/asset/v1/folder/:id.json')
+  @HttpCode(200)
   async updateFolderUsingPOST(
     @Param('id') id: number,
     @Body() updateFolderRequest: UpdateFolderRequest,
@@ -58,6 +67,7 @@ export class FoldersController {
   }
 
   @Post('rest/asset/v1/folder/:id/delete.json')
+  @HttpCode(200)
   async deleteFolderUsingPOST(
     @Param('id') id: number,
     @Body('type') type: 'Program' | 'Folder',
@@ -83,6 +93,7 @@ export class FoldersController {
   }
 
   @Post('rest/asset/v1/folders.json')
+  @HttpCode(200)
   async createFolderUsingPOST(
     @Body() createFolderRequest: CreateFolderRequest,
   ): Promise<ResponseOfFolderResponse> {

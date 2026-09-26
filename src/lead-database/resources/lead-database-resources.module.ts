@@ -1,0 +1,45 @@
+import { Module } from '@nestjs/common'
+import { ActivitiesModule } from './activities/activities.module'
+import { BulkExportActivitiesModule } from './bulk-export-activities/bulk-export-activities.module'
+import { BulkExportCustomObjectsModule } from './bulk-export-custom-objects/bulk-export-custom-objects.module'
+import { BulkExportLeadsModule } from './bulk-export-leads/bulk-export-leads.module'
+import { BulkExportProgramMembersModule } from './bulk-export-program-members/bulk-export-program-members.module'
+import { BulkImportCustomObjectsModule } from './bulk-import-custom-objects/bulk-import-custom-objects.module'
+import { BulkImportLeadsModule } from './bulk-import-leads/bulk-import-leads.module'
+import { BulkImportProgramMembersModule } from './bulk-import-program-members/bulk-import-program-members.module'
+import { CampaignsModule } from './campaigns/campaigns.module'
+import { CompaniesModule } from './companies/companies.module'
+import { CustomObjectsModule } from './custom-objects/custom-objects.module'
+import { LeadsModule } from './leads/leads.module'
+import { NamedAccountListsModule } from './named-account-lists/named-account-lists.module'
+import { NamedAccountsModule } from './named-accounts/named-accounts.module'
+import { OpportunitiesModule } from './opportunities/opportunities.module'
+import { ProgramMembersModule } from './program-members/program-members.module'
+import { SalesPersonsModule } from './sales-persons/sales-persons.module'
+import { StaticListsModule } from './static-lists/static-lists.module'
+import { UsageModule } from './usage/usage.module'
+
+@Module({
+  imports: [
+    ActivitiesModule,
+    BulkExportActivitiesModule,
+    BulkExportCustomObjectsModule,
+    BulkExportLeadsModule,
+    BulkExportProgramMembersModule,
+    BulkImportCustomObjectsModule,
+    BulkImportLeadsModule,
+    BulkImportProgramMembersModule,
+    CampaignsModule,
+    CompaniesModule,
+    CustomObjectsModule,
+    LeadsModule,
+    NamedAccountListsModule,
+    NamedAccountsModule,
+    OpportunitiesModule,
+    ProgramMembersModule,
+    SalesPersonsModule,
+    StaticListsModule,
+    UsageModule,
+  ],
+})
+export class LeadDatabaseResourcesModule {}
