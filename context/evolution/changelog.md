@@ -4,6 +4,51 @@ Uma entrada por mudança mergeada, da mais nova para a mais antiga, escrita no p
 
 ---
 
+## 2026-09-26: Hooks do Claude Code que interrompem, antes da ação, o que contorna o loop (#5)
+
+**Fase**: Learn
+**Tipo**: Feature
+
+### O que foi construído / corrigido
+
+- **Quatro hooks de projeto em `.claude/hooks/`,** ligados pelo `.claude/settings.json`:
+  - o `guard-bash` julga, antes de cada comando, os `gh` e `git` que contornam o loop: nega o Approve escrito pelo agente, `ready-for-agent`, toda escrita de label de estado menos a troca de `needs-triage` por `ready-for-human` depois de um `# Plano`, a PR sem `Closes #N.`, commit e push em `main`, os tokens de skip e resolver uma thread sem ter respondido nela; pede confirmação antes de um merge, que ele nega quando a revisão do Copilot, os pedidos pendentes, as threads ou os checks exigidos, lidos ao vivo, não estão em ordem;
+  - o `build-guard` só deixa editar fora de `context/intent/` com o cache do gate aberto para a branch, e nega em `main`;
+  - o `plan-to-issue` marca como pendente o plano aceito no plan mode até ele ser publicado numa issue;
+  - o `session-context` diz a branch, a issue e o estado do gate, e lembra que aprovação no chat não é Approve.
+- **Os hooks só restringem:** nenhum devolve `allow`, e em `bypassPermissions`, `dontAsk` e `auto` a confirmação crítica vira negação. O `run.sh` sai com 2 quando o script ou o `node` falta.
+- **O `gateStatus()`** passou a fechar o cache enquanto existir o marcador de um plano pendente, por mais recente que seja o gate.
+- **As docs falam dos hooks no presente:** a camada 3 e os limites na ADR 0002, a seção Os hooks do Claude Code no fluxo, a rota no `AGENTS.md`, e um teste de drift que confere o presente.
+- **Os critérios da #17** que ficaram para depois do merge foram marcados, com a evidência de cada um.
+
+### Números medidos
+
+- `npm run check`: 2.370 testes, dos quais 1.022 são dos hooks, em 11 arquivos de `test/hooks/`.
+- O código dos hooks tem 8,8 mil linhas; os testes e o suporte deles, 10,4 mil.
+- Corpus de 902 comandos Bash reais das sessões deste projeto: 816, 75 e 11 (passa, confirma, nega) na primeira rodada; 847, 44 e 11 depois das correções, com as mesmas 11 recusas certas. Mediana de 93 ms e máximo de 1,5 s.
+- As duas sondas do plano foram negadas com os hooks ativos, em modo `auto`.
+
+### Decisões tomadas
+
+- [0002: Enforcement soft do loop no GitHub Free](../decisions/0002-soft-enforcement-on-github-free.md): a camada 3 existe, com os limites dela.
+- [0003: Revisão do Copilot na cabeça e nenhuma thread aberta antes do merge](../decisions/0003-copilot-review-and-no-open-threads-before-merge.md): os hooks fazem valer responder antes de resolver e conferem a revisão ao vivo antes do merge.
+
+### Patterns aplicados ou criados
+
+- [Corpus de comandos reais](../knowledge/patterns/real-command-corpus.md), novo
+- [Guarda que só reconhece o nome literal](../knowledge/anti-patterns/guard-by-literal-name.md), anti-pattern novo
+- [O gate do loop](../knowledge/patterns/loop-gate.md) e [Revisão classificada por risco](../knowledge/patterns/risk-classified-review.md), atualizados
+
+### Aprendizados / surpresas
+
+- **Os testes provam a força de uma guarda, e o corpus prova o custo dela.** Cerca de 1.000 testes e uma revisão adversarial por peça deixaram passar 75 confirmações em trabalho legítimo, que o modo `auto` teria transformado em negações.
+- **Os hooks valem assim que o `.claude/settings.json` muda.** Não foi preciso reiniciar a sessão para as sondas, e a primeira coisa que os hooks negaram foi um comando de simulação do próprio agente.
+- **A prosa que cita um comando parece um comando.** Um script que escreve documentação citando `gh` conta como capaz de rodá-lo; a edição vai pela ferramenta Edit.
+- **Um agente de verificação rodou por engano uma lista de casos** escrita num heredoc que continha `EOF`. Nada chegou ao projeto, mas a lista de casos agora é escrita como dado, nunca como shell.
+- **A verificação adversarial parou no meio duas vezes,** porque um filtro de segurança barrou a escrita dos comandos de evasão. As brechas provadas antes disso foram fechadas, e o que não dá para ver pelo texto do comando foi para os limites da ADR 0002.
+
+---
+
 ## 2026-09-26: Reescrita multi-API, cinco documentos Swagger em main (#6, PR #21)
 
 **Fase**: Learn

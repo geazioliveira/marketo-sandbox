@@ -309,6 +309,7 @@ Desde a #5, hooks de projeto em `.claude/hooks/`, ligados pelo `.claude/settings
 | `plan-to-issue` | Depois de `ExitPlanMode` e de `Bash` | Marca o plano aceito no plan mode como pendente, no diretório git comum do repositório, até ele ser publicado numa issue. Ao publicar, apaga o marcador e o cache do gate, que precisa rodar de novo |
 | `session-context` | No início da sessão e a cada mensagem | Diz a branch, a issue e o estado do gate, e lembra que aprovação no chat não é Approve |
 
+- **Valem assim que o `.claude/settings.json` muda.** O Claude Code recarrega o arquivo sem reiniciar a sessão (medido na #5).
 - **Só restringem.** Nenhum hook devolve `allow`: sem objeção, o fluxo normal de permissão segue. Na dúvida, pedem confirmação.
 - **Em `bypassPermissions`, `dontAsk` e `auto`,** uma confirmação crítica (merge, caminho do harness, cache não verificado, plano pendente, indireção) vira negação. Nesses casos, a ação é feita fora desse modo.
 - **Quando um hook nega ou pede confirmação,** a mensagem diz o motivo. O agente resolve a causa (roda o gate, publica o plano, responde na thread) em vez de contornar o hook.

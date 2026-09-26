@@ -7,6 +7,7 @@ As regras vivem no Context Mesh. Esta página só aponta para elas.
 - [A forma de um módulo de recurso](context/knowledge/patterns/resource-module-shape.md)
 - [A fronteira do código gerado](context/knowledge/patterns/generated-code-boundary.md)
 - [Ciclo de vida de issue e branch](context/knowledge/patterns/issue-branch-lifecycle.md)
+- [Corpus de comandos reais](context/knowledge/patterns/real-command-corpus.md)
 - [Factory com overrides](context/knowledge/patterns/factory-with-overrides.md)
 - [Gerar e conferir](context/knowledge/patterns/generate-and-check.md)
 - [O gate do loop](context/knowledge/patterns/loop-gate.md)
@@ -17,6 +18,7 @@ As regras vivem no Context Mesh. Esta página só aponta para elas.
 
 - [Dublê de teste estrito na camada errada](context/knowledge/anti-patterns/test-double-strict-on-the-wrong-layer.md)
 - [Editar código gerado à mão](context/knowledge/anti-patterns/hand-editing-generated-code.md)
+- [Guarda que só reconhece o nome literal](context/knowledge/anti-patterns/guard-by-literal-name.md)
 - [Limite da auditoria tirado do evento](context/knowledge/anti-patterns/audit-bound-from-the-event.md)
 - [Mensagem de commit que diz menos do que o commit faz](context/knowledge/anti-patterns/commit-message-understating-its-content.md)
 - [Mover as pastas geradas sem o gerador](context/knowledge/anti-patterns/moving-generated-folders-without-the-generator.md)
