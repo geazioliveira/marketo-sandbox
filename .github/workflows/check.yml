@@ -3,12 +3,14 @@
 # One job, so the required check keeps its name (`Qualidade / check`, pinned in
 # scripts/loop-sections.mjs as requiredChecks). `npm run check` is what a
 # person runs before the PR: lint, format:check, typecheck, unit tests,
-# check:context and the build, in that order. The e2e is a step of its own,
-# because it boots the app. It needs no environment of its own: since #9 the
-# app sends no telemetry.
+# check:context, the build and check:all, in that order. The e2e is a step of
+# its own, because it boots the app. It needs no environment of its own: since
+# #9 the app sends no telemetry.
 #
-# Still left out: check:all, and with it Python. The generators still write to
-# the old layout, so it cannot pass today (#7).
+# check:all runs the three generators in --check mode, so the committed output
+# must be what they emit (#7). They use only the Python standard library, and
+# the runner image's python3 runs them: no setup step, and the version follows
+# the image (ADR 0008).
 name: Qualidade
 
 on:
