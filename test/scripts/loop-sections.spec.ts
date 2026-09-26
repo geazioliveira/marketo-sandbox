@@ -3,6 +3,8 @@ import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import * as loop from '../../scripts/loop-sections.mjs'
 import {
+  agentCreateStateLabels,
+  agentPlanLabelTransition,
   approveLikeHeading,
   approveState,
   branchCategory,
@@ -42,11 +44,13 @@ import {
   parseBranch,
   parseSections,
   planCitesBranch,
+  readyLabel,
   refreshPrCommand,
   reviewRuleSince,
   shellWord,
   sectionsFor,
   stepIds,
+  stateLabels,
   type GateCache,
   type IssueComment,
   type PullRequestReview,
@@ -124,6 +128,17 @@ describe('parseBranch', () => {
 })
 
 describe('kindOf and sectionsFor', () => {
+  it('permits exactly the agent post-plan state transition without applying the owner’s ready label', () => {
+    expect(agentPlanLabelTransition).toEqual({
+      from: 'needs-triage',
+      to: 'ready-for-human',
+    })
+    expect(stateLabels).toContain(agentPlanLabelTransition.from)
+    expect(stateLabels).toContain(agentPlanLabelTransition.to)
+    expect(agentCreateStateLabels).toContain(agentPlanLabelTransition.to)
+    expect(agentPlanLabelTransition.to).not.toBe(readyLabel)
+  })
+
   it('finds exactly one category, or none', () => {
     expect(kindOf(['bug', 'ready-for-agent'])).toEqual({
       kind: 'bug',

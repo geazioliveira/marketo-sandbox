@@ -12,11 +12,11 @@ Uma entrada por mudança mergeada, da mais nova para a mais antiga, escrita no p
 ### O que foi construído / corrigido
 
 - Ao publicar um plano completo numa issue em `needs-triage`, o agente troca essa label por `ready-for-human` no mesmo passo. O dono continua sendo o único a escrever `# Owner Approve` e aplicar `ready-for-agent`.
-- A regra agora aparece no `AGENTS.md`, no fluxo, na ADR 0001, no pattern do gate, no glossário e na mensagem que o gate imprime. Esta PR separa a documentação compartilhada dos hooks da #5, que ainda irão chegar.
+- A regra agora aparece no `AGENTS.md`, no fluxo, na ADR 0001, no pattern do gate, no glossário, no contrato `agentPlanLabelTransition` e na mensagem que o gate imprime. Esta PR separa a documentação compartilhada dos hooks da #5, que ainda irão chegar.
 
 ### Números medidos
 
-- `npm run check`: 1.337 testes passaram; lint, typecheck, `check:context` e build passaram. `check:context` leu 38 arquivos, 486 links internos, 30 blocos Status, 9 decisões no índice e 6 entradas anteriores do changelog.
+- `npm run check`: 1.338 testes passaram; lint, typecheck, `check:context` e build passaram. `check:context` leu 38 arquivos, 489 links internos, 30 blocos Status, 9 decisões no índice e 7 entradas do changelog.
 - `OBSERVE_ENDPOINT=http://127.0.0.1:9 npm run test:e2e`: 1 teste passou.
 
 ### Decisões tomadas
@@ -29,7 +29,7 @@ Uma entrada por mudança mergeada, da mais nova para a mais antiga, escrita no p
 
 ### Aprendizados / surpresas
 
-- Os documentos gerais do Context Mesh já estavam em `main`. Só a regra mais recente precisava de PR própria; o intent ficou na branch da #5, e os hooks da #5 ainda irão chegar.
+- Os documentos gerais do Context Mesh já estavam em `main`. Só a regra mais recente precisava de PR própria; o intent ficou na branch da #5, e os hooks da #5 ainda irão chegar. A revisão do Copilot mostrou que a mensagem do gate e o contrato de labels precisavam mudar juntos.
 
 ---
 
