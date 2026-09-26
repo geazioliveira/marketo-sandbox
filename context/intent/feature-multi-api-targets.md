@@ -81,6 +81,7 @@ Esta feature leva a reescrita para `main` pelo loop. Cada operação dos cinco d
   - `6e05850`: os módulos das áreas novas e a ligação delas no `AppModule`;
   - `53150ea`: o e2e das 388 rotas e de um pedido por área;
   - `4ed897b`: o e2e passa a contar os oito métodos do OpenAPI, achado da verificação adversarial;
+  - `448df86`: o merge de `main` depois da #9, com os conflitos resolvidos e as citações de linha conferidas de novo;
   - o Learn: a [ADR 0004](../decisions/0004-swagger-as-single-source-with-committed-generated-code.md) com uma fonte por área, emendas nas ADRs de 0005 a 0009, os patterns, os anti-patterns, o glossário, o `AGENTS.md`, o fluxo, o project intent e o changelog.
 - **Desvios do plano aprovado**:
   - a branch nasceu antes do merge da #5, pela resposta nova do dono à pergunta 4, na #6;
@@ -88,7 +89,7 @@ Esta feature leva a reescrita para `main` pelo loop. Cada operação dos cinco d
   - a ligação escrita à mão foi para depois da saída, e a linha de `src/main.ts` foi com a saída, para que todo commit compile;
   - a âncora da ADR 0004 foi com o README, e os testes ganharam um commit próprio.
 - **A verificação adversarial**, feita por um revisor independente: as 388 operações respondem um 2xx declarado, e só as 13 rotas sombreadas caem no handler errado. Ela achou três formas de schema que o código gerado não segue (#24) e o limite de 100 KiB no corpo, que já existia (#25). As duas ficaram registradas como limites nas ADRs 0004, 0005 e 0006.
-- **Medido**: os 604 arquivos gerados batem por sha256 com os que o dono gerou; num clone limpo, o `check:all` sai com 0, e o `generate:all` não muda nenhum arquivo; o app registra as 388 rotas, das quais 13 são sombreadas (#8); o `npm run check` passa com 1.339 testes, e o e2e com 13. Os números completos estão no [changelog](../evolution/changelog.md).
+- **Medido**: os 604 arquivos gerados batem por sha256 com os que o dono gerou; num clone limpo, o `check:all` sai com 0, e o `generate:all` não muda nenhum arquivo; o app registra as 388 rotas, das quais 13 são sombreadas (#8); depois do merge de `main` com a #9, o `npm run check` passa com 1.345 testes, e o e2e com 14. Os números completos estão no [changelog](../evolution/changelog.md).
 - **Fica para depois**:
   - a #7: o `check:all` no CI, o cabeçalho de gerado, a falha sem o Prettier e o comentário de `.github/workflows/check.yml:10-11`;
   - a #8: as 13 rotas sombreadas;
