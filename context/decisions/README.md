@@ -17,5 +17,6 @@ Uma escolha relevante por arquivo. Nome, template e vocabulário de status estã
 | [0007](0007-faker-factories-with-overrides-and-seed.md) | Factories faker com overrides e seed | Accepted |
 | [0008](0008-toolchain.md) | A toolchain | Accepted |
 | [0009](0009-behaviour-beside-generated-code.md) | Comportamento ao lado do código gerado, nunca dentro | Proposed |
+| [0010](0010-loopback-only-by-default.md) | O mock só fala com a própria máquina por padrão | Accepted |
 
 As decisões de 0004 a 0009 são o registro retroativo dos commits anteriores ao loop (#4). O racional que o histórico não registra está marcado "(inferido; confirmar)". A 0009 fica `Proposed` até a primeira sub-issue da Track A que construir comportamento.

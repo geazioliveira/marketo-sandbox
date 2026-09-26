@@ -20,7 +20,7 @@ Cada tag do Swagger vira uma pasta com um module, um controller e um service: o 
 - **Uma pasta por tag**, `src/asset/resources/<slug>/`. A primeira tag da operação decide o módulo (`scripts/generate-marketo-resources.py:266-270`). O slug é a tag em kebab-case, sem os parênteses: `Emails (New)` vira `emails-new` (`scripts/marketo_codegen.py:23-27`).
 - **Três arquivos por pasta**: `<slug>.module.ts`, `<slug>.controller.ts` e `<slug>.service.ts` (`scripts/generate-marketo-resources.py:273-278`).
 - **Os nomes vêm da tag em PascalCase**: `SnippetsModule`, `SnippetsController` e `SnippetsService`, e a propriedade `snippetsService` no controller (`scripts/generate-marketo-resources.py:105-107,224-238`).
-- **A ligação.** `AssetResourcesModule` importa os 23 módulos em ordem alfabética do slug (`scripts/generate-marketo-resources.py:244-262,279-281`). `AssetModule`, escrito à mão, importa o `AssetResourcesModule` (`src/asset/asset.module.ts:5`), e o `AppModule` importa o `AssetModule` (`src/app.module.ts:5,19`).
+- **A ligação.** `AssetResourcesModule` importa os 23 módulos em ordem alfabética do slug (`scripts/generate-marketo-resources.py:244-262,279-281`). `AssetModule`, escrito à mão, importa o `AssetResourcesModule` (`src/asset/asset.module.ts:5`), e o `AppModule` importa o `AssetModule` (`src/app.module.ts:2,5`).
 
 ### O module
 

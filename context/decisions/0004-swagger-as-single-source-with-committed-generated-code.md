@@ -32,12 +32,12 @@
 - **Todo gerador tem `--check`.** O argumento está em `generate-marketo-definitions.py:171`, `generate-marketo-resources.py:287` e `generate-marketo-factories.py:302`. `check_output` (`scripts/marketo_codegen.py:104-132`) gera em `.codegen-tmp`, formata, compara arquivo a arquivo com os arquivos da árvore e aponta todo `*.ts` a mais na pasta. Qualquer diferença sai com 1.
 - **Os scripts npm.** `generate:{definitions,resources,factories,all}` e `check:{definitions,resources,factories,all}` (`package.json:11-18`). `check:all` encadeia os três `--check` (`package.json:18`).
 - **O código gerado é commitado**: 255 arquivos em `src/asset/asset-definitions/`, 70 em `src/asset/resources/` e 259 em `src/asset/asset-mocks/`.
-- **Ninguém edita a saída à mão.** O [README](../../README.md#mock-marketo-asset-api) diz, desde `01ee283`, que essas pastas são geradas do Swagger e que nunca se editam à mão: regenera-se (`README.md:60-61`). E indica `npm run check:all` para o CI (`README.md:73-74`).
+- **Ninguém edita a saída à mão.** O [README](../../README.md#mock-marketo-asset-api) diz, desde `01ee283`, que essas pastas são geradas do Swagger e que nunca se editam à mão: regenera-se (`README.md:50-51`). E indica `npm run check:all` para o CI (`README.md:63-64`).
 
 ## Racional
 
 - **Fonte única contra deriva.** O project intent pede um único serviço, gerado a partir do Swagger oficial, em que toda rota documentada existe e responde no formato documentado. Um simulador à mão se afasta da API, como aconteceu no lite-campaign.
-- **Commitar a saída.** O `--check` pressupõe isso: ele compara os arquivos da árvore com o que o gerador emite (`scripts/marketo_codegen.py:117-122`), e o README o indica para o CI (`README.md:73-74`), onde a árvore é o commit. Commitar também deixa o mock compilar e rodar sem Python (inferido; confirmar), e deixa a revisão ver como diff o efeito de uma mudança no Swagger ou num gerador (inferido; confirmar).
+- **Commitar a saída.** O `--check` pressupõe isso: ele compara os arquivos da árvore com o que o gerador emite (`scripts/marketo_codegen.py:117-122`), e o README o indica para o CI (`README.md:63-64`), onde a árvore é o commit. Commitar também deixa o mock compilar e rodar sem Python (inferido; confirmar), e deixa a revisão ver como diff o efeito de uma mudança no Swagger ou num gerador (inferido; confirmar).
 - **`--check` em vez de confiança.** A saída pode se afastar da fonte por uma edição à mão ou por um gerador mudado sem regenerar. O `--check` mostra isso num comando, e o README o indica para o CI.
 - **Geradores próprios.** A saída segue uma forma que é deste projeto: um módulo Nest por tag e factories faker. Um gerador genérico não a emitiria (inferido; confirmar).
 
@@ -87,3 +87,4 @@ O histórico não registra alternativas. As linhas abaixo são as óbvias, com o
 
 - **Criado**: 2026-09-25 (Fase: Build), registro retroativo de `0c8e760`..`fb4a804` (#4)
 - **Status**: Accepted
+- **Atualizado**: 2026-09-26 (Fase: Learn), as citações do `README.md` seguiram as linhas novas depois que a #9 tirou o boilerplate do starter (#9)

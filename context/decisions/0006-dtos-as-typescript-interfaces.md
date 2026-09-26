@@ -20,7 +20,7 @@
   - as dependências entram com `import type` (`:123`).
 
   Dois exemplos: `src/asset/asset-definitions/responses/program-response.ts:1-12` e `src/asset/asset-definitions/models/folder.ts:1-12`.
-- **Sem biblioteca de validação.** class-validator e class-transformer não aparecem em `src` nem em `test`, e não estão instalados. No `package-lock.json`, são só peers opcionais de `@nestjs/common` (`:702-703`), de `@nestjs/mapped-types` (`:765-766`) e de `@nestjs/swagger` (`:1023-1024`).
+- **Sem biblioteca de validação.** class-validator e class-transformer não aparecem em `src` nem em `test`, e não estão instalados. No `package-lock.json`, são só peers opcionais de `@nestjs/common` (`:702-703`), de `@nestjs/mapped-types` (`:765-766`) e de `@nestjs/swagger` (`:846-847`).
 
 ## Racional
 
@@ -49,7 +49,7 @@ O histórico não registra alternativas. As linhas abaixo são as óbvias, e cad
 - **Mais difícil**:
   - **Nenhuma validação em runtime.** Um corpo ou um parâmetro fora do contrato chega ao service como veio. Não há pipe nos parâmetros (`src/asset/resources/snippets/snippets.controller.ts:19`), nem `ValidationPipe`, nem class-validator em `src`.
   - **A validação estrita da Track A vai precisar de outra coisa.** O project intent a lista entre os [critérios de aceite](../intent/project-intent.md#critérios-de-aceite). Uma interface não existe em runtime, então a validação precisa de código de runtime. A [ADR 0009](0009-behaviour-beside-generated-code.md), ainda `Proposed`, o põe ao lado do código gerado, nunca dentro dele. A forma da validação ainda não foi decidida.
-  - **A UI do Swagger sai sem schemas.** O `@nestjs/swagger` monta o documento de `/api` e `/api-json` a partir das rotas e dos decorators do app (`src/main.ts:18-19`, `README.md:49-52`), não de `docs/marketo-swagger-asset.json`. Não há nenhum `@Api*` em `src`, e o `nest-cli.json` não liga o plugin do `@nestjs/swagger`. Medido na #4 numa cópia de `origin/main` compilada com `tsc`: o `SwaggerModule.createDocument` sobre o `AssetResourcesModule` devolve 186 caminhos e 0 schemas.
+  - **A UI do Swagger sai sem schemas.** O `@nestjs/swagger` monta o documento de `/api` e `/api-json` a partir das rotas e dos decorators do app (`src/main.ts:17-18`, `README.md:39-42`), não de `docs/marketo-swagger-asset.json`. Não há nenhum `@Api*` em `src`, e o `nest-cli.json` não liga o plugin do `@nestjs/swagger`. Medido na #4 numa cópia de `origin/main` compilada com `tsc`: o `SwaggerModule.createDocument` sobre o `AssetResourcesModule` devolve 186 caminhos e 0 schemas.
   - **O tipo não garante o envelope.** Todo campo do envelope é opcional (`src/asset/asset-definitions/responses/response-of-snippet-response.ts:4-10`), então o tipo aceita um envelope sem `success`. Só a factory garante que ele vem preenchido ([ADR 0007](0007-faker-factories-with-overrides-and-seed.md)).
 
 ## Relacionados
@@ -66,3 +66,4 @@ O histórico não registra alternativas. As linhas abaixo são as óbvias, e cad
 
 - **Criado**: 2026-09-25 (Fase: Build), registro retroativo de `0c8e760`..`fb4a804` (#4)
 - **Status**: Accepted
+- **Atualizado**: 2026-09-26 (Fase: Learn), as citações do `src/main.ts`, do `README.md` e do `package-lock.json` seguiram as linhas novas depois da #9 (#9)

@@ -6,7 +6,7 @@ Editar à mão um arquivo que um gerador emite separa o que está commitado do q
 
 ## Problema
 
-- **A regra já estava escrita.** Desde `01ee283`, o README manda nunca editar à mão as pastas geradas e regenerá-las (`README.md:60-61`). Nenhum arquivo gerado diz que é gerado: não há cabeçalho, e a regra só existe no README. Prosa não recusa nada.
+- **A regra já estava escrita.** Desde `01ee283`, o README manda nunca editar à mão as pastas geradas e regenerá-las (`README.md:50-51`). Nenhum arquivo gerado diz que é gerado: não há cabeçalho, e a regra só existe no README. Prosa não recusa nada.
 - **`5cc5e09` editou a saída do gerador de resources.** A mensagem fala só de exportar os services. O commit também:
   - trocou o prefixo dos imports dos 23 controllers, de `../../../asset-definitions` para `../../asset-definitions`;
   - trocou os stubs `NotImplementedException` dos 23 services por `return makeX()`, com imports novos de `../../asset-definitions/*` e `../../asset-mocks/factories/*`. Antes, os services só importavam `@nestjs/common`.
@@ -16,7 +16,7 @@ Editar à mão um arquivo que um gerador emite separa o que está commitado do q
 - **Só o prefixo difere do que o gerador emite.** As factories e o `exports` são o que o código do gerador passou a emitir em `a967f26` (`scripts/generate-marketo-resources.py:189` e `:236`). O prefixo dos imports, não: o gerador ainda emite `../../../asset-definitions/…` e `../../../asset-mocks/factories/…` (`scripts/generate-marketo-resources.py:59` e `:63`), e nenhuma das duas versões commitadas dele emite `../../`: a de `0c8e760` emite `../../../asset-definitions/<categoria>/<arquivo>.js` (`0c8e760:scripts/generate-marketo-resources.py:73`).
 - **O `--check` acusa a edição.** Medido na #4, numa cópia de `origin/main`: `npm run check:resources` sai com 1 e aponta 46 arquivos alterados, os 23 controllers e os 23 services. A diferença é só o prefixo dos imports, e os 23 módulos estão em dia.
 - **Regenerar desfaz a edição.** O gerador apaga a pasta de saída antes de escrever (`shutil.rmtree`, `scripts/marketo_codegen.py:95`). Medido na #4: um `npm run generate:resources` devolve os 46 arquivos ao prefixo `../../../`, e o `npm run generate:all` recriaria as pastas no layout antigo, ao lado das atuais (#7).
-- **O CI não vê uma edição nova.** Enquanto a #7 não fecha, o `npm run check:all` é uma falha conhecida e fica fora do `npm run check` (`docs/development/workflow.md:273`). Nada no CI compara o código gerado com o que os geradores emitem.
+- **O CI não vê uma edição nova.** Enquanto a #7 não fecha, o `npm run check:all` é uma falha conhecida e fica fora do `npm run check` (`docs/development/workflow.md:277`). Nada no CI compara o código gerado com o que os geradores emitem.
 
 ## O que fazer em vez disso
 

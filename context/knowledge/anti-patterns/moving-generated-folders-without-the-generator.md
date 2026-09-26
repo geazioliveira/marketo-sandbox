@@ -6,7 +6,7 @@ Mover a pasta de saída de um gerador sem mudar o gerador deixa dois layouts, o 
 
 ## Problema
 
-- **O README anunciou o layout antes da mudança.** `01ee283` acrescentou a tabela com `src/asset/asset-definitions` e `src/asset/asset-mocks` (`README.md:63-67`) antes de as duas pastas existirem.
+- **O README anunciou o layout antes da mudança.** `01ee283` acrescentou a tabela com `src/asset/asset-definitions` e `src/asset/asset-mocks` (`01ee283:README.md:63-67`) antes de as duas pastas existirem.
 - **As pastas mudaram, e os geradores não.** Nenhum destes commits toca `scripts/`:
   - `a19d9d3` apagou 101 dos 255 DTOs de `src/asset-definitions/`;
   - `e7a0bb6` recriou esses 101 em `src/asset/asset-definitions/`, renomeou os outros 154 para lá e reformatou os 255. São os mesmos 255 nomes, antes e depois;
@@ -28,7 +28,7 @@ Mover a pasta de saída de um gerador sem mudar o gerador deixa dois layouts, o 
   - `check:resources` sai com 1: 46 alterados;
   - `check:factories` sai com 1: 259 ausentes.
 
-  Por isso o `check:all` ficou fora do `npm run check` (`docs/development/workflow.md:273`), e o critério de aceite que o exige segue aberto no [project intent](../../intent/project-intent.md#critérios-de-aceite). E o `npm run generate:all` recriaria as pastas no layout antigo, ao lado das atuais (#7).
+  Por isso o `check:all` ficou fora do `npm run check` (`docs/development/workflow.md:277`), e o critério de aceite que o exige segue aberto no [project intent](../../intent/project-intent.md#critérios-de-aceite). E o `npm run generate:all` recriaria as pastas no layout antigo, ao lado das atuais (#7).
 
 ## O que fazer em vez disso
 
