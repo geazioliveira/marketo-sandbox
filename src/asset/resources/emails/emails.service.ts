@@ -29,6 +29,12 @@ export class EmailsService {
     return makeResponseOfEmailResponse()
   }
 
+  async getEmailCCFieldsUsingGET(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfEmailCCFieldsResponse> {
+    return makeResponseOfEmailCCFieldsResponse()
+  }
+
   async getEmailByIdUsingGET(
     ..._arguments: unknown[]
   ): Promise<ResponseOfEmailResponse> {
@@ -147,12 +153,6 @@ export class EmailsService {
     ..._arguments: unknown[]
   ): Promise<ResponseOfEmailVariableResponse> {
     return makeResponseOfEmailVariableResponse()
-  }
-
-  async getEmailCCFieldsUsingGET(
-    ..._arguments: unknown[]
-  ): Promise<ResponseOfEmailCCFieldsResponse> {
-    return makeResponseOfEmailCCFieldsResponse()
   }
 
   async getEmailUsingGET(

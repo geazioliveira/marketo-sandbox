@@ -49,6 +49,12 @@ export class EmailTemplatesNewService {
     return makeEmailTemplateNewResponse()
   }
 
+  async bulkDeleteUsingPOST_emailtemplate(
+    ..._arguments: unknown[]
+  ): Promise<DeleteResponse> {
+    return makeDeleteResponse()
+  }
+
   async deleteContentUsingPOST_emailtemplate(
     ..._arguments: unknown[]
   ): Promise<DeleteResponse> {
@@ -65,12 +71,6 @@ export class EmailTemplatesNewService {
     ..._arguments: unknown[]
   ): Promise<EmailTemplateNewResponse> {
     return makeEmailTemplateNewResponse()
-  }
-
-  async bulkDeleteUsingPOST_emailtemplate(
-    ..._arguments: unknown[]
-  ): Promise<DeleteResponse> {
-    return makeDeleteResponse()
   }
 
   async bulkUsedByUsingPOST_emailtemplate(

@@ -4,6 +4,46 @@ Uma entrada por mudança mergeada, da mais nova para a mais antiga, escrita no p
 
 ---
 
+## 2026-09-26: Cada requisição chega ao próprio handler, e o gerador ordena as rotas (#8)
+
+**Fase**: Learn
+**Tipo**: Bug Fix
+
+### O que foi construído / corrigido
+
+- **13 rotas sombreadas passaram a chegar ao próprio handler.** Eram 11 de assets e 2 de Lead Database: `smartCampaign/byName.json`, `rules.json`, `flowSteps.json` e `flowStepTypes.json`, `smartList/byName.json` e `rules.json`, `staticList/byName.json`, `email/ccFields.json`, os três `v2/<tipo>/bulk/delete` e `GET` e `POST customobjects/schema.json`. Cada uma caía numa rota com parâmetro do mesmo método, declarada antes dela no mesmo controller.
+- **A regra de ordem, no gerador.** Dentro de cada tag, a ordem do Swagger se mantém, mas uma rota sobe para logo antes da primeira rota que a capturaria. A comparação ignora maiúsculas e minúsculas, como o Express, e troca os parâmetros por `{}`, que nenhum literal contém. Se duas rotas se capturam uma à outra, a geração falha com o par. A saída veio de `npm run generate:resources`, sem ajuste à mão.
+- **Dois testes em `test/route-order.e2e-spec.ts`.** Um lê o roteador do app montado e exige que a primeira camada que casa com uma requisição de exemplo de cada rota seja a própria. O outro, por HTTP, põe um `vi.spyOn` no método de service de cada rota e no da rota que a capturava. As linhas são tipadas: um nome de handler errado não compila. O caso entre controllers de `form-fields` entrou nos dois, sem mudar a ordem dos módulos. Os helpers de documento e de roteador foram para `test/support/marketo-routes.ts`, que o e2e da #6 também usa.
+- **O contexto.** A ADR 0005 ganhou a exceção na ordem das rotas e as alternativas medidas, e a ADR 0009, o anti-pattern, o pattern `resource-module-shape`, o glossário e o project intent acompanharam.
+
+### Números medidos
+
+- **Antes da correção**, em `3ddceb4`: 14 dos 19 testes novos falham (o do roteador, com as 13 rotas, e 13 linhas por HTTP), e passam a guarda, as 2 linhas de `form-fields` e os 2 controles.
+- **A saída regenerada**: 16 arquivos e 181 linhas movidas, nenhuma alterada (conteúdo ordenado idêntico, conferido com `sort | shasum`). A alternativa descartada no plano, uma ordenação estável pelo número de parâmetros, movia 1.308 linhas em 52 arquivos.
+- **Depois**: os 19 testes passam; `npm run check` com 1.345 testes; o e2e com 33 (19 desta issue, 12 da #6 e 2 do smoke da #9); `check:all` sai com 0; um segundo `generate:all` não muda nenhum arquivo.
+- **As citações**: as 47 linhas do gerador citadas sem commit em `context/` foram conferidas contra `3ddceb4` depois do deslocamento, e apontam para o mesmo código.
+- **A verificação adversarial**: 12.511 pares de requisição e método sondados, e só as 13 rotas mudam de handler, com os mesmos status. Com o `FormsModule` antes do `FormFieldsModule`, o teste do roteador e as 2 linhas de `form-fields` falham. No `/api-json`, 48 das 335 chaves de `paths` mudam de posição, com o mesmo conteúdo.
+
+### Decisões tomadas
+
+- [0005: NestJS sobre Express, com um módulo por tag](../decisions/0005-nestjs-express-one-module-per-tag.md): a ordem das rotas é a do Swagger, com a exceção da rota que seria capturada.
+- As seis perguntas do plano ficaram com as recomendações: a branch nasceu depois do merge da #6, as 2 rotas de Lead Database entraram, o caso entre controllers ficou só com o teste, o "teste estático" do relato virou o teste do roteador montado, a regra é o movimento mínimo, e a ADR 0005 foi emendada em vez de uma ADR nova.
+
+### Patterns aplicados ou criados
+
+- [Gerar e conferir](../knowledge/patterns/generate-and-check.md): o commit do gerador e o da saída separados, com o `check:all` na verificação.
+- [A forma de um módulo de recurso](../knowledge/patterns/resource-module-shape.md), com a regra de ordem.
+- [Rota literal declarada depois de uma rota com parâmetro](../knowledge/anti-patterns/literal-route-after-param-route.md), que passou a descrever o defeito no passado e o caminho certo no presente.
+
+### Aprendizados / surpresas
+
+- **Observar o handler, não a resposta.** Em `smartCampaign/byName.json`, a rota errada devolve o mesmo tipo que a certa. Só um spy no service, ou o matcher do próprio roteador, mostra para onde a requisição foi.
+- **Um rascunho validado encurta o Build.** Os testes e o gerador foram rascunhados e medidos na head da PR #21 antes do merge dela. Depois do merge, o gerador de resources estava igual, e o Build foi aplicar, regenerar e remedir.
+- **Uma inserção no topo de um arquivo muito citado desloca dezenas de citações.** As citações sem commit do gerador passaram por um mapa de deslocamento, conferido linha a linha contra o commit de antes. As correções que vieram depois foram escritas sem mudar o número de linhas, para não deslocar nada de novo.
+- **Imitar o casador de verdade, não o documento.** A verificação adversarial achou duas diferenças entre o `captures()` e o Express que nenhum documento exercita hoje: a caixa e uma amostra que coincide com um literal. O teste do roteador pegaria as duas no dia em que aparecessem, mas o gerador passaria a emitir a ordem errada antes disso.
+
+---
+
 ## 2026-09-26: Reescrita multi-API, cinco documentos Swagger em main (#6, PR #21)
 
 **Fase**: Learn
