@@ -91,7 +91,7 @@ def resolve_targets(arguments: argparse.Namespace) -> list[Target]:
             raise SystemExit("--swagger and --area must be used together.")
         if not arguments.swagger.is_file():
             raise SystemExit(f"Swagger document not found: {arguments.swagger}")
-        return [Target(arguments.area, arguments.area, arguments.swagger)]
+        return [custom_target(arguments.swagger, arguments.area)]
 
     keys = list(TARGETS) if "all" in arguments.target else list(dict.fromkeys(arguments.target))
     return [TARGETS[key] for key in keys]
@@ -278,3 +278,17 @@ def check_output(output: Path, files: dict[Path, str], label: str) -> int:
     finally:
         if TEMP.exists():
             shutil.rmtree(TEMP)
+
+
+def custom_target(swagger: Path, area: str) -> Target:
+    """A target for an unregistered document, confined to a new folder directly under `src/`.
+
+    write_output() deletes an area's output folders before writing, so `--area` may never name
+    a registered area, the shared mocks or a path that leaves `src/`.
+    """
+    taken = {target.area for target in TARGETS.values()} | {SHARED_MOCKS.name}
+    if not re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", area) or area in taken:
+        raise SystemExit(
+            f"--area must name a new kebab-case folder under src/, not a path, a registered area or 'mocks': {area!r}"
+        )
+    return Target(area, area, swagger)

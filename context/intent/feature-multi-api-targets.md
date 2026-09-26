@@ -82,6 +82,7 @@ Esta feature leva a reescrita para `main` pelo loop. Cada operação dos cinco d
   - `53150ea`: o e2e das 388 rotas e de um pedido por área;
   - `4ed897b`: o e2e passa a contar os oito métodos do OpenAPI, achado da verificação adversarial;
   - `448df86`: o merge de `main` depois da #9, com os conflitos resolvidos e as citações de linha conferidas de novo;
+  - a correção da revisão do Copilot: o `--area` só aceita uma pasta nova em kebab-case, direto em `src/`, e recusa um caminho, uma área registrada ou `mocks`;
   - o Learn: a [ADR 0004](../decisions/0004-swagger-as-single-source-with-committed-generated-code.md) com uma fonte por área, emendas nas ADRs de 0005 a 0009, os patterns, os anti-patterns, o glossário, o `AGENTS.md`, o fluxo, o project intent e o changelog.
 - **Desvios do plano aprovado**:
   - a branch nasceu antes do merge da #5, pela resposta nova do dono à pergunta 4, na #6;
