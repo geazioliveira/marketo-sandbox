@@ -36,7 +36,7 @@ Toda definição de um Swagger tem uma factory `makeX(overrides)` que devolve um
   ```
 
 - **Todo campo é preenchido**, obrigatório ou não (`scripts/generate-marketo-factories.py:198-206`). Só fica de fora um `$ref` que voltaria à própria definição (abaixo).
-- **Um schema sem `properties` não tem campo a preencher.** `Person` e `CustomObject`, do Data Ingestion, só têm `additionalProperties`, e a factory devolve só os overrides (`src/data-ingestion/data-ingestion-mocks/factories/person.ts`).
+- **Um schema de topo sem `properties` não tem campo a preencher.** `Person` e `CustomObject`, do Data Ingestion, só têm `additionalProperties`, e `LeadAttribute2SearchableFields`, de Lead Database, é um array de strings. A factory de cada um devolve só os overrides, `{}` por padrão (`src/data-ingestion/data-ingestion-mocks/factories/person.ts`; #24).
 
 ### Como os campos são preenchidos
 

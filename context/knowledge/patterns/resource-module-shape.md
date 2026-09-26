@@ -59,7 +59,8 @@ Cada tag de um Swagger vira, na área dele, uma pasta com um module, um controll
   - com `$ref`, devolve a factory da definição;
   - com um array de `$ref`, devolve de 1 a 3 itens da factory;
   - sem schema nenhum, como o 202 do Data Ingestion, o método não devolve nada, e a rota responde sem corpo;
-  - com outro schema, devolve `undefined as never`, e a rota também responde sem corpo. Só `inviteUserUsingPOST`, de `user-management`, cai aqui: o Swagger dele declara uma string.
+  - com outro schema, devolve `undefined as never`, e a rota também responde sem corpo. Só `inviteUserUsingPOST`, de `user-management`, cai aqui: o Swagger dele declara uma string (#24).
+- **Os headers de resposta não são gerados.** Os 202 do Data Ingestion documentam um `X-Request-Id`, e a rota não o envia (#24).
 - **O envelope é o caso comum.** Em assets, 186 dos 220 métodos devolvem uma factory `makeResponseOf*` com o envelope `{errors, requestId, result, success, warnings}`, e em `lead-database`, 135 dos 147, com `moreResult` e `nextPageToken` em alguns. Identity devolve o token (`ResponseOfIdentity`), e `user-management` devolve os tipos do documento dele, sem envelope.
 
 ### Os imports

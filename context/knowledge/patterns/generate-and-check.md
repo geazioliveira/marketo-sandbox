@@ -40,6 +40,7 @@ npm run check:all      # sai com 0 só quando a saída commitada é a que os ger
 - Ele acusa arquivo ausente, arquivo mudado e todo `*.ts` a mais na pasta de saída da área, e sai com 1. A mensagem lista até 10 caminhos e dá as duas contagens (`scripts/marketo_codegen.py:265-275`).
 - O `.codegen-tmp` é apagado no fim (`scripts/marketo_codegen.py:278-280`) e está no `.gitignore` (`.gitignore:41`).
 - Ele não confere a pasta de uma área que saiu do registro, nem a de uma área gerada com `--swagger` e `--area` ([ADR 0004](../../decisions/0004-swagger-as-single-source-with-committed-generated-code.md)).
+- **Não ponha caminhos de `src/` num `.prettierignore`.** O `--check` formata a cópia em `.codegen-tmp/`, e não no caminho real: com uma regra dessas, o generate deixaria o arquivo sem formatar, e o check o formataria, então os dois discordariam para sempre. A verificação adversarial da #6 mediu isso, e hoje não há `.prettierignore` (#7).
 
 ### O que a #7 ainda guarda
 
