@@ -16,7 +16,7 @@ Uma entrada por mudança mergeada, da mais nova para a mais antiga, escrita no p
 - **O `check:all` passou.** Além dos caminhos, faltava uma causa: o Prettier 3 lê o `.gitignore`, que lista `/.codegen-tmp/`, e não formatava a cópia que o `--check` compara. O Prettier dos geradores passou a ler só o `.prettierignore`.
 - **O status documentado.** O controller ganha `@HttpCode` quando o menor 2xx declarado difere do padrão do Nest: os 139 POSTs de assets passaram de 201 para 200, e os 7 de Data Ingestion respondem 202 sem corpo.
 - **Um e2e novo** confere as 388 rotas contra os documentos, recusa método+caminho repetido e faz um pedido por área.
-- **O `--area` ficou restrito.** A revisão do Copilot apontou que ele aceitava uma área registrada, um `..` ou um caminho absoluto, e o gerador apagaria a pasta. Agora ele só aceita uma pasta nova em kebab-case, direto em `src/`.
+- **O `--area` ficou restrito.** As revisões do Copilot apontaram que ele aceitava uma área registrada, um `..`, um caminho absoluto ou uma pasta com arquivos escritos à mão, e o gerador apagaria a pasta. Agora ele só aceita uma pasta em kebab-case, direto em `src/`, que não guarde nada além das três pastas de gerador.
 - **O contexto.** A ADR 0004 passou a uma fonte por área, com a origem e o sha256 dos cinco documentos. As ADRs de 0005 a 0009 ganharam emendas, e os patterns, os anti-patterns, o glossário, o `AGENTS.md`, o fluxo e o project intent acompanharam.
 
 ### Números medidos
