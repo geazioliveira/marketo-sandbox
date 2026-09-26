@@ -11,7 +11,7 @@
 - **O histórico já mostra o custo de misturar.** O `5cc5e09` mudou a saída gerada sem o gerador: nesse commit o gerador de resources nem rodava, porque o `marketo_codegen.py` que ele importa só chegou no `0ef242d`, e ele emitiu `../../../`, onde os arquivos commitados têm `../../`, até a #6 (`610e101:scripts/generate-marketo-resources.py:59`, `:63`). O `e7a0bb6` moveu as definições para `src/asset/` sem mudar o gerador, e o `b91681a` commitou as factories fora da pasta que o gerador delas escreve. Por isso o `npm run check:all` não passava antes da #6 (#7).
 - **Os pontos de encaixe que já existem.**
   - `src/asset/asset.module.ts` fica fora de toda pasta que um gerador escreve e importa o `AssetResourcesModule` (`src/asset/asset.module.ts:1-7`). Ele veio no `0c8e760`, e nenhum gerador o emite.
-  - Cada módulo gerado exporta o próprio serviço, como `exports: [SnippetsService]` (`src/asset/resources/snippets/snippets.module.ts:11`). O gerador faz isso desde o `a967f26` (`scripts/generate-marketo-resources.py:314`).
+  - Cada módulo gerado exporta o próprio serviço, como `exports: [SnippetsService]` (`src/asset/resources/snippets/snippets.module.ts:11`). O gerador faz isso desde o `a967f26` (`scripts/generate-marketo-resources.py:353`).
   - As factories aceitam overrides ([ADR 0007](0007-faker-factories-with-overrides-and-seed.md)).
 - **O layout mudou na #6.** A reescrita multi-API trouxe as áreas `src/{data-ingestion,identity,lead-database,user-management}/` e o `src/mocks/` comum, cada área com as próprias pastas geradas ([ADR 0004](0004-swagger-as-single-source-with-committed-generated-code.md)). O R3 da Track A depende de `identity/oauth/token`, e o R4 do `userservice`, que desde a #6 têm rota.
 
@@ -61,7 +61,7 @@
 - **Mais difícil**:
   - **o comportamento acompanha a superfície gerada.** Os nomes de método vêm do `operationId`, como `getSnippetByIdUsingGET` (`src/asset/resources/snippets/snippets.service.ts:17`), e uma mudança no Swagger pode quebrar o comportamento. O typecheck pega a quebra quando o comportamento usa os tipos gerados (inferido; confirmar);
   - **trocar o serviço gerado não é direto hoje.** Cada módulo gerado declara o próprio serviço como provider (`src/asset/resources/snippets/snippets.module.ts:8-13`), e o controller gerado o recebe no construtor (`src/asset/resources/snippets/snippets.controller.ts:26`). Trocá-lo sem tocar no módulo gerado provavelmente pede um gancho no gerador (inferido; confirmar);
-  - **as rotas sombreadas atrapalham.** As 11 rotas literais declaradas depois de uma rota `:id` caem no handler da `:id`, como a #4 mediu em runtime ([ADR 0005](0005-nestjs-express-one-module-per-tag.md), [anti-pattern](../knowledge/anti-patterns/literal-route-after-param-route.md)). Um comportamento preso a uma dessas rotas não roda até a #8 corrigir a ordem;
+  - **o comportamento depende da ordem das rotas.** Até a #8, 13 rotas literais caíam no handler de uma rota com parâmetro declarada antes delas, e um comportamento preso a uma delas não rodaria ([ADR 0005](0005-nestjs-express-one-module-per-tag.md), [anti-pattern](../knowledge/anti-patterns/literal-route-after-param-route.md)). Desde a #8, o gerador ordena as rotas e o `test/route-order.e2e-spec.ts` prova que cada requisição chega ao próprio handler. Uma rota escrita à mão ao lado do código gerado entra na mesma prova, porque o teste lê o app montado;
   - **a prova depende dos geradores.** O teste do item 5 pede `generate:all` e `check:all` funcionando, e eles funcionam desde a #6.
 
 ## Relacionados
@@ -84,4 +84,5 @@
 - **Criado**: 2026-09-25 (Fase: Build), registro retroativo de `0c8e760`..`fb4a804` (#4)
 - **Status**: Proposed
 - **Atualizado**: 2026-09-26 (Fase: Learn), o layout das cinco áreas chegou com a #6, e o `generate:all` e o `check:all` passaram a funcionar para a prova; as citações seguiram as linhas novas, e a do prefixo de import antigo passou a levar o commit `610e101` (#6)
+- **Atualizado**: 2026-09-26 (Fase: Learn), as rotas sombreadas deixaram de atrapalhar o comportamento: o gerador as ordena, e o `test/route-order.e2e-spec.ts` confere o app montado; a citação do gerador seguiu a linha nova (#8)
 - **Atualizado**: 2026-09-26 (Fase: Build), as citações dos arquivos gerados e dos geradores seguiram as linhas novas, depois do cabeçalho de gerado (#7)

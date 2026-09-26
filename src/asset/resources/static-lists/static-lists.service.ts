@@ -10,6 +10,12 @@ import type { ResponseOfStaticListResponse } from '../../asset-definitions/respo
 
 @Injectable()
 export class StaticListsService {
+  async getStaticListByNameUsingGET(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfStaticListResponse> {
+    return makeResponseOfStaticListResponse()
+  }
+
   async getStaticListByIdUsingGET(
     ..._arguments: unknown[]
   ): Promise<ResponseOfStaticListResponse> {
@@ -29,12 +35,6 @@ export class StaticListsService {
   }
 
   async createStaticListUsingPOST(
-    ..._arguments: unknown[]
-  ): Promise<ResponseOfStaticListResponse> {
-    return makeResponseOfStaticListResponse()
-  }
-
-  async getStaticListByNameUsingGET(
     ..._arguments: unknown[]
   ): Promise<ResponseOfStaticListResponse> {
     return makeResponseOfStaticListResponse()

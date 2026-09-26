@@ -16,16 +16,22 @@ import type { ResponseOfSmartListRuleType } from '../../asset-definitions/respon
 
 @Injectable()
 export class SmartListsService {
-  async getSmartListByIdUsingGET(
-    ..._arguments: unknown[]
-  ): Promise<ResponseOfSmartListResponseWithRules> {
-    return makeResponseOfSmartListResponseWithRules()
-  }
-
   async getSmartListByNameUsingGET(
     ..._arguments: unknown[]
   ): Promise<ResponseOfSmartListResponse> {
     return makeResponseOfSmartListResponse()
+  }
+
+  async getSmartListRulesUsingGET(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfSmartListRuleType> {
+    return makeResponseOfSmartListRuleType()
+  }
+
+  async getSmartListByIdUsingGET(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfSmartListResponseWithRules> {
+    return makeResponseOfSmartListResponseWithRules()
   }
 
   async deleteSmartListByIdUsingPOST(
@@ -44,12 +50,6 @@ export class SmartListsService {
     ..._arguments: unknown[]
   ): Promise<ResponseOfSmartListResponse> {
     return makeResponseOfSmartListResponse()
-  }
-
-  async getSmartListRulesUsingGET(
-    ..._arguments: unknown[]
-  ): Promise<ResponseOfSmartListRuleType> {
-    return makeResponseOfSmartListRuleType()
   }
 
   async getSmartListAutoSuggestUsingGET(

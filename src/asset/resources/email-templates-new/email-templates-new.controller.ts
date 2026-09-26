@@ -149,6 +149,20 @@ export class EmailTemplatesNewController {
     )
   }
 
+  @Post('rest/asset/v2/emailtemplate/bulk/delete')
+  @HttpCode(200)
+  async bulkDeleteUsingPOST_emailtemplate(
+    @Query('access_token') accessToken: string,
+    @Headers('x-app-type') xAppType: string,
+    @Body() bulkDeleteRequest: BulkDeleteRequest,
+  ): Promise<DeleteResponse> {
+    return this.emailTemplatesNewService.bulkDeleteUsingPOST_emailtemplate(
+      accessToken,
+      xAppType,
+      bulkDeleteRequest,
+    )
+  }
+
   @Post('rest/asset/v2/emailtemplate/:id/delete')
   @HttpCode(200)
   async deleteContentUsingPOST_emailtemplate(
@@ -190,20 +204,6 @@ export class EmailTemplatesNewController {
       accessToken,
       xAppType,
       bulkGetRequest,
-    )
-  }
-
-  @Post('rest/asset/v2/emailtemplate/bulk/delete')
-  @HttpCode(200)
-  async bulkDeleteUsingPOST_emailtemplate(
-    @Query('access_token') accessToken: string,
-    @Headers('x-app-type') xAppType: string,
-    @Body() bulkDeleteRequest: BulkDeleteRequest,
-  ): Promise<DeleteResponse> {
-    return this.emailTemplatesNewService.bulkDeleteUsingPOST_emailtemplate(
-      accessToken,
-      xAppType,
-      bulkDeleteRequest,
     )
   }
 

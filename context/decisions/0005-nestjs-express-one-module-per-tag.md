@@ -28,9 +28,9 @@
   - A forma é `{errors, requestId, result, success, warnings}`, com todos os campos opcionais e `result` como array (`src/asset/asset-definitions/responses/response-of-snippet-response.ts:7-13`).
   - A factory o preenche como uma chamada que deu certo: `success: true`, `errors: []`, `warnings: []` e um `requestId` de mock (`610e101:scripts/generate-marketo-factories.py:30-36`, aplicado em `:192-193`).
   - Dos outros 34, 33 devolvem tipos com `success` e `requestId`, mas sem `errors` nem `warnings`, como `DeleteResponse` (`src/asset/asset-definitions/responses/delete-response.ts:4-7`) e os `*NewResponse`. Só `ModelResponse` é `{}` (`src/asset/asset-definitions/responses/model-response.ts:4`). A [ADR 0007](0007-faker-factories-with-overrides-and-seed.md) diz o que as factories põem em cada um.
-- **A ordem das rotas é a do Swagger.** O gerador percorre `document["paths"]` na ordem do documento e anexa cada operação à tag dela nessa ordem (`610e101:scripts/generate-marketo-resources.py:267-270`). Nada põe uma rota literal antes de uma rota com parâmetro.
+- **A ordem das rotas é a do Swagger, com uma exceção (#8).** O gerador percorre os caminhos na ordem do documento e anexa cada operação à tag dela nessa ordem (`scripts/generate-marketo-resources.py:380-383`). Dentro de cada tag, uma rota que uma rota anterior do mesmo método capturaria sobe para logo antes da primeira rota que a captura (`order_routes()`, `:88-108`, chamada em `:388`). Uma rota captura outra quando o caminho da outra, com os parâmetros trocados por `{}`, casa com o padrão dela, em que cada `{param}` aceita um segmento, sem distinguir maiúsculas de minúsculas, como o Express (`:72-85`). Nenhum segmento literal tem chaves, então uma rota literal nunca captura uma rota com parâmetro. Se duas rotas se capturam uma à outra, nenhuma ordem serve as duas, e a geração falha com o par (`:101-107`). O controller e o service seguem a mesma ordem. Entre módulos, a ordem continua a alfabética.
 - **Desde a #6, um módulo de recursos por área.** Cada área tem um `<Área>ResourcesModule` em `src/<área>/resources/`, importado por um `<Área>Module` escrito à mão, e o `AppModule` importa os cinco (`src/app.module.ts:10-14`, [Pattern: A forma de um módulo de recurso](../knowledge/patterns/resource-module-shape.md)). São 49 tags e 388 operações. A forma de cada recurso é a mesma.
-- **Desde a #6, o status 2xx documentado.** Quando o menor 2xx que o Swagger declara difere do padrão do Nest (201 num POST, 200 no resto), o método ganha `@HttpCode` (`scripts/generate-marketo-resources.py:86-94`). Os 139 POSTs de assets passaram de 201 para 200, como o Swagger declara, e os 7 de Data Ingestion respondem 202. Uma resposta sem schema, como esse 202, sai sem corpo: o método do service não devolve nada (`:272-274`).
+- **Desde a #6, o status 2xx documentado.** Quando o menor 2xx que o Swagger declara difere do padrão do Nest (201 num POST, 200 no resto), o método ganha `@HttpCode` (`scripts/generate-marketo-resources.py:125-133`). Os 139 POSTs de assets passaram de 201 para 200, como o Swagger declara, e os 7 de Data Ingestion respondem 202. Uma resposta sem schema, como esse 202, sai sem corpo: o método do service não devolve nada (`:311-313`).
 
 ## Racional
 
@@ -52,22 +52,23 @@ O histórico não registra alternativas. As linhas abaixo são as óbvias, e cad
 | Express sem Nest | Sem módulos nem injeção de dependência, o comportamento de um recurso não teria onde se encaixar ao lado do código gerado (inferido; confirmar) |
 | Um módulo só, com as 220 rotas | Um arquivo enorme e nenhuma fronteira por recurso (inferido; confirmar) |
 | Um prefixo por controller, como `@Controller('rest/asset/v1')` | O gerador teria de partir cada caminho em prefixo e resto, e a rota deixaria de ser a cópia literal do Swagger (inferido; confirmar) |
+| A ordem do Swagger sem exceção | 13 rotas nunca chegavam ao próprio handler (medido na #4, na #6 e na #8) |
+| Toda rota literal antes das rotas com parâmetro, numa ordenação estável pelo número de parâmetros | Move 1.308 linhas em 52 arquivos gerados, contra 181 em 16 da regra escolhida, e afasta a ordem do Swagger sem ganho no roteamento (medido no plano da #8) |
+
+As duas últimas linhas vêm do plano da #8 e foram medidas.
 
 ## Consequências
 
 - **Mais fácil**:
   - cada operação do Swagger tem um método no controller e outro no service, que se acham pelo caminho ou pelo `operationId`;
-  - todo método de service devolve, sem credenciais, um corpo com a forma da resposta de sucesso documentada (`610e101:scripts/generate-marketo-resources.py:88-101`); as 11 rotas sombreadas abaixo são a exceção;
+  - todo método de service devolve, sem credenciais, um corpo com a forma da resposta de sucesso documentada (`610e101:scripts/generate-marketo-resources.py:88-101`);
+  - toda requisição chega ao handler da rota que ela nomeia, e o `test/route-order.e2e-spec.ts` prova isso para as 388 rotas do app montado, na ordem real de registro (#8);
   - outro módulo pode injetar qualquer service, porque todo módulo o exporta.
 - **Mais difícil**:
-  - **Rota literal depois de rota com parâmetro (#8).** No Express, a primeira rota declarada que casa vence. Como a ordem é a do Swagger, 11 rotas literais ficam, no mesmo controller, depois de uma rota com `:id` que casa com elas. Dois exemplos:
-    - `GET rest/asset/v1/smartCampaign/byName.json` (`610e101:src/asset/resources/smart-campaigns/smart-campaigns.controller.ts:43`) vem depois de `smartCampaign/:id.json` (`:21`);
-    - `POST rest/asset/v2/email/bulk/delete` (`610e101:src/asset/resources/emails-new/emails-new.controller.ts:185`) vem depois de `email/:id/delete` (`:144`).
-
-    A varredura estática, com o `match()` do path-to-regexp 8.4.2, acha as 11. Medido na #4 numa cópia de `origin/main` compilada com `tsc`: com o `AssetResourcesModule` servido em loopback e cada método de service trocado por um que devolve o próprio nome, as 11 chamadas chegam ao handler da rota com `:id`. De controle, `GET smartCampaign/12.json` e `GET smartCampaigns.json` chegam ao próprio handler. A #8 fica com o teste e2e e a correção, e o [Anti-pattern: Rota literal declarada depois de uma rota com parâmetro](../knowledge/anti-patterns/literal-route-after-param-route.md) com a regra.
-  - **Entre módulos, a ordem alfabética decide.** `GET form/fields.json` e `GET form/programMemberFields.json`, de `form-fields`, casam com `form/:id.json`, de `forms`. Na mesma medição, as duas chegam ao próprio handler, porque o `FormFieldsModule` vem antes do `FormsModule` (`src/asset/resources/asset-resources.module.ts:39-40`), na ordem que o gerador dá (`610e101:scripts/generate-marketo-resources.py:279-281`). Renomear uma tag pode inverter isso (inferido; confirmar). A #8 não lista esse caso.
+  - **Um controller não segue mais a ordem do Swagger à risca (#8).** Até a #8, a ordem era a do documento, e no Express a primeira rota declarada que casa vence. 13 rotas literais ficavam depois de uma rota com parâmetro do mesmo controller e nunca chegavam ao próprio handler: 11 de assets, medidas na #4, como `GET rest/asset/v1/smartCampaign/byName.json` (`610e101:src/asset/resources/smart-campaigns/smart-campaigns.controller.ts:43`) depois de `smartCampaign/:id.json` (`:21`), e 2 de `lead-database`, medidas na #6, `GET` e `POST rest/v1/customobjects/schema.json`. Com a regra, essas 13 sobem e movem 181 linhas em 16 arquivos gerados. Quem procura uma rota pela posição no Swagger a acha perto dela, não no mesmo lugar. O [Anti-pattern: Rota literal declarada depois de uma rota com parâmetro](../knowledge/anti-patterns/literal-route-after-param-route.md) guarda o defeito.
+  - **Entre módulos, a ordem alfabética decide.** `GET form/fields.json` e `GET form/programMemberFields.json`, de `form-fields`, casam com `form/:id.json`, de `forms`, e chegam ao próprio handler só porque o `FormFieldsModule` vem antes do `FormsModule` (`src/asset/resources/asset-resources.module.ts:39-40`), na ordem que o gerador dá (`scripts/generate-marketo-resources.py:394-396`). A regra da #8 vale dentro de uma tag, e renomear uma tag pode inverter esse caso (inferido; confirmar). Se inverter, o `test/route-order.e2e-spec.ts` falha.
   - **Desde a #6, o consumidor vê outro status.** Um cliente que esperava o 201 de um POST de assets recebe 200.
-  - **Desde a #6, mais 2 rotas sombreadas.** Em `lead-database`, `GET` e `POST rest/v1/customobjects/schema.json` caem no handler de `rest/v1/customobjects/:customObjectName.json`, medido na #6 com o app servido e o `match()` do router do Express. A #8 fica com elas também.
+  - **Desde a #8, o consumidor vê outra resposta nas 13 rotas.** Onde o tipo documentado da rota literal difere do da rota com parâmetro, como `smartCampaign/rules.json`, que respondia um `ResponseOfSmartCampaignResponseWithFlow` e agora responde o `ResponseOfSmartCampaignRuleType` documentado, a resposta muda de forma.
   - **Um corpo acima de 100 KiB responde 413**, em qualquer rota. É o limite padrão do body parser do Express, que o `src/main.ts` não muda. Isso já valia antes da #6, e com ela passa a pegar também os lotes de Lead Database e de Data Ingestion: 250 leads com 110,8 KiB em `POST /rest/v1/leads.json` dão 413 (medido na #6; #25).
   - Nenhum pipe converte ou valida um parâmetro, nem o `@Param('id') id: number` ([ADR 0006](0006-dtos-as-typescript-interfaces.md)).
   - O service ignora os argumentos: a resposta não depende do id nem do corpo, e não há estado. Estado, autenticação e falhas roteirizadas entram com a Track A, e a [ADR 0009](0009-behaviour-beside-generated-code.md), ainda `Proposed`, põe esse comportamento ao lado do código gerado.
@@ -83,7 +84,7 @@ O histórico não registra alternativas. As linhas abaixo são as óbvias, e cad
 - [Pattern: A forma de um módulo de recurso](../knowledge/patterns/resource-module-shape.md)
 - [Anti-pattern: Rota literal declarada depois de uma rota com parâmetro](../knowledge/anti-patterns/literal-route-after-param-route.md)
 - [Anti-pattern: Mensagem de commit que diz menos do que o commit faz](../knowledge/anti-patterns/commit-message-understating-its-content.md)
-- As rotas sombreadas (#8) e as sobras do starter (#9)
+- A correção das rotas sombreadas (#8) e as sobras do starter (#9)
 
 ## Status
 
@@ -91,4 +92,5 @@ O histórico não registra alternativas. As linhas abaixo são as óbvias, e cad
 - **Status**: Accepted
 - **Atualizado**: 2026-09-26 (Fase: Learn), a #9 renomeou o pacote e tirou do `AppModule` o Observe, o `AppController` e o `AppService`; as citações do `package.json` e do `src/app.module.ts` seguiram as linhas novas, e as que descrevem o starter passaram a apontar para o commit (#9)
 - **Atualizado**: 2026-09-26 (Fase: Learn), um módulo de recursos por área e o `@HttpCode` do status 2xx documentado; as citações do gerador de antes da #6 passaram a levar o commit `610e101`, e as do controller de snippets, do `asset-resources.module.ts` e do `AppModule` seguiram as linhas novas (#6)
+- **Atualizado**: 2026-09-26 (Fase: Learn), a ordem das rotas ganhou a exceção da #8: dentro de uma tag, uma rota sobe para logo antes da primeira que a capturaria, e a geração falha com duas rotas ambíguas; as consequências e as alternativas registram as 13 rotas sombreadas até então e a ordenação medida e descartada, e as citações do gerador seguiram as linhas novas (#8)
 - **Atualizado**: 2026-09-26 (Fase: Build), as citações dos arquivos gerados e dos geradores seguiram as linhas novas, depois do cabeçalho de gerado (#7)

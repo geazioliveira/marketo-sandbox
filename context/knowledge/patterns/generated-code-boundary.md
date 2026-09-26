@@ -38,7 +38,7 @@ As cinco áreas, com os arquivos medidos na #6:
 | `src/lead-database/` | `mapi` | 175 | 58 | 177 |
 | `src/user-management/` | `user` | 12 | 4 | 14 |
 
-- Os arquivos de cada pasta são os que o gerador lista em `generated_files` ou em `files()` (`scripts/generate-marketo-definitions.py:142-147`, `scripts/generate-marketo-resources.py:341-357`, `scripts/generate-marketo-factories.py:287-305`).
+- Os arquivos de cada pasta são os que o gerador lista em `generated_files` ou em `files()` (`scripts/generate-marketo-definitions.py:142-147`, `scripts/generate-marketo-resources.py:380-397`, `scripts/generate-marketo-factories.py:287-305`).
 - `seed.ts` e `request-id.ts` também são gerados (`scripts/generate-marketo-factories.py:235-292`). Mudar o seed é mudar o gerador.
 - O resto de `src/` é escrito à mão: `src/main.ts`, `src/listen-address.ts`, `src/app.module.ts` e os cinco `src/<área>/<área>.module.ts`, que só importam o `<Área>ResourcesModule` (`src/identity/identity.module.ts:1-7`). Nenhum gerador os emite.
 

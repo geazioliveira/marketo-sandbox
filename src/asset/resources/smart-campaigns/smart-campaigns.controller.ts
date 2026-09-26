@@ -29,6 +29,32 @@ import type { UpdateSmartCampaignRequest } from '../../asset-definitions/request
 export class SmartCampaignsController {
   constructor(private readonly smartCampaignsService: SmartCampaignsService) {}
 
+  @Get('rest/asset/v1/smartCampaign/byName.json')
+  async getSmartCampaignByNameUsingGET(
+    @Query('name') name: string,
+    @Query('includeFlowSteps') includeFlowSteps?: boolean,
+  ): Promise<ResponseOfSmartCampaignResponseWithFlow> {
+    return this.smartCampaignsService.getSmartCampaignByNameUsingGET(
+      name,
+      includeFlowSteps,
+    )
+  }
+
+  @Get('rest/asset/v1/smartCampaign/rules.json')
+  async getSmartCampaignRulesUsingGET(): Promise<ResponseOfSmartCampaignRuleType> {
+    return this.smartCampaignsService.getSmartCampaignRulesUsingGET()
+  }
+
+  @Get('rest/asset/v1/smartCampaign/flowSteps.json')
+  async getSmartCampaignFlowStepsUsingGET(): Promise<ResponseOfSmartCampaignFlowStepActionType> {
+    return this.smartCampaignsService.getSmartCampaignFlowStepsUsingGET()
+  }
+
+  @Get('rest/asset/v1/smartCampaign/flowStepTypes.json')
+  async getSmartCampaignFlowStepTypesUsingGET(): Promise<ResponseOfSmartCampaignFlowStepType> {
+    return this.smartCampaignsService.getSmartCampaignFlowStepTypesUsingGET()
+  }
+
   @Get('rest/asset/v1/smartCampaign/:id.json')
   async getSmartCampaignByIdUsingGET(
     @Param('id') id: number,
@@ -52,17 +78,6 @@ export class SmartCampaignsController {
     )
   }
 
-  @Get('rest/asset/v1/smartCampaign/byName.json')
-  async getSmartCampaignByNameUsingGET(
-    @Query('name') name: string,
-    @Query('includeFlowSteps') includeFlowSteps?: boolean,
-  ): Promise<ResponseOfSmartCampaignResponseWithFlow> {
-    return this.smartCampaignsService.getSmartCampaignByNameUsingGET(
-      name,
-      includeFlowSteps,
-    )
-  }
-
   @Get('rest/asset/v1/smartCampaign/:id/usedBy.json')
   async getSmartCampaignUsedByUsingGET(
     @Param('id') id: number,
@@ -80,21 +95,6 @@ export class SmartCampaignsController {
       order,
       query,
     )
-  }
-
-  @Get('rest/asset/v1/smartCampaign/rules.json')
-  async getSmartCampaignRulesUsingGET(): Promise<ResponseOfSmartCampaignRuleType> {
-    return this.smartCampaignsService.getSmartCampaignRulesUsingGET()
-  }
-
-  @Get('rest/asset/v1/smartCampaign/flowSteps.json')
-  async getSmartCampaignFlowStepsUsingGET(): Promise<ResponseOfSmartCampaignFlowStepActionType> {
-    return this.smartCampaignsService.getSmartCampaignFlowStepsUsingGET()
-  }
-
-  @Get('rest/asset/v1/smartCampaign/flowStepTypes.json')
-  async getSmartCampaignFlowStepTypesUsingGET(): Promise<ResponseOfSmartCampaignFlowStepType> {
-    return this.smartCampaignsService.getSmartCampaignFlowStepTypesUsingGET()
   }
 
   @Get('rest/asset/v1/smartCampaign/:id/autoSuggest.json')

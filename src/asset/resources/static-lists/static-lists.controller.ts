@@ -21,6 +21,13 @@ import type { UpdateStaticListRequest } from '../../asset-definitions/requests/u
 export class StaticListsController {
   constructor(private readonly staticListsService: StaticListsService) {}
 
+  @Get('rest/asset/v1/staticList/byName.json')
+  async getStaticListByNameUsingGET(
+    @Query('name') name: string,
+  ): Promise<ResponseOfStaticListResponse> {
+    return this.staticListsService.getStaticListByNameUsingGET(name)
+  }
+
   @Get('rest/asset/v1/staticList/:id.json')
   async getStaticListByIdUsingGET(
     @Param('id') id: number,
@@ -65,13 +72,6 @@ export class StaticListsController {
     return this.staticListsService.createStaticListUsingPOST(
       createStaticListRequest,
     )
-  }
-
-  @Get('rest/asset/v1/staticList/byName.json')
-  async getStaticListByNameUsingGET(
-    @Query('name') name: string,
-  ): Promise<ResponseOfStaticListResponse> {
-    return this.staticListsService.getStaticListByNameUsingGET(name)
   }
 
   @Post('rest/asset/v1/staticList/:id/delete.json')

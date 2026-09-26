@@ -52,6 +52,12 @@ export class FragmentsNewService {
     return makeFragmentNewResponse()
   }
 
+  async bulkDeleteUsingPOST_fragment(
+    ..._arguments: unknown[]
+  ): Promise<DeleteResponse> {
+    return makeDeleteResponse()
+  }
+
   async deleteContentUsingPOST_fragment(
     ..._arguments: unknown[]
   ): Promise<DeleteResponse> {
@@ -68,12 +74,6 @@ export class FragmentsNewService {
     ..._arguments: unknown[]
   ): Promise<FragmentNewResponse> {
     return makeFragmentNewResponse()
-  }
-
-  async bulkDeleteUsingPOST_fragment(
-    ..._arguments: unknown[]
-  ): Promise<DeleteResponse> {
-    return makeDeleteResponse()
   }
 
   async bulkUsedByUsingPOST_fragment(

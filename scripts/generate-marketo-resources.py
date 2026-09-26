@@ -69,6 +69,45 @@ def nest_route(path: str) -> str:
     return re.sub(r"\{([^}]+)}", r":\1", path.lstrip("/"))
 
 
+def route_pattern(path: str) -> re.Pattern[str]:
+    """The request paths a Swagger path accepts, ignoring case as Express does; `{param}` is one segment."""
+    parts = re.split(r"(\{[^}]+})", path)
+    return re.compile("(?i)" + "".join("[^/]+" if part.startswith("{") else re.escape(part) for part in parts))
+
+
+def captures(earlier: tuple[str, str, dict[str, Any]], later: tuple[str, str, dict[str, Any]]) -> bool:
+    """Whether `earlier`, registered first, takes the requests of `later`: `{}` fits no literal."""
+    sample = re.sub(r"\{[^}]+}", "{}", later[1])
+    return (
+        earlier[0] == later[0]
+        and earlier[1] != later[1]
+        and route_pattern(earlier[1]).fullmatch(sample) is not None
+    )
+
+
+def order_routes(tagged: list[tuple[str, str, dict[str, Any]]]) -> list[tuple[str, str, dict[str, Any]]]:
+    """Keep the Swagger order, but put a route right before the first route that would capture it.
+
+    Express hands a request to the first registered route that matches it, and a `{param}`
+    takes a literal segment such as `byName` as readily as an id (#8).
+    """
+    ordered: list[tuple[str, str, dict[str, Any]]] = []
+    for route in tagged:
+        position = next(
+            (index for index, placed in enumerate(ordered) if captures(placed, route)),
+            len(ordered),
+        )
+        ordered.insert(position, route)
+    for index, earlier in enumerate(ordered):
+        for later in ordered[index + 1 :]:
+            if captures(earlier, later):
+                raise SystemExit(
+                    f"{earlier[0].upper()} {earlier[1]} captures {later[0].upper()} {later[1]}, "
+                    "and no order of the two routes lets both be reached.",
+                )
+    return ordered
+
+
 def parameter_identifier(name: str, index: int) -> str:
     identifier = camel_case(name)
     if not identifier or not re.match(r"^[A-Za-z_$]", identifier):
@@ -346,10 +385,11 @@ class ResourceGenerator:
         output = self.target.resources
         files: dict[Path, str] = {}
         for tag, tagged in grouped.items():
+            ordered = order_routes(tagged)
             slug = kebab_case(tag)
             directory = output / slug
-            files[directory / f"{slug}.controller.ts"] = self.render_controller(tag, tagged)
-            files[directory / f"{slug}.service.ts"] = self.render_service(tag, tagged)
+            files[directory / f"{slug}.controller.ts"] = self.render_controller(tag, ordered)
+            files[directory / f"{slug}.service.ts"] = self.render_service(tag, ordered)
             files[directory / f"{slug}.module.ts"] = self.render_module(tag)
         files[output / f"{self.target.area}-resources.module.ts"] = self.render_resources_module(
             sorted(kebab_case(tag) for tag in grouped),

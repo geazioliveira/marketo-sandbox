@@ -24,10 +24,22 @@ export class CustomObjectsService {
     return makeResponseOfObjectMetaData()
   }
 
+  async listCustomObjectTypesUsingGET(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfObjectMetaData> {
+    return makeResponseOfObjectMetaData()
+  }
+
   async getCustomObjectsUsingGET(
     ..._arguments: unknown[]
   ): Promise<ResponseOfCustomObject> {
     return makeResponseOfCustomObject()
+  }
+
+  async syncCustomObjectTypeUsingPOST(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfCustomObjectType> {
+    return makeResponseOfCustomObjectType()
   }
 
   async syncCustomObjectsUsingPOST(
@@ -46,18 +58,6 @@ export class CustomObjectsService {
     ..._arguments: unknown[]
   ): Promise<ResponseOfObjectMetaData> {
     return makeResponseOfObjectMetaData()
-  }
-
-  async listCustomObjectTypesUsingGET(
-    ..._arguments: unknown[]
-  ): Promise<ResponseOfObjectMetaData> {
-    return makeResponseOfObjectMetaData()
-  }
-
-  async syncCustomObjectTypeUsingPOST(
-    ..._arguments: unknown[]
-  ): Promise<ResponseOfCustomObjectType> {
-    return makeResponseOfCustomObjectType()
   }
 
   async approveCustomObjectTypeUsingPOST(

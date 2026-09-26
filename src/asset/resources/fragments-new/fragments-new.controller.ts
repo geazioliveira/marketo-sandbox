@@ -149,6 +149,20 @@ export class FragmentsNewController {
     )
   }
 
+  @Post('rest/asset/v2/fragment/bulk/delete')
+  @HttpCode(200)
+  async bulkDeleteUsingPOST_fragment(
+    @Query('access_token') accessToken: string,
+    @Headers('x-app-type') xAppType: string,
+    @Body() bulkDeleteRequest: BulkDeleteRequest,
+  ): Promise<DeleteResponse> {
+    return this.fragmentsNewService.bulkDeleteUsingPOST_fragment(
+      accessToken,
+      xAppType,
+      bulkDeleteRequest,
+    )
+  }
+
   @Post('rest/asset/v2/fragment/:id/delete')
   @HttpCode(200)
   async deleteContentUsingPOST_fragment(
@@ -190,20 +204,6 @@ export class FragmentsNewController {
       accessToken,
       xAppType,
       bulkGetRequest,
-    )
-  }
-
-  @Post('rest/asset/v2/fragment/bulk/delete')
-  @HttpCode(200)
-  async bulkDeleteUsingPOST_fragment(
-    @Query('access_token') accessToken: string,
-    @Headers('x-app-type') xAppType: string,
-    @Body() bulkDeleteRequest: BulkDeleteRequest,
-  ): Promise<DeleteResponse> {
-    return this.fragmentsNewService.bulkDeleteUsingPOST_fragment(
-      accessToken,
-      xAppType,
-      bulkDeleteRequest,
     )
   }
 

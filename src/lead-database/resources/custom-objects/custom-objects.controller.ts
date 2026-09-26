@@ -37,6 +37,14 @@ export class CustomObjectsController {
     return this.customObjectsService.listCustomObjectsUsingGET(names)
   }
 
+  @Get('rest/v1/customobjects/schema.json')
+  async listCustomObjectTypesUsingGET(
+    @Query('names') names?: Array<string>,
+    @Query('state') state?: 'draft' | 'approved' | 'approvedWithDraft',
+  ): Promise<ResponseOfObjectMetaData> {
+    return this.customObjectsService.listCustomObjectTypesUsingGET(names, state)
+  }
+
   @Get('rest/v1/customobjects/:customObjectName.json')
   async getCustomObjectsUsingGET(
     @Param('customObjectName') customObjectName: string,
@@ -55,6 +63,16 @@ export class CustomObjectsController {
       fields,
       batchSize,
       nextPageToken,
+    )
+  }
+
+  @Post('rest/v1/customobjects/schema.json')
+  @HttpCode(200)
+  async syncCustomObjectTypeUsingPOST(
+    @Body() syncCustomObjectTypeRequest: SyncCustomObjectTypeRequest,
+  ): Promise<ResponseOfCustomObjectType> {
+    return this.customObjectsService.syncCustomObjectTypeUsingPOST(
+      syncCustomObjectTypeRequest,
     )
   }
 
@@ -87,24 +105,6 @@ export class CustomObjectsController {
     @Param('customObjectName') customObjectName: string,
   ): Promise<ResponseOfObjectMetaData> {
     return this.customObjectsService.describeUsingGET_1(customObjectName)
-  }
-
-  @Get('rest/v1/customobjects/schema.json')
-  async listCustomObjectTypesUsingGET(
-    @Query('names') names?: Array<string>,
-    @Query('state') state?: 'draft' | 'approved' | 'approvedWithDraft',
-  ): Promise<ResponseOfObjectMetaData> {
-    return this.customObjectsService.listCustomObjectTypesUsingGET(names, state)
-  }
-
-  @Post('rest/v1/customobjects/schema.json')
-  @HttpCode(200)
-  async syncCustomObjectTypeUsingPOST(
-    @Body() syncCustomObjectTypeRequest: SyncCustomObjectTypeRequest,
-  ): Promise<ResponseOfCustomObjectType> {
-    return this.customObjectsService.syncCustomObjectTypeUsingPOST(
-      syncCustomObjectTypeRequest,
-    )
   }
 
   @Post('rest/v1/customobjects/schema/:apiName/approve.json')

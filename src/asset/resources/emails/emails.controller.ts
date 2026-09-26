@@ -45,6 +45,11 @@ export class EmailsController {
     return this.emailsService.getEmailByNameUsingGET(name, status, folder)
   }
 
+  @Get('rest/asset/v1/email/ccFields.json')
+  async getEmailCCFieldsUsingGET(): Promise<ResponseOfEmailCCFieldsResponse> {
+    return this.emailsService.getEmailCCFieldsUsingGET()
+  }
+
   @Get('rest/asset/v1/email/:id.json')
   async getEmailByIdUsingGET(
     @Param('id') id: number,
@@ -244,11 +249,6 @@ export class EmailsController {
     @Param('id') id: number,
   ): Promise<ResponseOfEmailVariableResponse> {
     return this.emailsService.getEmailVariablesUsingGET(id)
-  }
-
-  @Get('rest/asset/v1/email/ccFields.json')
-  async getEmailCCFieldsUsingGET(): Promise<ResponseOfEmailCCFieldsResponse> {
-    return this.emailsService.getEmailCCFieldsUsingGET()
   }
 
   @Get('rest/asset/v1/emails.json')

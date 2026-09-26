@@ -47,7 +47,7 @@
   | Gerador | Lê, por alvo | Emite, por área |
   | --- | --- | --- |
   | [`generate-marketo-definitions.py`](../../scripts/generate-marketo-definitions.py) | `Target.schemas()`: `definitions` no Swagger 2.0, `components.schemas` no OpenAPI 3 (`scripts/marketo_codegen.py:56-59`) | Uma interface por schema em `src/<área>/<área>-definitions/` ([ADR 0006](0006-dtos-as-typescript-interfaces.md)) |
-  | [`generate-marketo-resources.py`](../../scripts/generate-marketo-resources.py) | `operations()`, agrupadas pela primeira tag (`scripts/generate-marketo-resources.py:341-357`) | Um módulo por tag em `src/<área>/resources/` e o `<Área>ResourcesModule` ([ADR 0005](0005-nestjs-express-one-module-per-tag.md)) |
+  | [`generate-marketo-resources.py`](../../scripts/generate-marketo-resources.py) | `operations()`, agrupadas pela primeira tag (`scripts/generate-marketo-resources.py:380-397`) | Um módulo por tag em `src/<área>/resources/` e o `<Área>ResourcesModule` ([ADR 0005](0005-nestjs-express-one-module-per-tag.md)) |
   | [`generate-marketo-factories.py`](../../scripts/generate-marketo-factories.py) | `Target.schemas()` | Uma factory por schema em `src/<área>/<área>-mocks/`, e o `seed.ts` e o `request-id.ts` comuns em `src/mocks/` ([ADR 0007](0007-faker-factories-with-overrides-and-seed.md)) |
 
   [`marketo_codegen.py`](../../scripts/marketo_codegen.py) guarda o que os três compartilham: o registro, as flags, a leitura dos dois formatos, os nomes, os imports relativos, a escrita, a conferência e o Prettier.
@@ -136,4 +136,5 @@ O histórico não registra alternativas para a decisão de `0c8e760`. As linhas 
 - **Status**: Accepted
 - **Atualizado**: 2026-09-26 (Fase: Learn), as citações do `README.md` seguiram as linhas novas depois que a #9 tirou o boilerplate do starter (#9)
 - **Atualizado**: 2026-09-26 (Fase: Learn), a fonte passou a ser um documento por área, com os cinco alvos de `TARGETS`, a origem e o sha256 de cada documento, o suporte a OpenAPI 3 e o `check:all` passando (#6)
+- **Atualizado**: 2026-09-26 (Fase: Learn), a citação do gerador de resources seguiu as linhas novas depois que a #8 acrescentou a ordem das rotas (#8)
 - **Atualizado**: 2026-09-26 (Fase: Build), todo arquivo gerado abre com o cabeçalho de gerado, o gerador sai com 2 quando não consegue formatar e o `check:all` roda no `npm run check`; o Prettier dos geradores deixou de ler o `.prettierignore`, pela [ADR 0011](0011-generators-format-without-ignore-files.md), e as citações do `marketo_codegen.py` e dos arquivos gerados seguiram as linhas novas (#7)
