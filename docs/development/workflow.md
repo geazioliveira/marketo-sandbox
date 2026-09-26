@@ -263,7 +263,7 @@ Antes da PR, o mesmo que o CI roda, e o gate:
 npm run check && OBSERVE_ENDPOINT=http://127.0.0.1:9 npm run test:e2e && npm run gate
 ```
 
-- **`npm run check`** roda, nessa ordem e parando no primeiro erro: `npm run lint` (oxlint em `src/`, `test/` e `scripts/`), `npm run typecheck` (`tsc --noEmit`, que cobre `src/` e `test/`), `npm test` (vitest), `npm run check:context` e `npm run build` (nest build, que escreve em `dist/`, ignorado pelo git).
+- **`npm run check`** roda, nessa ordem e parando no primeiro erro: `npm run lint` (oxlint em `src/`, `test/` e `scripts/`), `npm run format:check` (`prettier --check` em `src/`, `test/` e `scripts/`, os mesmos arquivos que o script `format` reescreve), `npm run typecheck` (`tsc --noEmit`, que cobre `src/` e `test/`), `npm test` (vitest), `npm run check:context` e `npm run build` (nest build, que escreve em `dist/`, ignorado pelo git).
 - **`npm run check:context`** (`scripts/check-context.mjs`) lê `context/`, `docs/`, `AGENTS.md` e `CLAUDE.md`, e os links do template de PR. Cada problema sai com `arquivo:linha`, e os formatos estão no [guia do Context Mesh](../../context/README.md). Ele recusa:
   - link relativo ou âncora quebrados, a âncora do próprio arquivo (`#…`) inclusive;
   - arquivo fora do layout. As pastas e os nomes de `context/` estão no [Layout do guia](../../context/README.md#layout), e um arquivo fora destas pastas faz o check:context recusar a árvore; uma pasta nova entra antes em `scripts/loop-sections.mjs` e no Layout. Só um arquivo oculto que não é markdown (`.DS_Store`, `.obsidian/`) fica de fora;

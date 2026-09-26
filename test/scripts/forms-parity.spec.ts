@@ -658,12 +658,13 @@ describe(workflows.check, () => {
     expect(e2e && stepField(e2e, 'OBSERVE_ENDPOINT')).toBe('http://127.0.0.1:9')
   })
 
-  it('relies on a `npm run check` that chains lint, typecheck, test, check:context and build', () => {
+  it('relies on a `npm run check` that chains lint, format:check, typecheck, test, check:context and build', () => {
     const { scripts } = JSON.parse(read('package.json')) as {
       scripts: Record<string, string>
     }
     expect(scripts.check.split(' && ')).toEqual([
       'npm run lint',
+      'npm run format:check',
       'npm run typecheck',
       'npm test',
       'npm run check:context',
@@ -671,6 +672,13 @@ describe(workflows.check, () => {
     ])
     expect(scripts.typecheck).toBe('tsc --noEmit')
     expect(scripts['check:context']).toBe('node scripts/check-context.mjs')
+    // format:check refuses exactly what `npm run format` would rewrite (#9).
+    expect(scripts['format:check']).toBe(
+      'prettier --check "src/**/*.ts" "test/**/*.ts" "scripts/**/*.{mjs,mts}"',
+    )
+    expect(scripts.format).toBe(
+      scripts['format:check'].replace('--check', '--write'),
+    )
   })
 
   it('reads the repository with a read-only token', () => {
