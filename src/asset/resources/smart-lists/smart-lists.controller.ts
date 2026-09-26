@@ -21,19 +21,24 @@ import type { ResponseOfSmartListRuleType } from '../../asset-definitions/respon
 export class SmartListsController {
   constructor(private readonly smartListsService: SmartListsService) {}
 
+  @Get('rest/asset/v1/smartList/byName.json')
+  async getSmartListByNameUsingGET(
+    @Query('name') name: string,
+  ): Promise<ResponseOfSmartListResponse> {
+    return this.smartListsService.getSmartListByNameUsingGET(name)
+  }
+
+  @Get('rest/asset/v1/smartList/rules.json')
+  async getSmartListRulesUsingGET(): Promise<ResponseOfSmartListRuleType> {
+    return this.smartListsService.getSmartListRulesUsingGET()
+  }
+
   @Get('rest/asset/v1/smartList/:id.json')
   async getSmartListByIdUsingGET(
     @Param('id') id: number,
     @Query('includeRules') includeRules?: boolean,
   ): Promise<ResponseOfSmartListResponseWithRules> {
     return this.smartListsService.getSmartListByIdUsingGET(id, includeRules)
-  }
-
-  @Get('rest/asset/v1/smartList/byName.json')
-  async getSmartListByNameUsingGET(
-    @Query('name') name: string,
-  ): Promise<ResponseOfSmartListResponse> {
-    return this.smartListsService.getSmartListByNameUsingGET(name)
   }
 
   @Post('rest/asset/v1/smartList/:id/delete.json')
@@ -69,11 +74,6 @@ export class SmartListsController {
     return this.smartListsService.createSmartListUsingPOST(
       createSmartListRequest,
     )
-  }
-
-  @Get('rest/asset/v1/smartList/rules.json')
-  async getSmartListRulesUsingGET(): Promise<ResponseOfSmartListRuleType> {
-    return this.smartListsService.getSmartListRulesUsingGET()
   }
 
   @Get('rest/asset/v1/smartList/:id/autoSuggest.json')
