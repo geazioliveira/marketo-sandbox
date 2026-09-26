@@ -20,6 +20,7 @@ from marketo_codegen import (  # noqa: E402
     check_output,
     definition_category,
     definition_file,
+    generated_header,
     kebab_case,
     operation_parameters,
     operations,
@@ -366,10 +367,11 @@ def main() -> int:
     for target in resolve_targets(arguments):
         files = ResourceGenerator(target).files()
         label = f"{target.key} resource files"
+        header = generated_header(Path(__file__).name, target.source)
         status |= (
-            check_output(target.resources, files, label)
+            check_output(target.resources, files, label, header)
             if arguments.check
-            else write_output(target.resources, files, label)
+            else write_output(target.resources, files, label, header)
         )
     return status
 

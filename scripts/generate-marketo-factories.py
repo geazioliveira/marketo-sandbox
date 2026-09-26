@@ -19,6 +19,7 @@ from marketo_codegen import (  # noqa: E402
     check_output,
     definition_category,
     definition_file,
+    generated_header,
     property_key,
     quote,
     reference_name,
@@ -311,19 +312,21 @@ def main() -> int:
     arguments = parser.parse_args()
 
     shared = shared_files()
+    header = generated_header(Path(__file__).name)
     status = (
-        check_output(SHARED_MOCKS, shared, "shared mock helpers")
+        check_output(SHARED_MOCKS, shared, "shared mock helpers", header)
         if arguments.check
-        else write_output(SHARED_MOCKS, shared, "shared mock helpers")
+        else write_output(SHARED_MOCKS, shared, "shared mock helpers", header)
     )
 
     for target in resolve_targets(arguments):
         files = generated_files(target)
         label = f"{target.key} mock factories"
+        header = generated_header(Path(__file__).name, target.source)
         status |= (
-            check_output(target.mocks, files, label)
+            check_output(target.mocks, files, label, header)
             if arguments.check
-            else write_output(target.mocks, files, label)
+            else write_output(target.mocks, files, label, header)
         )
     return status
 

@@ -17,6 +17,7 @@ from marketo_codegen import (  # noqa: E402
     check_output,
     definition_category as category,
     definition_file as file_name,
+    generated_header,
     pascal_case,
     property_key as property_name,
     reference_name,
@@ -156,10 +157,11 @@ def main() -> int:
     for target in resolve_targets(arguments):
         files = generated_files(target, target.schemas())
         label = f"{target.key} TypeScript definitions"
+        header = generated_header(Path(__file__).name, target.source)
         status |= (
-            check_output(target.definitions, files, label)
+            check_output(target.definitions, files, label, header)
             if arguments.check
-            else write_output(target.definitions, files, label)
+            else write_output(target.definitions, files, label, header)
         )
     return status
 
