@@ -13,7 +13,8 @@ import { AppModule } from '../src/app.module'
  * every area was generated and wired into AppModule.
  *
  * A registered route is not proof that a request reaches its own handler: a
- * literal route declared after a `:param` route is shadowed by it (#8).
+ * literal route declared after a `:param` route is shadowed by it.
+ * test/route-order.e2e-spec.ts holds every route to its own handler (#8).
  */
 
 const root = path.resolve(__dirname, '..')
