@@ -9,10 +9,6 @@
 // (brunohab/lite-campaign#111). User-facing text is pt-BR; identifiers and
 // tokens stay English (context/decisions/0001-context-mesh-in-the-repository.md).
 
-/** Printed on every gate run, passing ones included. */
-export const ownerRule =
-  'Ao publicar um plano, o agente move needs-triage para ready-for-human. Só o dono escreve o Approve e move ready-for-agent.'
-
 // ---------------------------------------------------------------------------
 // Branches
 
@@ -73,6 +69,12 @@ export const agentPlanLabelTransition = Object.freeze({
   from: 'needs-triage',
   to: 'ready-for-human',
 })
+
+/**
+ * Printed on every gate run, passing ones included. It is built from the
+ * labels above, so the rule the gate prints is the one the contract holds.
+ */
+export const ownerRule = `Ao publicar um plano completo numa issue em ${agentPlanLabelTransition.from}, o agente a troca por ${agentPlanLabelTransition.to}. Só o dono escreve o Approve e aplica ${readyLabel}.`
 
 /** @returns {{ kind: 'bug' | 'enhancement' | null, found: string[] }} */
 export function kindOf(labelNames) {

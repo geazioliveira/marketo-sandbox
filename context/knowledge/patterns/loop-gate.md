@@ -179,7 +179,7 @@ O gate lê a primeira linha não vazia de cada comentário, sem os espaços das 
 
 Este repositório tem uma conta só no GitHub. O dono e o agente postam com o mesmo login, então nada nos metadados de uma issue distingue um comentário do dono de um que o agente escreveu com a voz do dono. Nenhum script rodado com essa conta fecha esse buraco. Por isso o gate imprime, em toda execução, inclusive nas que passam:
 
-> Ao publicar um plano, o agente move `needs-triage` para `ready-for-human`. Só o dono escreve o Approve e move `ready-for-agent`.
+> Ao publicar um plano completo numa issue em `needs-triage`, o agente a troca por `ready-for-human`. Só o dono escreve o Approve e aplica `ready-for-agent`.
 
 - Mover `ready-for-human` para `ready-for-agent` é um ato do dono. É um segundo ato deliberado, e o gate exige que ele venha depois do Approve: é isso que dificulta fabricar um Approve por acidente.
 - Um Approve são as palavras do dono. Uma aprovação dada no chat não é Approve, e o agente nunca a transcreve para a issue.
