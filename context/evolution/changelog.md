@@ -15,11 +15,12 @@ Uma entrada por mudança mergeada, da mais nova para a mais antiga, escrita no p
 - **Nenhum arquivo de ignore alcança a saída gerada.** O Prettier roda com `--ignore-path=`, e o gerador confere que cada caminho passado aparece no relatório por arquivo. A regra da #6, "o Prettier dos geradores lê só o `.prettierignore`", foi substituída pela [ADR 0011](../decisions/0011-generators-format-without-ignore-files.md).
 - **Todo arquivo gerado se declara gerado.** Os 1.083 abrem com duas linhas `//` que dizem o gerador, o documento de origem e o comando de regenerar, e o `--check` confere o cabeçalho como o resto do arquivo.
 - **O `check:all` roda no CI.** Ele fecha a cadeia do `npm run check`, e o `forms-parity.spec.ts` pina a cadeia e os scripts `check:*`.
+- **A revisão adversarial.** O cabeçalho de uma área avulsa passou a dar as flags que a regeneram; o node entra no `PATH` do Prettier em caminho absoluto; o `PRETTIER_EXPERIMENTAL_CLI` sai do ambiente dele; o range do arquivo inteiro protege a conferência junto com o `--no-require-pragma`; e dois limites do `--check`, a config do Prettier que depende do caminho e a saída sem formatação depois de uma falha no modo de gerar, foram para a #29.
 - **Um teste novo**, `test/scripts/codegen.spec.ts`, roda os três geradores numa árvore temporária, com o alvo `identity`: sem Prettier, com `NODE_BIN` sem node, sob `.prettierignore`, com um Prettier que pula arquivos e com o cabeçalho.
 
 ### Números medidos
 
-- **O spec**: 20 dos 31 casos falhavam em `3ddceb4`, e os 31 passam depois, em cerca de 5 s. Os casos de factories no `identity` passam antes e depois, porque essa saída já nasce formatada, e ficam como controle.
+- **O spec**: 20 dos 31 casos falhavam em `3ddceb4`, e os 31 passam depois. A revisão adversarial levou o spec a 43 casos, que passam em cerca de 7 s, e sete mutações do gerador são pegas por pelo menos um caso cada. Os casos de factories no `identity` passam antes e depois, porque essa saída já nasce formatada, e ficam como controle.
 - **A saída**: 1.083 arquivos com 3 linhas a mais cada, e nenhuma outra mudança (`git diff -U0 | grep '^@@'` dá só `@@ -0,0 +1,3 @@`). Um segundo `generate:all` não muda nada, e o `format:check` passa.
 - **Os checks**: `npm run check` passa em 212 s locais, com 1.378 testes em 9 arquivos e as 16 linhas "are current"; o e2e passa com 14. No CI, antes, a run 36270989088 levou 93 s de vitest e 114 s no passo `npm run check`.
 - **Sem node**, numa máquina sem `/usr/local/bin/node` nem `/opt/homebrew/bin/node`: saída 2 e a mensagem, sem traceback e sem mudar a saída.
@@ -39,7 +40,7 @@ Uma entrada por mudança mergeada, da mais nova para a mais antiga, escrita no p
 ### Aprendizados / surpresas
 
 - **O plano previa uma #6 diferente da que entrou.** A #6 manteve o `.codegen-tmp` e registrou uma decisão sobre o `.prettierignore` depois do Approve da #7. O passo 0 do plano pegou a divergência, e um `# Plano` revisado a levou ao dono antes do corte da branch.
-- **Um cabeçalho de 3 linhas desloca toda citação.** Foram 72 citações de arquivos gerados em 9 arquivos de `context/`, mais as dos geradores, que o `check:context` não confere. Um script mapeou cada número por diff e conferiu que a linha citada continuava a mesma.
+- **Uma citação só se confere pelo conteúdo.** O cabeçalho de 3 linhas e as mudanças nos geradores deslocaram centenas de citações `arquivo:linha`, que o `check:context` não confere. Um script as remapeou por diff, mas a revisão adversarial achou três grupos que ele não pegou: uma citação presa a um commit pela prosa ("naquele commit"), continuações `:N` sem o nome do arquivo e uma tabela com as linhas entre parênteses. Eles foram conferidos pelo conteúdo da linha e corrigidos.
 - **O runner tem outro node.** A imagem do `ubuntu-latest` traz o Node 22 em `/usr/local/bin`, que o gerador punha na frente do Node do `.nvmrc` (inferido dos scripts da imagem, não medido num runner). O `PATH` passou a vir antes dos candidatos fixos, e o caso "sem node" do spec usa um `NODE_BIN` sem node, que se reproduz em qualquer máquina.
 
 ---

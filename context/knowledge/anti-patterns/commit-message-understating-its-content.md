@@ -10,7 +10,7 @@ Quatro dos nove commits anteriores ao loop dizem menos, ou outra coisa, do que f
 
 | Commit | A mensagem diz | O commit faz |
 | --- | --- | --- |
-| `a967f26` | "Refactor Marketo generation scripts to improve structure and readability; update file handling and output logic" | Muda o comportamento do que o gerador de resources emite, não só a "output logic": os services passam de `NotImplementedException` a factories, e os módulos ganham `exports: [Service]` (`scripts/generate-marketo-resources.py:190` e `:237` naquele commit). Os imports emitidos perdem o sufixo `.js`. Os dois geradores passam a importar `marketo_codegen`, que só chega em `0ef242d`, e não rodam até lá: medido na #4, saem com `ModuleNotFoundError` em `a967f26` e em `5cc5e09` |
+| `a967f26` | "Refactor Marketo generation scripts to improve structure and readability; update file handling and output logic" | Muda o comportamento do que o gerador de resources emite, não só a "output logic": os services passam de `NotImplementedException` a factories, e os módulos ganham `exports: [Service]` (`a967f26:scripts/generate-marketo-resources.py:189` e `:236`). Os imports emitidos perdem o sufixo `.js`. Os dois geradores passam a importar `marketo_codegen`, que só chega em `0ef242d`, e não rodam até lá: medido na #4, saem com `ModuleNotFoundError` em `a967f26` e em `5cc5e09` |
 | `a19d9d3` | "Remove unused DTO interfaces and types to clean up the codebase" | Apaga 101 DTOs de `src/asset-definitions/`. Eles não eram sem uso: os mesmos 101 caminhos voltam no commit seguinte. É metade de um movimento |
 | `e7a0bb6` | "Add new DTO interfaces for multipart files, flow steps, file folders, and email templates; refactor existing DTOs for consistency" | Não traz tipo novo: são 255 DTOs antes e os mesmos 255 nomes depois. Move todos para `src/asset/asset-definitions/` (154 renomeados, com similaridade de 50% a 90%, e os 101 de volta) e reformata os 255 no estilo do `.prettierrc`: aspas simples e sem ponto e vírgula (`.prettierrc:2` e `:4`) |
 | `5cc5e09` | "Export services from module files to improve module accessibility" | Além do `exports` nos 23 módulos, troca o prefixo dos imports dos 23 controllers e troca os stubs `NotImplementedException` dos 23 services por chamadas às factories, que só chegam em `b91681a` |
@@ -43,4 +43,4 @@ Os 101 arquivos que o primeiro apaga são os 101 que o segundo adiciona, com os 
 
 - **Criado**: 2026-09-25 (Fase: Build), registro retroativo de `0c8e760`..`fb4a804` (#4)
 - **Status**: Active
-- **Atualizado**: 2026-09-26 (Fase: Build), as citações dos arquivos gerados e dos geradores seguiram as linhas novas, depois do cabeçalho de gerado (#7)
+- **Atualizado**: 2026-09-26 (Fase: Build), a citação do gerador de `a967f26` passou a levar o prefixo do commit (#7)

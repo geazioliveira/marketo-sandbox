@@ -13,17 +13,17 @@
 
 ## Decisão
 
-- **Nenhum arquivo de ignore alcança a saída gerada.** Os geradores chamam o Prettier com `--write --no-color --no-require-pragma --ignore-path=` e os caminhos relativos à raiz (`scripts/marketo_codegen.py:279-307`). O `--ignore-path=` vazio desliga o `.gitignore` e o `.prettierignore`. Esta decisão substitui "o Prettier dos geradores lê só o `.prettierignore`", que a #6 registrou nas ADRs 0004 e 0008.
-- **O gerador confere que o Prettier processou cada arquivo.** Todo caminho passado precisa aparecer no relatório por arquivo do `--write` (`<caminho> <N>ms`, com `(unchanged)` quando nada muda). Um que falte para a execução.
-- **O gerador confere o Prettier e o node antes de mexer na saída.** `prettier_environment()` roda antes do `refuse_foreign_files()` e do `rmtree` (`scripts/marketo_codegen.py:263-276`). O node vem do `NODE_BIN`, do `PATH`, de `~/.nvm`, de `/usr/local/bin` ou de `/opt/homebrew/bin`, nessa ordem (`:241-260`), e um `NODE_BIN` sem node é erro.
-- **A saída 2 quer dizer "não consegui formatar".** A mensagem vai para o stderr, sem traceback, e diz o que falta. A saída 1 continua querendo dizer defasado, e também cobre as recusas de `--swagger` e `--area` que a #6 trouxe. O argparse também sai com 2 num uso errado, e a mensagem distingue os dois casos.
+- **Nenhum arquivo de ignore alcança a saída gerada.** Os geradores chamam o Prettier com `--write --no-color --no-require-pragma --range-start=0 --range-end=Infinity --ignore-path=` e os caminhos relativos à raiz (`scripts/marketo_codegen.py:298-335`). O `--ignore-path=` vazio desliga o `.gitignore` e o `.prettierignore`. Esta decisão substitui "o Prettier dos geradores lê só o `.prettierignore`", que a #6 registrou nas ADRs 0004 e 0008.
+- **O gerador confere que o Prettier processou cada arquivo.** Todo caminho passado precisa aparecer no relatório por arquivo do `--write` (`<caminho> <N>ms`, com `(unchanged)` quando nada muda). Um que falte para a execução. O `PRETTIER_EXPERIMENTAL_CLI` sai do ambiente do Prettier, porque o CLI experimental formata sem esse relatório.
+- **O gerador confere o Prettier e o node antes de mexer na saída.** `prettier_environment()` roda antes do `refuse_foreign_files()` e do `rmtree` (`scripts/marketo_codegen.py:280-295`). O node vem do `NODE_BIN`, do `PATH`, de `~/.nvm`, de `/usr/local/bin` ou de `/opt/homebrew/bin`, nessa ordem (`:254-277`), e um `NODE_BIN` sem node é erro. A pasta escolhida entra no `PATH` do Prettier como caminho absoluto, porque ele roda com `cwd` na raiz.
+- **A saída 2 quer dizer "não consegui formatar".** A mensagem vai para o stderr, sem traceback, e diz o que falta. A saída 1 continua querendo dizer defasado, e também cobre as recusas de `--swagger` e `--area` que a #6 trouxe. O argparse também sai com 2 num uso errado, e a mensagem distingue os dois casos. Um traceback, como o de um Python anterior ao 3.9 ([ADR 0008](0008-toolchain.md)), sai com 1. No modo de gerar, a mensagem de saída 2 diz também como restaurar a pasta que já foi regravada.
 
 ## Racional
 
-- **Gerar e checar sempre concordam.** Nenhuma regra de ignore faz um lado formatar e o outro não. Medido: com `src/identity/`, `identity-definitions/` ou `/.codegen-tmp/` num `.prettierignore`, os dois saem com 0 e `src/` não muda.
+- **Nenhuma regra de ignore separa gerar de checar.** Nenhuma delas faz um lado formatar e o outro não. Medido: com `src/identity/`, `identity-definitions/` ou `/.codegen-tmp/` num `.prettierignore`, os dois saem com 0 e `src/` não muda.
 - **A exceção do `.prettierignore` não tinha uso.** O repositório não tem `.prettierignore`, e a própria #6 deixou a exceção só como regra de convivência, apontando para a #7.
 - **Só o relatório por arquivo prova o pulo.** `--check` e `-l` depois do `--write` também pulam o arquivo ignorado com saída 0. O relatório já vem no `--write`, sem outra chamada ao Prettier.
-- **O `--no-color` e o `--no-require-pragma` protegem a conferência.** Com `CI=true`, como no GitHub Actions, ou com `FORCE_COLOR`, o Prettier pinta o caminho nas linhas `(unchanged)`, e a conferência leria como pulado um arquivo formatado (medido). Um `requirePragma` na config faria o Prettier processar sem formatar, e a flag da CLI vence a config (medido).
+- **O `--no-color`, o `--no-require-pragma` e o range protegem a conferência.** Com `CI=true`, como no GitHub Actions, ou com `FORCE_COLOR`, o Prettier pinta o caminho nas linhas `(unchanged)`, e a conferência leria como pulado um arquivo formatado (medido). Um `requirePragma` na config faria o Prettier processar sem formatar, e a flag da CLI vence a config (medido). Um `rangeStart` ou `rangeEnd` na config faz o mesmo, e o range da CLI, do arquivo inteiro, também vence (medido na revisão adversarial da #7).
 - **A saída 2 separa ambiente quebrado de código defasado**, como nos scripts `.mjs` do loop, em que 2 é o script que não conseguiu rodar.
 
 ## Alternativas consideradas
@@ -39,13 +39,14 @@
 ## Consequências
 
 - **Mais fácil**:
-  - um diagnóstico de defasagem é sempre defasagem de verdade;
+  - nenhuma regra de ignore produz uma defasagem falsa nem um verde falso;
   - Prettier ou node ausentes aparecem como tais, antes de a saída ser tocada;
   - nenhuma regra de convivência sobre o `.prettierignore`.
 - **Mais difícil**:
   - a conferência depende do texto do relatório por arquivo do CLI do Prettier 3. Se ele mudar numa versão futura, o gerador falha alto em toda execução, nunca em silêncio;
-  - ela prova que o Prettier processou cada arquivo, não que o formatou. O `--no-require-pragma` cobre o caso conhecido;
-  - no modo de gerar, uma falha do próprio Prettier ou da conferência vem depois do `rmtree`: a saída fica sem formatação até um `git checkout -- src`, com a saída 2 e a mensagem. Gerar numa pasta temporária e mover no fim ficou fora da #7;
+  - ela prova que o Prettier processou cada arquivo, não que o formatou. O `--no-require-pragma` e o range cobrem os casos conhecidos;
+  - uma config do Prettier que dependa do caminho (um `overrides` para `src/**`, ou um `.prettierrc` ou `.editorconfig` dentro de `src/`) faz o `--check` formatar diferente de gerar, porque a cópia dele fica em `.codegen-tmp/src/…`: gerar sai com 0 e o check acusa defasagem (medido, #29);
+  - no modo de gerar, uma falha do próprio Prettier ou da conferência vem depois do `rmtree`: a saída fica sem formatação até um `git checkout`, com a saída 2 e a mensagem, que diz qual pasta restaurar. Gerar numa pasta temporária e mover no fim ficou para a #29;
   - uma regra sobre `src/` num `.prettierignore` ainda tira os arquivos gerados do `format:check`, que lê o `.prettierignore`, mas não do `check:all`.
 
 ## Relacionados

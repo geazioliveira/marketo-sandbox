@@ -11,13 +11,13 @@ Uma rota literal registrada depois de uma rota com parâmetro que também casa c
 
   | Controller, em `src/asset/resources/` | Rota com parâmetro (linha) | Rotas literais depois dela (linha) |
   | --- | --- | --- |
-  | `smart-campaigns/smart-campaigns.controller.ts` | `GET smartCampaign/:id.json` (29) | `byName.json` (52), `rules.json` (82), `flowSteps.json` (87), `flowStepTypes.json` (92) |
-  | `smart-lists/smart-lists.controller.ts` | `GET smartList/:id.json` (24) | `byName.json` (32), `rules.json` (74) |
-  | `static-lists/static-lists.controller.ts` | `GET staticList/:id.json` (21) | `byName.json` (67) |
-  | `emails/emails.controller.ts` | `GET email/:id.json` (45) | `ccFields.json` (246) |
-  | O controller de `emails-new/`, de `email-templates-new/` e de `fragments-new/` | `POST v2/<tipo>/:id/delete` (149) | `v2/<tipo>/bulk/delete` (193) |
+  | `smart-campaigns/smart-campaigns.controller.ts` | `GET smartCampaign/:id.json` (32) | `byName.json` (55), `rules.json` (85), `flowSteps.json` (90), `flowStepTypes.json` (95) |
+  | `smart-lists/smart-lists.controller.ts` | `GET smartList/:id.json` (27) | `byName.json` (35), `rules.json` (77) |
+  | `static-lists/static-lists.controller.ts` | `GET staticList/:id.json` (24) | `byName.json` (70) |
+  | `emails/emails.controller.ts` | `GET email/:id.json` (48) | `ccFields.json` (249) |
+  | O controller de `emails-new/`, de `email-templates-new/` e de `fragments-new/` | `POST v2/<tipo>/:id/delete` (152) | `v2/<tipo>/bulk/delete` (196) |
 
-  A tabela omite o prefixo das rotas: `rest/asset/v1/` antes das v1, e `rest/asset/` antes das que começam com `v2/`. As linhas são as da saída da #6, que acrescentou os `@HttpCode` e quebrou os imports longos; a ordem das rotas é a mesma.
+  A tabela omite o prefixo das rotas: `rest/asset/v1/` antes das v1, e `rest/asset/` antes das que começam com `v2/`. As linhas são as da saída atual: a da #6, que acrescentou os `@HttpCode` e quebrou os imports longos, com as 3 linhas do cabeçalho de gerado da #7; a ordem das rotas é a mesma.
 - **A rota `:id` vence.** O Express entrega a requisição ao primeiro handler registrado cuja rota casa, e `:id` aceita `byName`, `rules`, `ccFields` ou `bulk`. Medido na #4, numa cópia de `origin/main` compilada com `tsc`, com o `AssetResourcesModule` servido em loopback e cada método de service trocado por um que devolve o próprio nome: as 11 chamadas chegam ao handler da rota `:id`, e as rotas literais nunca são alcançadas. De controle, `GET smartCampaign/12.json` e `GET smartCampaigns.json` chegam ao próprio handler. A #8 fica com o teste e2e e a correção.
 - **Entre controllers, só a ordem dos módulos salva.** `GET form/fields.json` e `GET form/programMemberFields.json`, de `form-fields/`, também casam com `GET form/:id.json`, de `forms/`. Na mesma medição, as duas chegam ao próprio handler, porque o `FormFieldsModule` é importado antes do `FormsModule` (`src/asset/resources/asset-resources.module.ts:39-40`), na ordem alfabética que o gerador dá (`scripts/generate-marketo-resources.py:354-356`). Renomear uma tag pode inverter isso (inferido; confirmar). A #8 não lista esse caso.
 - **Nada recusa o id errado.** `@Param('id') id: number` não tem `ParseIntPipe` (`smart-campaigns.controller.ts:34`), e o service ignora os argumentos e devolve uma factory (`src/asset/resources/smart-campaigns/smart-campaigns.service.ts:27-31`). Na medição, `byName.json` responde 200 pelo handler da rota `:id`, sem erro. Em `smartCampaign`, as duas rotas devolvem o mesmo tipo, `ResponseOfSmartCampaignResponseWithFlow` (`smart-campaigns.controller.ts:36` e `:59`), então nem a forma da resposta denuncia o erro.
