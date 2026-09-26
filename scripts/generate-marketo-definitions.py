@@ -157,7 +157,7 @@ def main() -> int:
     for target in resolve_targets(arguments):
         files = generated_files(target, target.schemas())
         label = f"{target.key} TypeScript definitions"
-        header = generated_header(Path(__file__).name, target.source)
+        header = generated_header(Path(__file__).name, target)
         status |= (
             check_output(target.definitions, files, label, header)
             if arguments.check

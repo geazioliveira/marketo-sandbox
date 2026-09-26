@@ -367,7 +367,7 @@ def main() -> int:
     for target in resolve_targets(arguments):
         files = ResourceGenerator(target).files()
         label = f"{target.key} resource files"
-        header = generated_header(Path(__file__).name, target.source)
+        header = generated_header(Path(__file__).name, target)
         status |= (
             check_output(target.resources, files, label, header)
             if arguments.check

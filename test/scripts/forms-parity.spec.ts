@@ -680,10 +680,19 @@ describe(workflows.check, () => {
     expect(scripts['check:all']).toBe(
       'npm run check:definitions && npm run check:resources && npm run check:factories',
     )
-    for (const generator of ['definitions', 'resources', 'factories'])
+    // The generated header tells the reader to run `npm run generate:<g>`, so
+    // those scripts are pinned too.
+    expect(scripts['generate:all']).toBe(
+      'npm run generate:definitions && npm run generate:resources && npm run generate:factories',
+    )
+    for (const generator of ['definitions', 'resources', 'factories']) {
       expect(scripts[`check:${generator}`]).toBe(
         `python3 scripts/generate-marketo-${generator}.py --check`,
       )
+      expect(scripts[`generate:${generator}`]).toBe(
+        `python3 scripts/generate-marketo-${generator}.py`,
+      )
+    }
     // format:check refuses exactly what `npm run format` would rewrite (#9).
     expect(scripts['format:check']).toBe(
       'prettier --check "src/**/*.ts" "test/**/*.ts" "scripts/**/*.{mjs,mts}"',

@@ -322,7 +322,7 @@ def main() -> int:
     for target in resolve_targets(arguments):
         files = generated_files(target)
         label = f"{target.key} mock factories"
-        header = generated_header(Path(__file__).name, target.source)
+        header = generated_header(Path(__file__).name, target)
         status |= (
             check_output(target.mocks, files, label, header)
             if arguments.check
