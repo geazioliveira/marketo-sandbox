@@ -3,6 +3,10 @@ import { createObserveModule } from '@nestjs/observe'
 import { AppController } from './app.controller'
 import { AppService } from './app.service'
 import { AssetModule } from './asset/asset.module'
+import { DataIngestionModule } from './data-ingestion/data-ingestion.module'
+import { IdentityModule } from './identity/identity.module'
+import { LeadDatabaseModule } from './lead-database/lead-database.module'
+import { UserManagementModule } from './user-management/user-management.module'
 
 export const { ObserveModule, ObserveInstrument } = createObserveModule()
 
@@ -17,6 +21,10 @@ export const { ObserveModule, ObserveInstrument } = createObserveModule()
       serviceId: 'nest-typescript-starter',
     }),
     AssetModule,
+    DataIngestionModule,
+    IdentityModule,
+    LeadDatabaseModule,
+    UserManagementModule,
   ],
   controllers: [AppController],
   providers: [AppService],
