@@ -8,12 +8,12 @@ Esta feature leva a reescrita para `main` pelo loop. Cada operação dos cinco d
 
 ## Critérios de aceite
 
-- [ ] Os cinco documentos têm origem, commit upstream e sha256 registrados; o arquivo de assets preserva a cópia atual.
-- [ ] `scripts/marketo_codegen.py` registra os cinco alvos e os três geradores aceitam `--target`, `--swagger` e `--area`, com suporte a Swagger 2.0 e OpenAPI 3, sem sobrescrever outra área.
-- [ ] Os arquivos gerados e os módulos escritos à mão cobrem as 388 operações; um teste confere método+caminho dos cinco documentos contra os controllers e detecta colisões exatas. Smoke e2e confere pelo menos uma rota de cada grupo, inclusive Identity e o 202 vazio de Data Ingestion.
-- [ ] `npm run generate:all` não muda nenhum arquivo num clone limpo; `npm run check:all` passa. A correção pontual do diretório temporário do verificador entra nesta PR; os itens restantes da #7 permanecem lá.
-- [ ] `npm run check`, `npm run check:context` e o e2e passam; a âncora da ADR 0004 acompanha o heading novo do README.
-- [ ] Intent, atualização da ADR 0004 e dos patterns de código gerado, e Learn no changelog explicam a nova fronteira por área. O commit de output gerado é distinto dos commits de Swagger e dos geradores.
+- [x] Os cinco documentos têm origem, commit upstream e sha256 registrados; o arquivo de assets preserva a cópia atual.
+- [x] `scripts/marketo_codegen.py` registra os cinco alvos e os três geradores aceitam `--target`, `--swagger` e `--area`, com suporte a Swagger 2.0 e OpenAPI 3, sem sobrescrever outra área.
+- [x] Os arquivos gerados e os módulos escritos à mão cobrem as 388 operações; um teste confere método+caminho dos cinco documentos contra os controllers e detecta colisões exatas. Smoke e2e confere pelo menos uma rota de cada grupo, inclusive Identity e o 202 vazio de Data Ingestion.
+- [x] `npm run generate:all` não muda nenhum arquivo num clone limpo; `npm run check:all` passa. A correção pontual do diretório temporário do verificador entra nesta PR; os itens restantes da #7 permanecem lá.
+- [x] `npm run check`, `npm run check:context` e o e2e passam; a âncora da ADR 0004 acompanha o heading novo do README.
+- [x] Intent, atualização da ADR 0004 e dos patterns de código gerado, e Learn no changelog explicam a nova fronteira por área. O commit de output gerado é distinto dos commits de Swagger e dos geradores.
 - [ ] A PR fecha somente a #6, tem revisão do Copilot na cabeça, nenhuma thread aberta e gate fresco antes do merge.
 
 ## Abordagem técnica
@@ -73,10 +73,29 @@ Esta feature leva a reescrita para `main` pelo loop. Cada operação dos cinco d
 
 ## Resultados
 
-Preenchidos no Learn desta issue.
+- **O que foi construído**, na PR #21:
+  - `667d6e3`: este intent;
+  - `539049a`: os quatro documentos novos, com a origem e o sha256 de cada um na mensagem;
+  - `b399cde`: os geradores da reescrita, a correção do verificador, o README e a âncora da ADR 0004;
+  - `80245c7`: a saída de `npm run generate:all` e o import do seed em `src/main.ts`;
+  - `6e05850`: os módulos das áreas novas e a ligação delas no `AppModule`;
+  - `53150ea`: o e2e das 388 rotas e de um pedido por área;
+  - o Learn: a [ADR 0004](../decisions/0004-swagger-as-single-source-with-committed-generated-code.md) com uma fonte por área, emendas nas ADRs de 0005 a 0009, os patterns, os anti-patterns, o glossário, o `AGENTS.md`, o fluxo, o project intent e o changelog.
+- **Desvios do plano aprovado**:
+  - a branch nasceu antes do merge da #5, pela resposta nova do dono à pergunta 4, na #6;
+  - a correção do verificador faz o Prettier ler só o `.prettierignore`: a causa medida era o `.gitignore`, e não a pasta ser oculta;
+  - a ligação escrita à mão foi para depois da saída, e a linha de `src/main.ts` foi com a saída, para que todo commit compile;
+  - a âncora da ADR 0004 foi com o README, e os testes ganharam um commit próprio.
+- **Medido**: os 604 arquivos gerados batem por sha256 com os que o dono gerou; num clone limpo, o `check:all` sai com 0, e o `generate:all` não muda nenhum arquivo; o app registra as 388 rotas, das quais 13 são sombreadas (#8); o `npm run check` passa com 1.339 testes, e o e2e com 13. Os números completos estão no [changelog](../evolution/changelog.md).
+- **Fica para depois**:
+  - a #7: o `check:all` no CI, o cabeçalho de gerado, a falha sem o Prettier e o comentário de `.github/workflows/check.yml:10-11`;
+  - a #8: as 13 rotas sombreadas;
+  - a #9: as sobras do starter.
+
+  O último critério, a revisão do Copilot na cabeça, as threads e o veredito fresco, é conferido no fluxo da PR, depois deste Learn.
 
 ## Status
 
 - **Criado**: 2026-09-26 (Fase: Intent), do plano aprovado na issue #6 (#6)
-- **Status**: In Progress
-- **Atualizado**: 2026-09-26 (Fase: Intent), branch cortada de `origin/main` sem esperar o merge da #5, pela nova resposta do dono à pergunta 4 (#6)
+- **Status**: Completed
+- **Atualizado**: 2026-09-26 (Fase: Learn), a reescrita chegou à branch em seis commits, com o `check:all` passando e o e2e das 388 rotas; a revisão do Copilot e o veredito fresco seguem no fluxo da PR (#6)

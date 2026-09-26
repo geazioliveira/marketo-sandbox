@@ -6,6 +6,7 @@
 - O projeto nasceu do starter do NestJS. O pacote ainda se chama `nest-typescript-starter` (`package.json:2`), e as sobras dele são a #9.
 - Os geradores Python dependem do lado Node: eles formatam a saída com o prettier de `node_modules` (`scripts/marketo_codegen.py:80-89`).
 - O loop (#2 e #3) acrescentou peças por cima. Esta decisão separa o que é pré-loop do que o loop trouxe, para que ninguém leia um acréscimo do loop como decisão dos commits iniciais.
+- As citações `arquivo:linha` sem commit desta ADR, fora das linhas "Desde a #6", são do código de `610e101`, o `main` antes da #6.
 
 ## Decisão
 
@@ -22,14 +23,14 @@
 
   O `tsconfig.build.json` compila só `src` e deixa os specs de fora (`tsconfig.build.json:2-7`).
 - **oxlint.** `oxlint` `^1.58.0` (`package.json:53`), travado em 1.80.0. O `.oxlintrc.json` desliga `no-explicit-any` e deixa `no-floating-promises` como aviso (`.oxlintrc.json:3-5`). O script pré-loop era `oxlint src/ test/` (`fb4a804:package.json:23`).
-- **Prettier.** `prettier` `^3.4.2` (`package.json:54`), travado em 3.9.6. O `.prettierrc` é `singleQuote: true`, `trailingComma: "all"` e `semi: false` (`.prettierrc:1-5`). O script `format` escreve `src/**/*.ts` e `test/**/*.ts` (`package.json:10`). Os geradores passam a saída por esse mesmo prettier (`scripts/marketo_codegen.py:99`, `:115`). Os DTOs chegaram a esse estilo no `e7a0bb6`: no `0c8e760`, 253 dos 255 tinham linhas terminadas em `;`, e depois dele nenhum.
+- **Prettier.** `prettier` `^3.4.2` (`package.json:54`), travado em 3.9.6. O `.prettierrc` é `singleQuote: true`, `trailingComma: "all"` e `semi: false` (`.prettierrc:1-5`). O script `format` escreve `src/**/*.ts` e `test/**/*.ts` (`package.json:10`). Os geradores passam a saída por esse mesmo prettier (`scripts/marketo_codegen.py:99`, `:115`). Os DTOs chegaram a esse estilo no `e7a0bb6`: no `0c8e760`, 253 dos 255 tinham linhas terminadas em `;`, e depois dele nenhum. Desde a #6, o Prettier dos geradores lê só o `.prettierignore` (`scripts/marketo_codegen.py:229-233`): o Prettier 3 também lê o `.gitignore`, que lista a pasta onde o `--check` formata a saída (`.gitignore:41`).
 - **vitest, com duas configs.** `vitest` `^4.1.2` (`package.json:60`), travado em 4.1.11:
   - `vitest.config.ts` pega `**/*.spec.ts` (`vitest.config.ts:11`);
   - `vitest.config.e2e.ts` pega `**/*.e2e-spec.ts` (`vitest.config.e2e.ts:9`);
   - as duas ligam `globals: true` e o `vite-tsconfig-paths`;
   - os scripts são `test`, `test:watch`, `test:cov` (com `@vitest/coverage-v8`), `test:debug` e `test:e2e` (`fb4a804:package.json:24-28`).
 - **Build com `nest build`** (`package.json:8`). Nas `compilerOptions`, o `nest-cli.json` só liga `deleteOutDir` e não escolhe builder (`nest-cli.json:5-7`). O swc é só um peer opcional do `@nestjs/cli` (`package-lock.json:649-650`, `:661-666`) e não está instalado pelo lockfile, então o build usa o tsc (inferido; confirmar). `start:prod` roda `node dist/main` (`package.json:22`).
-- **Geradores em Python 3.** Os scripts `generate:*` e `check:*` de cada gerador chamam `python3 scripts/generate-marketo-*.py`, e `generate:all` e `check:all` os encadeiam (`package.json:11-18`). Eles só usam a biblioteca padrão (`argparse`, `json`, `re`, `shutil`, `subprocess`, `pathlib` e afins). Nenhum arquivo declara a versão do Python: não há `pyproject.toml`, `requirements.txt` nem `.python-version`. O `:=` (`scripts/generate-marketo-definitions.py:137`) e o `from __future__ import annotations` (`:4`) pedem 3.8 ou mais novo (inferido; confirmar). Na leitura da #4, eles rodaram com o Python 3.9.6 local.
+- **Geradores em Python 3.** Os scripts `generate:*` e `check:*` de cada gerador chamam `python3 scripts/generate-marketo-*.py`, e `generate:all` e `check:all` os encadeiam (`package.json:11-18`). Eles só usam a biblioteca padrão (`argparse`, `json`, `re`, `shutil`, `subprocess`, `pathlib` e afins). Nenhum arquivo declara a versão do Python: não há `pyproject.toml`, `requirements.txt` nem `.python-version`. O `:=` (`scripts/generate-marketo-definitions.py:137`) e o `from __future__ import annotations` (`:4`) pedem 3.8 ou mais novo (inferido; confirmar). Na leitura da #4, eles rodaram com o Python 3.9.6 local. Na #6, com o Python 3.9.9 local, o `generate:all` reproduziu byte a byte a saída que o dono tinha gerado.
 
 ### Acrescentado pelo loop
 
@@ -38,6 +39,7 @@
 | O script `gate`, `scripts/` no `lint` (`package.json:23`) e o `.claude/**` fora das duas configs do vitest (`vitest.config.ts:12-14`, `vitest.config.e2e.ts:10`) | `8ce2d58` | #2 |
 | `.nvmrc` com `24`, e o workflow `Qualidade`, que lê a versão dele (`.github/workflows/check.yml:46-48`) | `5b33eb2` | #2 |
 | `/.codegen-tmp/`, `/scripts/__pycache__/` e `/coverage/` no `.gitignore` (`.gitignore:41-43`) | `53ebbf7` | #2 |
+| O Prettier dos geradores lendo só o `.prettierignore` (`scripts/marketo_codegen.py:229-233`) | `b399cde` | #6 |
 | `typecheck` (`tsc --noEmit`), `check:context` e `check`, que roda lint, typecheck, testes, `check:context` e build nessa ordem (`package.json:24`, `:31-32`) | `410d295` | #3 |
 
 O check `Qualidade / check` roda `npm ci`, `npm run check` e o e2e (`.github/workflows/check.yml:50-57`). Ele deixa de fora o `check:all` e, com ele, o Python, até a #7 (`.github/workflows/check.yml:10-11`). O [fluxo](../../docs/development/workflow.md#check) diz como rodar o mesmo antes da PR.
@@ -70,7 +72,7 @@ O histórico não registra que alternativas foram avaliadas.
   - **o Python não tem versão fixada** e o CI ainda não roda os geradores (`.github/workflows/check.yml:10-11`), então nada pega um Python velho demais;
   - **o TypeScript 7 pede uma migração.** O tsc diz que `moduleResolution=node10` vai parar de funcionar no 7.0. Subir de versão pede trocar a resolução de módulos, e talvez a forma dos imports gerados (inferido; confirmar);
   - **os geradores não escolhem o Node pelo `.nvmrc`.** Antes de rodar o prettier, eles põem na frente do `PATH` o primeiro diretório com um `node`: `NODE_BIN`, depois `~/.nvm/versions/node/*/bin` em ordem reversa de nome, `/usr/local/bin` e `/opt/homebrew/bin` (`scripts/marketo_codegen.py:68-77`). Eles também pulam o prettier em silêncio quando `node_modules/.bin/prettier` não existe (`:81-83`), e um clone sem `npm ci` vê tudo como defasado (#7);
-  - **o `format` não cobre tudo e nada o confere.** Ele só escreve `src` e `test` (`package.json:10`), e o `npm run check` não roda `prettier --check`. Em `fb4a804`, o `prettier --check` nesse escopo falhava em 4 arquivos: os 3 do Hello World do starter (`src/app.controller.ts`, `src/app.controller.spec.ts` e `src/app.service.ts`) e o `src/asset/asset.module.ts` (#9);
+  - **o `format` não cobre tudo e nada o confere.** Ele só escreve `src` e `test` (`package.json:10`), e o `npm run check` não roda `prettier --check`. Em `fb4a804`, o `prettier --check` nesse escopo falhava em 4 arquivos: os 3 do Hello World do starter (`src/app.controller.ts`, `src/app.controller.spec.ts` e `src/app.service.ts`) e o `src/asset/asset.module.ts` (#9). A #6 reformatou o `src/asset/asset.module.ts`, junto com os módulos escritos à mão das áreas novas;
   - **o lockfile marca o faker como dev**, o que a [ADR 0007](0007-faker-factories-with-overrides-and-seed.md) e a #9 tratam;
   - **o script `deploy` e o `@nestjs/mau` são sobras do starter** (#9).
 
@@ -90,3 +92,4 @@ O histórico não registra que alternativas foram avaliadas.
 
 - **Criado**: 2026-09-25 (Fase: Build), registro retroativo de `0c8e760`..`fb4a804` (#4)
 - **Status**: Accepted
+- **Atualizado**: 2026-09-26 (Fase: Learn), o Prettier dos geradores passou a ler só o `.prettierignore`, e o Python 3.9.9 reproduziu a saída da reescrita multi-API; as citações sem commit ficaram presas a `610e101` (#6)

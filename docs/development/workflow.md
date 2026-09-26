@@ -275,7 +275,7 @@ npm run check && OBSERVE_ENDPOINT=http://127.0.0.1:9 npm run test:e2e && npm run
 - **O e2e** (`npm run test:e2e`) sobe o app inteiro, e com ele o `ObserveModule`, que manda telemetria por padrão. `OBSERVE_ENDPOINT` aponta essa telemetria para uma porta fechada de loopback, para que nada saia da máquina. Deixar o Observe opt-in é a #9.
 - **No CI**, o job `check` (`Qualidade / check`) roda em toda PR, em todo push em `main` e à mão. Os passos são `npm ci`, `npm run check`, o passo `e2e` (`npm run test:e2e` com o mesmo `OBSERVE_ENDPOINT`) e a conferência de que a árvore ficou limpa. Numa PR, um push novo cancela a run velha. Em `main`, nenhuma run é cancelada nem substituída: cada commit tem o seu grupo de concorrência, e todo push em `main` que dispara run ganha um veredito; o que um push sem run trouxe entra na auditoria seguinte ([Auditoria de main](#auditoria-de-main)).
 - **Se o e2e falhar num runner limpo**, ele sai do `check` como falha conhecida, com a causa registrada, e o conserto vai para a #9 (resposta 1 do dono na #3).
-- O `npm run check:all`, que confere se o código gerado é o que os geradores emitem, é uma falha conhecida, acompanhada na #7. Ele fica fora do `check` até lá.
+- O `npm run check:all`, que confere se o código gerado é o que os geradores emitem, passa desde a #6, mas fica fora do `check` e do CI até a #7, que também faz os geradores falharem sem o Prettier. Rode-o à mão numa PR que toca um gerador, um Swagger ou uma pasta gerada ([gerar e conferir](../../context/knowledge/patterns/generate-and-check.md)).
 
 ## Auditoria de main
 

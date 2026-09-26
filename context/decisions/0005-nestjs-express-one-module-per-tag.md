@@ -9,6 +9,7 @@
   - `a967f26` muda o gerador de resources: o service passa a devolver uma factory (`a967f26:scripts/generate-marketo-resources.py:189`), e cada módulo passa a exportar o service (`:236`).
   - `5cc5e09` leva essas mudanças aos 69 arquivos commitados sem o gerador, que importa um `marketo_codegen` que só chega em `0ef242d`. Nos 23 módulos, acrescenta o `exports`. Nos 23 services, troca o `NotImplementedException` pela factory, com imports `../../`, onde o gerador emite `../../../`. Nos 23 controllers, troca o prefixo dos imports de `../../../asset-definitions` para `../../asset-definitions`. A mensagem só fala dos exports ([Anti-pattern: Mensagem de commit que diz menos do que o commit faz](../knowledge/anti-patterns/commit-message-understating-its-content.md)).
   - `fb4a804` serve a UI do Swagger em `api` (`src/main.ts:13-19`) e semeia o faker antes de criar o app (`src/main.ts:7`).
+- **A #6 levou a forma a cinco áreas.** O gerador passou a rodar por alvo, com um documento Swagger por área ([ADR 0004](0004-swagger-as-single-source-with-committed-generated-code.md)), e a declarar o status 2xx documentado. As citações `arquivo:linha` sem commit desta ADR, fora das linhas "Desde a #6", são do código de `610e101`, o `main` antes da #6.
 
 ## Decisão
 
@@ -28,6 +29,8 @@
   - A factory o preenche como uma chamada que deu certo: `success: true`, `errors: []`, `warnings: []` e um `requestId` de mock (`scripts/generate-marketo-factories.py:30-36`, aplicado em `:192-193`).
   - Dos outros 34, 33 devolvem tipos com `success` e `requestId`, mas sem `errors` nem `warnings`, como `DeleteResponse` (`src/asset/asset-definitions/responses/delete-response.ts:1-4`) e os `*NewResponse`. Só `ModelResponse` é `{}` (`src/asset/asset-definitions/responses/model-response.ts:1`). A [ADR 0007](0007-faker-factories-with-overrides-and-seed.md) diz o que as factories põem em cada um.
 - **A ordem das rotas é a do Swagger.** O gerador percorre `document["paths"]` na ordem do documento e anexa cada operação à tag dela nessa ordem (`scripts/generate-marketo-resources.py:267-270`). Nada põe uma rota literal antes de uma rota com parâmetro.
+- **Desde a #6, um módulo de recursos por área.** Cada área tem um `<Área>ResourcesModule` em `src/<área>/resources/`, importado por um `<Área>Module` escrito à mão, e o `AppModule` importa os cinco (`src/app.module.ts:23-27`, [Pattern: A forma de um módulo de recurso](../knowledge/patterns/resource-module-shape.md)). São 49 tags e 388 operações. A forma de cada recurso é a mesma.
+- **Desde a #6, o status 2xx documentado.** Quando o menor 2xx que o Swagger declara difere do padrão do Nest (201 num POST, 200 no resto), o método ganha `@HttpCode` (`scripts/generate-marketo-resources.py:85-93`). Os 139 POSTs de assets passaram de 201 para 200, como o Swagger declara, e os 7 de Data Ingestion respondem 202. Uma resposta sem schema, como esse 202, sai sem corpo: o método do service não devolve nada (`:271-273`).
 
 ## Racional
 
@@ -37,6 +40,7 @@
 - **Caminho inteiro, sem prefixo.** A rota fica igual ao caminho do Swagger, com a sintaxe de parâmetro trocada: acha-se por busca, e o gerador não precisa decompor o caminho (inferido; confirmar).
 - **O service exportado.** O `exports` deixa outro módulo injetar o service, o que abre lugar para comportamento ao lado do código gerado ([ADR 0009](0009-behaviour-beside-generated-code.md)) (inferido; confirmar).
 - **Um envelope de sucesso fixo.** O comentário do gerador diz que o envelope do Marketo precisa parecer uma chamada que deu certo, não ruído aleatório (`scripts/generate-marketo-factories.py:30`).
+- **O status documentado.** O status faz parte do formato documentado que o mock promete, e um cliente que confere o status veria 201 onde o Marketo documenta 200 (inferido; confirmar).
 
 ## Alternativas consideradas
 
@@ -62,6 +66,8 @@ O histórico não registra alternativas. As linhas abaixo são as óbvias, e cad
 
     A varredura estática, com o `match()` do path-to-regexp 8.4.2, acha as 11. Medido na #4 numa cópia de `origin/main` compilada com `tsc`: com o `AssetResourcesModule` servido em loopback e cada método de service trocado por um que devolve o próprio nome, as 11 chamadas chegam ao handler da rota com `:id`. De controle, `GET smartCampaign/12.json` e `GET smartCampaigns.json` chegam ao próprio handler. A #8 fica com o teste e2e e a correção, e o [Anti-pattern: Rota literal declarada depois de uma rota com parâmetro](../knowledge/anti-patterns/literal-route-after-param-route.md) com a regra.
   - **Entre módulos, a ordem alfabética decide.** `GET form/fields.json` e `GET form/programMemberFields.json`, de `form-fields`, casam com `form/:id.json`, de `forms`. Na mesma medição, as duas chegam ao próprio handler, porque o `FormFieldsModule` vem antes do `FormsModule` (`src/asset/resources/asset-resources.module.ts:36-37`), na ordem que o gerador dá (`scripts/generate-marketo-resources.py:279-281`). Renomear uma tag pode inverter isso (inferido; confirmar). A #8 não lista esse caso.
+  - **Desde a #6, o consumidor vê outro status.** Um cliente que esperava o 201 de um POST de assets recebe 200.
+  - **Desde a #6, mais 2 rotas sombreadas.** Em `lead-database`, `GET` e `POST rest/v1/customobjects/schema.json` caem no handler de `rest/v1/customobjects/:customObjectName.json`, medido na #6 com o app servido e o `match()` do router do Express. A #8 fica com elas também.
   - Nenhum pipe converte ou valida um parâmetro, nem o `@Param('id') id: number` ([ADR 0006](0006-dtos-as-typescript-interfaces.md)).
   - O service ignora os argumentos: a resposta não depende do id nem do corpo, e não há estado. Estado, autenticação e falhas roteirizadas entram com a Track A, e a [ADR 0009](0009-behaviour-beside-generated-code.md), ainda `Proposed`, põe esse comportamento ao lado do código gerado.
   - A forma de controller, service e módulo vem do gerador. Mudá-la é mudar o gerador e regenerar ([ADR 0004](0004-swagger-as-single-source-with-committed-generated-code.md)).
@@ -82,3 +88,4 @@ O histórico não registra alternativas. As linhas abaixo são as óbvias, e cad
 
 - **Criado**: 2026-09-25 (Fase: Build), registro retroativo de `0c8e760`..`fb4a804` (#4)
 - **Status**: Accepted
+- **Atualizado**: 2026-09-26 (Fase: Learn), um módulo de recursos por área e o `@HttpCode` do status 2xx documentado; as citações sem commit ficaram presas a `610e101` (#6)

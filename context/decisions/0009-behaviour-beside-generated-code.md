@@ -8,12 +8,13 @@
   - O controller passa os argumentos ao serviço (`src/asset/resources/snippets/snippets.controller.ts:22`), sem pipe: `@Param('id') id: number` não tem `ParseIntPipe` (`:19`).
   - Nenhuma biblioteca de validação é usada ([ADR 0006](0006-dtos-as-typescript-interfaces.md)).
 - **Regenerar apaga a pasta de saída.** `write_output` roda `shutil.rmtree(output)` antes de escrever (`scripts/marketo_codegen.py:94-95`), e `check_output` acusa como inesperado todo `*.ts` da pasta de saída que o gerador não emitiu (`:122`). Um arquivo escrito à mão em `src/asset/resources/` some no próximo `npm run generate:resources` e reprova o `check:resources`.
-- **O histórico já mostra o custo de misturar.** O `5cc5e09` mudou a saída gerada sem o gerador: nesse commit o gerador de resources nem rodava, porque o `marketo_codegen.py` que ele importa só chegou no `0ef242d`, e ele ainda emite `../../../` onde os arquivos commitados têm `../../` (`scripts/generate-marketo-resources.py:59`, `:63`). O `e7a0bb6` moveu as definições para `src/asset/` sem mudar o gerador, e o `b91681a` commitou as factories fora da pasta que o gerador delas escreve. Por isso o `npm run check:all` não passa (#7).
+- **O histórico já mostra o custo de misturar.** O `5cc5e09` mudou a saída gerada sem o gerador: nesse commit o gerador de resources nem rodava, porque o `marketo_codegen.py` que ele importa só chegou no `0ef242d`, e ele emitiu `../../../`, onde os arquivos commitados têm `../../`, até a #6 (`scripts/generate-marketo-resources.py:59`, `:63`). O `e7a0bb6` moveu as definições para `src/asset/` sem mudar o gerador, e o `b91681a` commitou as factories fora da pasta que o gerador delas escreve. Por isso o `npm run check:all` não passava antes da #6 (#7).
 - **Os pontos de encaixe que já existem.**
   - `src/asset/asset.module.ts` fica fora de toda pasta que um gerador escreve e importa o `AssetResourcesModule` (`src/asset/asset.module.ts:1-7`). Ele veio no `0c8e760`, e nenhum gerador o emite.
   - Cada módulo gerado exporta o próprio serviço, como `exports: [SnippetsService]` (`src/asset/resources/snippets/snippets.module.ts:8`). O gerador faz isso desde o `a967f26` (`scripts/generate-marketo-resources.py:236`).
   - As factories aceitam overrides ([ADR 0007](0007-faker-factories-with-overrides-and-seed.md)).
-- **O layout vai mudar.** A reescrita multi-API (#6) traz as áreas `src/{data-ingestion,identity,lead-database,user-management,mocks}/`. O R3 da Track A depende de `identity/oauth/token`, e o R4 do `userservice`, que não estão no Swagger de assets (#6).
+- **O layout mudou na #6.** A reescrita multi-API trouxe as áreas `src/{data-ingestion,identity,lead-database,user-management}/` e o `src/mocks/` comum, cada área com as próprias pastas geradas ([ADR 0004](0004-swagger-as-single-source-with-committed-generated-code.md)). O R3 da Track A depende de `identity/oauth/token`, e o R4 do `userservice`, que desde a #6 têm rota.
+- As citações `arquivo:linha` sem commit desta ADR, fora das linhas "Desde a #6", são do código de `610e101`, o `main` antes da #6.
 
 ## Decisão
 
@@ -62,7 +63,7 @@
   - **o comportamento acompanha a superfície gerada.** Os nomes de método vêm do `operationId`, como `getSnippetByIdUsingGET` (`src/asset/resources/snippets/snippets.service.ts:14`), e uma mudança no Swagger pode quebrar o comportamento. O typecheck pega a quebra quando o comportamento usa os tipos gerados (inferido; confirmar);
   - **trocar o serviço gerado não é direto hoje.** Cada módulo gerado declara o próprio serviço como provider (`src/asset/resources/snippets/snippets.module.ts:5-10`), e o controller gerado o recebe no construtor (`src/asset/resources/snippets/snippets.controller.ts:15`). Trocá-lo sem tocar no módulo gerado provavelmente pede um gancho no gerador (inferido; confirmar);
   - **as rotas sombreadas atrapalham.** As 11 rotas literais declaradas depois de uma rota `:id` caem no handler da `:id`, como a #4 mediu em runtime ([ADR 0005](0005-nestjs-express-one-module-per-tag.md), [anti-pattern](../knowledge/anti-patterns/literal-route-after-param-route.md)). Um comportamento preso a uma dessas rotas não roda até a #8 corrigir a ordem;
-  - **a prova depende dos geradores.** O teste do item 5 pede `generate:all` e `check:all` funcionando, e hoje os geradores escrevem no layout antigo. A #7, ou a #6, vem antes (inferido; confirmar).
+  - **a prova depende dos geradores.** O teste do item 5 pede `generate:all` e `check:all` funcionando, e eles funcionam desde a #6.
 
 ## Relacionados
 
@@ -83,3 +84,4 @@
 
 - **Criado**: 2026-09-25 (Fase: Build), registro retroativo de `0c8e760`..`fb4a804` (#4)
 - **Status**: Proposed
+- **Atualizado**: 2026-09-26 (Fase: Learn), o layout das cinco áreas chegou com a #6, e o `generate:all` e o `check:all` passaram a funcionar para a prova; as citações sem commit ficaram presas a `610e101` (#6)

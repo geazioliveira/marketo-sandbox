@@ -16,17 +16,17 @@ Serviço HTTP de mock para desenvolvimento e testes, rodando em loopback. Não �
 - NestJS 12 sobre Express, com um módulo por tag do Swagger.
 - DTOs como interfaces TypeScript.
 - Respostas geradas por factories faker com overrides e seed.
-- Código gerado por scripts Python a partir de `docs/marketo-swagger-asset.json`.
+- Código gerado por scripts Python a partir de cinco documentos Swagger em `docs/`, um por área de `src/`: assets, Data Ingestion, Identity, Lead Database e User Management.
 - vitest, oxlint, prettier e TypeScript 6.
 
 As decisões por trás de cada item estão registradas, de forma retroativa, nas ADRs [0004](../decisions/0004-swagger-as-single-source-with-committed-generated-code.md), [0005](../decisions/0005-nestjs-express-one-module-per-tag.md), [0006](../decisions/0006-dtos-as-typescript-interfaces.md), [0007](../decisions/0007-faker-factories-with-overrides-and-seed.md) e [0008](../decisions/0008-toolchain.md) (#4).
 
 ## Critérios de aceite
 
-Nenhum está marcado ainda: um critério só é marcado quando um teste ou um check o prova.
+Um critério só é marcado quando um teste ou um check o prova.
 
-- [ ] Cada operação do Swagger de assets (220 operações, 186 caminhos, 23 tags) tem uma rota que chega ao próprio handler e responde um envelope bem formado. Hoje as rotas existem, mas 11 estão sombreadas: medido na #4, elas caem no handler de uma rota `:id` declarada antes ([ADR 0005](../decisions/0005-nestjs-express-one-module-per-tag.md), #8).
-- [ ] O código gerado é exatamente o que os geradores emitem: `npm run check:all` passa num clone limpo. Hoje falha (#7).
+- [ ] Cada operação do Swagger de assets (220 operações, 186 caminhos, 23 tags) tem uma rota que chega ao próprio handler e responde um envelope bem formado. Hoje as rotas existem, mas 11 estão sombreadas: medido na #4, elas caem no handler de uma rota `:id` declarada antes ([ADR 0005](../decisions/0005-nestjs-express-one-module-per-tag.md), #8). Desde a #6, as outras quatro áreas também têm uma rota por operação, 388 ao todo, conferidas pelo e2e, e 2 rotas de `lead-database` também estão sombreadas.
+- [x] O código gerado é exatamente o que os geradores emitem: `npm run check:all` passa num clone limpo. Medido na #6; o CI passa a rodá-lo com a #7.
 - [ ] Com `MARKETO_MOCK_SEED`, a mesma requisição devolve o mesmo payload entre reinícios. Hoje só vale para a mesma sequência de requisições desde o boot, porque o faker recebe o seed uma vez ([ADR 0007](../decisions/0007-faker-factories-with-overrides-and-seed.md)), e não há teste.
 - [ ] Por padrão, nenhuma requisição sai da máquina e o servidor escuta em 127.0.0.1. Hoje o `ObserveModule` fica ligado e o servidor escuta em todas as interfaces (#9).
 - [ ] Um consumidor fixa uma release com tag e a sobe com um comando documentado.
@@ -46,7 +46,6 @@ Nenhum está marcado ainda: um critério só é marcado quando um teste ou um ch
 
 ## Decisões em aberto
 
-- **A reescrita multi-API** (5 documentos Swagger, registro de alvos) está no checkout principal sem commit e entra por PR (#6).
 - **Qual cópia do Swagger de assets vale.** Aqui é `ced6c339…` (255 definições); o lite-campaign fixa `ff7ec628…` (254). A escolha sai de um diff nas rotas que o consumidor usa.
 - **Onde vive o comportamento com estado:** ao lado do código gerado, nunca dentro dele. A [ADR 0009](../decisions/0009-behaviour-beside-generated-code.md) propõe isso como `Proposed`, e a primeira sub-issue da Track A que construir comportamento a aceita ou a substitui.
 - **ObserveModule:** tornar opt-in ou remover (#9).
@@ -57,4 +56,4 @@ Nenhum está marcado ainda: um critério só é marcado quando um teste ou um ch
 
 - **Criado**: 2026-09-24 (Fase: Intent), a partir do código em `fb4a804` e do plano do consumidor lite-campaign (#2)
 - **Status**: In Progress
-- **Atualizado**: 2026-09-25 (Fase: Learn), a stack e as decisões em aberto apontam para as ADRs retroativas de 0004 a 0009 (#4)
+- **Atualizado**: 2026-09-26 (Fase: Learn), a stack passou a gerar cinco áreas de cinco documentos Swagger, o critério do `check:all` foi marcado e a reescrita multi-API saiu das decisões em aberto (#6)

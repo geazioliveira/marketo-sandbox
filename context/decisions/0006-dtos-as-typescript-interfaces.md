@@ -7,6 +7,7 @@
   - `0c8e760` traz as 255 interfaces em `src/asset-definitions/` e o gerador `scripts/generate-marketo-definitions.py`, que já emite cada definição como `export interface` (`0c8e760:scripts/generate-marketo-definitions.py:142`). Os arquivos commitados não têm o sufixo `.js` que esse gerador põe nos imports (`:151`) ([ADR 0004](0004-swagger-as-single-source-with-committed-generated-code.md)).
   - `a19d9d3` apaga 101 delas como "não usadas", e `e7a0bb6` traz de volta os mesmos 101 caminhos e move as 255 para `src/asset/asset-definitions/`. Os dois commits são as duas metades de uma mudança de pasta ([Anti-pattern: Mensagem de commit que diz menos do que o commit faz](../knowledge/anti-patterns/commit-message-understating-its-content.md)).
   - `e7a0bb6` também reformata os arquivos no estilo do Prettier, sem ponto e vírgula e com aspas simples. A forma não muda: continuam interfaces.
+- **A #6 levou os DTOs a cinco áreas**, com um documento Swagger por área, um deles em OpenAPI 3 ([ADR 0004](0004-swagger-as-single-source-with-committed-generated-code.md)). As citações `arquivo:linha` sem commit desta ADR, fora das linhas "Desde a #6", são do código de `610e101`, o `main` antes da #6.
 
 ## Decisão
 
@@ -20,6 +21,7 @@
   - as dependências entram com `import type` (`:123`).
 
   Dois exemplos: `src/asset/asset-definitions/responses/program-response.ts:1-12` e `src/asset/asset-definitions/models/folder.ts:1-12`.
+- **Desde a #6, 459 interfaces nas cinco áreas**, em `src/<área>/<área>-definitions/`. A regra da pasta é uma só, `definition_category()`, que os três geradores usam, e um nome que começa com `ResponseOf` também vai para `responses/` (`scripts/marketo_codegen.py:177-183`). Por isso 13 definições de assets passaram de `models/` para `responses/`, e ficaram 79 em `models/`, 72 em `requests/` e 104 em `responses/`. O OpenAPI 3 passa pelo mesmo `render()`: os schemas vêm de `components.schemas` (`scripts/marketo_codegen.py:55-58`).
 - **Sem biblioteca de validação.** class-validator e class-transformer não aparecem em `src` nem em `test`, e não estão instalados. No `package-lock.json`, são só peers opcionais de `@nestjs/common` (`:702-703`), de `@nestjs/mapped-types` (`:765-766`) e de `@nestjs/swagger` (`:1023-1024`).
 
 ## Racional
@@ -50,6 +52,7 @@ O histórico não registra alternativas. As linhas abaixo são as óbvias, e cad
   - **Nenhuma validação em runtime.** Um corpo ou um parâmetro fora do contrato chega ao service como veio. Não há pipe nos parâmetros (`src/asset/resources/snippets/snippets.controller.ts:19`), nem `ValidationPipe`, nem class-validator em `src`.
   - **A validação estrita da Track A vai precisar de outra coisa.** O project intent a lista entre os [critérios de aceite](../intent/project-intent.md#critérios-de-aceite). Uma interface não existe em runtime, então a validação precisa de código de runtime. A [ADR 0009](0009-behaviour-beside-generated-code.md), ainda `Proposed`, o põe ao lado do código gerado, nunca dentro dele. A forma da validação ainda não foi decidida.
   - **A UI do Swagger sai sem schemas.** O `@nestjs/swagger` monta o documento de `/api` e `/api-json` a partir das rotas e dos decorators do app (`src/main.ts:18-19`, `README.md:49-52`), não de `docs/marketo-swagger-asset.json`. Não há nenhum `@Api*` em `src`, e o `nest-cli.json` não liga o plugin do `@nestjs/swagger`. Medido na #4 numa cópia de `origin/main` compilada com `tsc`: o `SwaggerModule.createDocument` sobre o `AssetResourcesModule` devolve 186 caminhos e 0 schemas.
+  - **Desde a #6, um schema só com `additionalProperties` vira interface vazia.** `Person` e `CustomObject`, do Data Ingestion, saem como `export interface X {}`, e o tipo aceita qualquer objeto (medido na #6).
   - **O tipo não garante o envelope.** Todo campo do envelope é opcional (`src/asset/asset-definitions/responses/response-of-snippet-response.ts:4-10`), então o tipo aceita um envelope sem `success`. Só a factory garante que ele vem preenchido ([ADR 0007](0007-faker-factories-with-overrides-and-seed.md)).
 
 ## Relacionados
@@ -66,3 +69,4 @@ O histórico não registra alternativas. As linhas abaixo são as óbvias, e cad
 
 - **Criado**: 2026-09-25 (Fase: Build), registro retroativo de `0c8e760`..`fb4a804` (#4)
 - **Status**: Accepted
+- **Atualizado**: 2026-09-26 (Fase: Learn), 459 interfaces nas cinco áreas, uma regra só de pasta, com `ResponseOf*` em `responses/`, e os schemas do OpenAPI 3; as citações sem commit ficaram presas a `610e101` (#6)

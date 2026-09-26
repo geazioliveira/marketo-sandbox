@@ -10,6 +10,7 @@
   - `0ef242d` trouxe o gerador, [scripts/generate-marketo-factories.py](../../scripts/generate-marketo-factories.py) (311 linhas);
   - `b91681a` gerou os 259 arquivos de `src/asset/asset-mocks/`: 255 factories, `factories/index.ts`, `request-id.ts`, `seed.ts` e `index.ts`;
   - `fb4a804` chamou `seedMockData()` no boot (`src/main.ts:7`).
+- **A #6 levou as factories a cinco áreas**, com um documento Swagger por área ([ADR 0004](0004-swagger-as-single-source-with-committed-generated-code.md)). As citações `arquivo:linha` sem commit desta ADR, fora das linhas "Desde a #6", são do código de `610e101`, o `main` antes da #6.
 
 ## Decisão
 
@@ -28,6 +29,7 @@
   - com seed, chama `faker.seed(seed)` e `faker.setDefaultRefDate(refDate)` (`:19-22`);
   - o boot a chama uma vez, antes de criar a aplicação (`src/main.ts:7`). O README documenta as duas variáveis (`README.md:77-87`).
 - **Tudo isso é código gerado.** `seed.ts`, `request-id.ts` e os dois `index.ts` também saem do gerador (`scripts/generate-marketo-factories.py:227-297`). A fronteira da [ADR 0004](0004-swagger-as-single-source-with-committed-generated-code.md) vale para eles.
+- **Desde a #6, o seed e o `requestId` são comuns às áreas.** `seed.ts`, `request-id.ts` e um `index.ts` ficam em `src/mocks/` (`scripts/generate-marketo-factories.py:286-292`), e cada área tem as factories dela em `src/<área>/<área>-mocks/factories/`. O `src/main.ts` importa o `seedMockData()` de `./mocks` (`src/main.ts:4`). `src/mocks/seed.ts` e `src/mocks/request-id.ts` têm as mesmas linhas de antes, então as citações de `seed.ts` e `request-id.ts` desta ADR valem para eles.
 - **faker é dependência de runtime.** `@faker-js/faker` `^10.6.0` está em `dependencies` (`package.json:35`) desde o `01ee283`. Os serviços chamam as factories a cada requisição, e esse foi o motivo da mudança (inferido; confirmar). O lockfile o trava em 10.6.0.
 
 ## Racional
@@ -66,7 +68,8 @@ O histórico não registra que alternativas foram avaliadas. Cada motivo abaixo 
   - **o envelope nunca é de erro.** `success: false` com `errors` só sai com um override, e nenhum código faz isso hoje. As falhas roteirizadas são da Track A ([ADR 0009](0009-behaviour-beside-generated-code.md));
   - **nada testa as factories nem o seed.** Nenhum spec os importa, e o critério do seed no [project intent](../intent/project-intent.md#critérios-de-aceite) segue sem teste;
   - **o lockfile está defasado.** A raiz dele lista faker em `devDependencies` (`package-lock.json:20-21`) e marca a entrada com `"dev": true` (`package-lock.json:218-222`). O `01ee283` acrescentou o `@nestjs/swagger` ao lockfile, mas não levou a mudança do faker. Com o npm 11.9.0, isso ainda não tira o faker de uma instalação de produção: o npm recalcula as marcas a partir do `package.json`, e `npm ci --omit=dev --dry-run` instala `@faker-js/faker 10.6.0`, medido na leitura da #4. Outra versão do npm, ou uma ferramenta que confie na marca `dev` do lockfile, pode deixar de fora o faker de que o runtime precisa (inferido; confirmar). A #9 corrige;
-  - **mudar uma heurística ou o envelope é mudar o gerador.** Mas o gerador escreve em `src/asset-mocks` (`scripts/generate-marketo-factories.py:27`), não em `src/asset/asset-mocks`, e o `check:factories` acusa os 259 arquivos como ausentes (#7).
+  - **mudar uma heurística ou o envelope é mudar o gerador.** Até a #6, o gerador escrevia em `src/asset-mocks` (`scripts/generate-marketo-factories.py:27`), não em `src/asset/asset-mocks`, e o `check:factories` acusava os 259 arquivos como ausentes (#7). Desde a #6, ele escreve na pasta de cada área, e o check passa;
+  - **desde a #6, uma instância do faker serve as cinco áreas.** Com seed, uma chamada a qualquer área desloca a sequência das outras.
 
 ## Relacionados
 
@@ -85,3 +88,4 @@ O histórico não registra que alternativas foram avaliadas. Cada motivo abaixo 
 
 - **Criado**: 2026-09-25 (Fase: Build), registro retroativo de `0c8e760`..`fb4a804` (#4)
 - **Status**: Accepted
+- **Atualizado**: 2026-09-26 (Fase: Learn), factories nas cinco áreas, com o seed e o `mockRequestId()` em `src/mocks/`, comuns a todas; as citações sem commit ficaram presas a `610e101` (#6)
