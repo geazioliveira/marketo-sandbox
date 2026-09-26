@@ -8,6 +8,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -210,35 +211,89 @@ def quote(value: Any) -> str:
     return json.dumps(value)
 
 
+PRETTIER = ROOT / "node_modules" / ".bin" / "prettier"
+#: What `prettier --write` prints for each file it processed; a file it skipped prints nothing.
+_PROCESSED = re.compile(r"^(?P<path>.+) \d+ms(?: \(unchanged\))?(?: \(cached\))?$")
+
+
+def _cannot_format(message: str) -> SystemExit:
+    """Exit 2, not 1: the run could not judge the output, which is not the same as stale output."""
+    print(message, file=sys.stderr)
+    return SystemExit(2)
+
+
 def _node_environment() -> dict[str, str]:
+    """NODE_BIN when set, else the node already in PATH, else the newest ~/.nvm one, else a system one."""
     environment = os.environ.copy()
-    candidates = [Path(environment.get("NODE_BIN", ""))] if environment.get("NODE_BIN") else []
-    candidates.extend(sorted((Path.home() / ".nvm" / "versions" / "node").glob("*/bin"), reverse=True))
-    candidates.extend([Path("/usr/local/bin"), Path("/opt/homebrew/bin")])
+    if environment.get("NODE_BIN"):
+        if not (Path(environment["NODE_BIN"]) / "node").exists():
+            raise _cannot_format(
+                f"Node.js not found in NODE_BIN ({environment['NODE_BIN']}): "
+                "point it at the bin/ folder of the version in .nvmrc."
+            )
+        candidates = [Path(environment["NODE_BIN"])]
+    elif shutil.which("node", path=environment.get("PATH")):
+        return environment
+    else:
+        candidates = sorted((Path.home() / ".nvm" / "versions" / "node").glob("*/bin"), reverse=True)
+        candidates += [Path("/usr/local/bin"), Path("/opt/homebrew/bin")]
     for candidate in candidates:
-        if candidate and (candidate / "node").exists():
+        if (candidate / "node").exists():
             environment["PATH"] = f"{candidate}{os.pathsep}{environment.get('PATH', '')}"
             break
     return environment
 
 
+def prettier_environment() -> dict[str, str]:
+    """Stop the run unless Prettier and a Node.js to run it are available."""
+    if not PRETTIER.exists():
+        raise _cannot_format(
+            f"Prettier not found at {PRETTIER.relative_to(ROOT)}: run `npm ci` first. "
+            "The generators never write or compare unformatted code."
+        )
+    environment = _node_environment()
+    if shutil.which("node", path=environment.get("PATH")) is None:
+        raise _cannot_format(
+            "Node.js not found in NODE_BIN, PATH, ~/.nvm, /usr/local/bin or /opt/homebrew/bin: Prettier needs it. "
+            "Install the version in .nvmrc, or point NODE_BIN at its bin/ folder."
+        )
+    return environment
+
+
 def format_with_prettier(paths: list[Path]) -> None:
-    prettier = ROOT / "node_modules" / ".bin" / "prettier"
-    if not prettier.exists() or not paths:
+    """Format `paths` in place, or stop the run if Prettier did not process every one of them.
+
+    Prettier 3 reads .gitignore and .prettierignore by default and skips an ignored file without a
+    word and with exit 0, even one named on the command line. `--ignore-path=` turns both off, so no
+    ignore rule reaches generated code, and the per-file report proves nothing else skipped a path.
+    `--no-color` keeps that report parseable under CI=true, and `--no-require-pragma` beats a config
+    that would process a file without formatting it (#7).
+    """
+    if not paths:
         return
-    # Prettier 3 also reads .gitignore, which lists .codegen-tmp/: --check would compare
-    # unformatted output against formatted files. Only .prettierignore may skip a path.
-    subprocess.run(
-        [str(prettier), "--write", "--log-level", "warn", "--ignore-path", ".prettierignore"]
-        + [str(path) for path in paths],
-        check=True,
+    relative = [path.relative_to(ROOT).as_posix() for path in paths]
+    result = subprocess.run(
+        [str(PRETTIER), "--write", "--no-color", "--no-require-pragma", "--ignore-path=", *relative],
         cwd=ROOT,
-        env=_node_environment(),
+        env=prettier_environment(),
+        capture_output=True,
+        text=True,
     )
+    sys.stderr.write(result.stderr)
+    if result.returncode != 0:
+        raise _cannot_format(f"Prettier failed with exit code {result.returncode}.")
+    reported = {match["path"] for line in result.stdout.splitlines() if (match := _PROCESSED.match(line))}
+    skipped = [path for path in relative if path not in reported]
+    if skipped:
+        raise _cannot_format(
+            f"Prettier did not process {len(skipped)} of {len(paths)} files, e.g. {skipped[0]}: "
+            "an ignore rule or a Prettier config is skipping them."
+        )
 
 
 def write_output(output: Path, files: dict[Path, str], label: str) -> int:
     """Write generated files, then normalise them with prettier."""
+    prettier_environment()  # fail before deleting anything
     if output.exists():
         refuse_foreign_files(output, files)
         shutil.rmtree(output)
@@ -252,6 +307,7 @@ def write_output(output: Path, files: dict[Path, str], label: str) -> int:
 
 def check_output(output: Path, files: dict[Path, str], label: str) -> int:
     """Compare committed files against freshly generated, prettier-formatted output."""
+    prettier_environment()  # fail before comparing anything
     if TEMP.exists():
         shutil.rmtree(TEMP)
     try:
