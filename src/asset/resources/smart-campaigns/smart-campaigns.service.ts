@@ -21,28 +21,10 @@ import type { ResponseOfSmartListResponseWithRules } from '../../asset-definitio
 
 @Injectable()
 export class SmartCampaignsService {
-  async getSmartCampaignByIdUsingGET(
-    ..._arguments: unknown[]
-  ): Promise<ResponseOfSmartCampaignResponseWithFlow> {
-    return makeResponseOfSmartCampaignResponseWithFlow()
-  }
-
-  async updateSmartCampaignUsingPOST(
-    ..._arguments: unknown[]
-  ): Promise<ResponseOfSmartCampaignResponse> {
-    return makeResponseOfSmartCampaignResponse()
-  }
-
   async getSmartCampaignByNameUsingGET(
     ..._arguments: unknown[]
   ): Promise<ResponseOfSmartCampaignResponseWithFlow> {
     return makeResponseOfSmartCampaignResponseWithFlow()
-  }
-
-  async getSmartCampaignUsedByUsingGET(
-    ..._arguments: unknown[]
-  ): Promise<ResponseOfSmartCampaignUsedBy> {
-    return makeResponseOfSmartCampaignUsedBy()
   }
 
   async getSmartCampaignRulesUsingGET(
@@ -61,6 +43,24 @@ export class SmartCampaignsService {
     ..._arguments: unknown[]
   ): Promise<ResponseOfSmartCampaignFlowStepType> {
     return makeResponseOfSmartCampaignFlowStepType()
+  }
+
+  async getSmartCampaignByIdUsingGET(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfSmartCampaignResponseWithFlow> {
+    return makeResponseOfSmartCampaignResponseWithFlow()
+  }
+
+  async updateSmartCampaignUsingPOST(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfSmartCampaignResponse> {
+    return makeResponseOfSmartCampaignResponse()
+  }
+
+  async getSmartCampaignUsedByUsingGET(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfSmartCampaignUsedBy> {
+    return makeResponseOfSmartCampaignUsedBy()
   }
 
   async getSmartCampaignAutoSuggestUsingGET(
