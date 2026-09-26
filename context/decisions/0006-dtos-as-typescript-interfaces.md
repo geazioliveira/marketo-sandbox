@@ -21,7 +21,7 @@
   - as dependências entram com `import type` (`:123`).
 
   Dois exemplos: `src/asset/asset-definitions/responses/program-response.ts:4-15` e `src/asset/asset-definitions/models/folder.ts:4-15`.
-- **Desde a #6, 459 interfaces nas cinco áreas**, em `src/<área>/<área>-definitions/`. A regra da pasta é uma só, `definition_category()`, que os três geradores usam, e um nome que começa com `ResponseOf` também vai para `responses/` (`scripts/marketo_codegen.py:178-184`). Por isso 13 definições de assets passaram de `models/` para `responses/`, e ficaram 79 em `models/`, 72 em `requests/` e 104 em `responses/`. O OpenAPI 3 passa pelo mesmo `render()`: os schemas vêm de `components.schemas` (`scripts/marketo_codegen.py:56-59`).
+- **Desde a #6, 459 interfaces nas cinco áreas**, em `src/<área>/<área>-definitions/`. A regra da pasta é uma só, `definition_category()`, que os três geradores usam, e um nome que começa com `ResponseOf` também vai para `responses/` (`scripts/marketo_codegen.py:179-185`). Por isso 13 definições de assets passaram de `models/` para `responses/`, e ficaram 79 em `models/`, 72 em `requests/` e 104 em `responses/`. O OpenAPI 3 passa pelo mesmo `render()`: os schemas vêm de `components.schemas` (`scripts/marketo_codegen.py:57-60`).
 - **Sem biblioteca de validação.** class-validator e class-transformer não aparecem em `src` nem em `test`, e não estão instalados. No `package-lock.json`, são só peers opcionais de `@nestjs/common` (`:702-703`), de `@nestjs/mapped-types` (`:765-766`) e de `@nestjs/swagger` (`:846-847`).
 
 ## Racional

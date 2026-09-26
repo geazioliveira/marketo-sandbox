@@ -487,6 +487,58 @@ describe.concurrent('the generators, on the identity target (#7)', () => {
       }),
   )
 
+  it('a NODE_BIN whose node is not executable fails before touching the output', () =>
+    withTree({}, async (at) => {
+      const bin = path.join(at.root, 'fake-bin')
+      mkdirSync(bin)
+      writeFileSync(path.join(bin, 'node'), '#!/bin/sh\n', { mode: 0o644 })
+      plantSentinels(at)
+      const before = snapshot(at)
+      for (const args of [['--check'], []]) {
+        const run = await generateWith(
+          at,
+          { NODE_BIN: bin },
+          'definitions',
+          ...args,
+        )
+        expect(run.out).toMatch(
+          /Node\.js not found in NODE_BIN .*not executable/,
+        )
+        expect(run.out).not.toMatch(/Traceback|stale|current/)
+        expect(run.status, run.out).toBe(2)
+      }
+      expect(snapshot(at)).toEqual(before)
+    }))
+
+  it('a custom area from a document with a space quotes it in the command', () =>
+    withTree({}, async (at) => {
+      cpSync(
+        path.join(at.dir, 'docs', 'marketo-swagger-identity.json'),
+        path.join(at.dir, 'docs', 'identity copy.json'),
+      )
+      const run = await generate(
+        at,
+        'definitions',
+        '--swagger',
+        'docs/identity copy.json',
+        '--area',
+        'zz-spaced',
+      )
+      expect(run.status, run.out).toBe(0)
+      const header = readFileSync(
+        path.join(
+          at.dir,
+          'src/zz-spaced/zz-spaced-definitions/requests/identity-request.ts',
+        ),
+        'utf8',
+      )
+        .split('\n')
+        .slice(0, 2)
+      expect(header[1]).toBe(
+        "// Change the generator or the Swagger document, then run `npm run generate:definitions -- --swagger 'docs/identity copy.json' --area zz-spaced`.",
+      )
+    }))
+
   it.each(
     generators.flatMap((generator) =>
       [

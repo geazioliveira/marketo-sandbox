@@ -18,7 +18,7 @@ Cada tag de um Swagger vira, na área dele, uma pasta com um module, um controll
 
 ### Os arquivos
 
-- **Uma pasta por tag**, `src/<área>/resources/<slug>/`. A primeira tag da operação decide o módulo (`scripts/generate-marketo-resources.py:380-383`). O slug é a tag em kebab-case, sem os parênteses: `Emails (New)` vira `emails-new` (`scripts/marketo_codegen.py:160-164`).
+- **Uma pasta por tag**, `src/<área>/resources/<slug>/`. A primeira tag da operação decide o módulo (`scripts/generate-marketo-resources.py:380-383`). O slug é a tag em kebab-case, sem os parênteses: `Emails (New)` vira `emails-new` (`scripts/marketo_codegen.py:161-165`).
 - **Três arquivos por pasta**: `<slug>.module.ts`, `<slug>.controller.ts` e `<slug>.service.ts` (`scripts/generate-marketo-resources.py:387-393`).
 - **Os nomes vêm da tag em PascalCase**: `SnippetsModule`, `SnippetsController` e `SnippetsService`, e a propriedade `snippetsService` no controller (`scripts/generate-marketo-resources.py:216-218,341-358`).
 - **A ligação.** O `<Área>ResourcesModule` importa os módulos da área em ordem alfabética do slug (`scripts/generate-marketo-resources.py:360-378,394-396`). O `<Área>Module`, escrito à mão, importa o `<Área>ResourcesModule` (`src/asset/asset.module.ts:1-7`), e o `AppModule` importa os cinco `<Área>Module`, nesta ordem: assets, Data Ingestion, Identity, Lead Database e User Management (`src/app.module.ts:10-14`).
@@ -44,7 +44,7 @@ Cada tag de um Swagger vira, na área dele, uma pasta com um module, um controll
 - **Os parâmetros vêm do `in` do Swagger** (`scripts/generate-marketo-resources.py:37-43,118-122`):
   - `path` vira `@Param('<nome>')`;
   - `query` vira `@Query('<nome>')`;
-  - `body`, e o `requestBody` do OpenAPI 3, viram `@Body()` (`scripts/marketo_codegen.py:129-142`), e `formData` vira `@Body('<nome>')`;
+  - `body`, e o `requestBody` do OpenAPI 3, viram `@Body()` (`scripts/marketo_codegen.py:130-143`), e `formData` vira `@Body('<nome>')`;
   - `header` vira `@Headers('<nome>')`.
 
   Os obrigatórios vêm antes dos opcionais (`scripts/generate-marketo-resources.py:233-238`).
@@ -66,7 +66,7 @@ Cada tag de um Swagger vira, na área dele, uma pasta com um module, um controll
 ### Os imports
 
 - Os tipos entram com `import type` de `…/<área>-definitions/…`, e as factories, de `…/<área>-mocks/factories/…` (`src/asset/resources/snippets/snippets.service.ts:4-13`).
-- O caminho sai de `relative_import()`, a partir de um arquivo em `resources/<slug>/` (`scripts/generate-marketo-resources.py:198-213`, `scripts/marketo_codegen.py:154-157`). O gerador e a saída commitada batem: o `check:resources` passa desde a #6.
+- O caminho sai de `relative_import()`, a partir de um arquivo em `resources/<slug>/` (`scripts/generate-marketo-resources.py:198-213`, `scripts/marketo_codegen.py:155-158`). O gerador e a saída commitada batem: o `check:resources` passa desde a #6.
 
 ### Exemplo
 
