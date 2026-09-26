@@ -20,13 +20,20 @@ Uma entrada por mudança mergeada, da mais nova para a mais antiga, escrita no p
 - **O `gateStatus()`** passou a fechar o cache enquanto existir o marcador de um plano pendente, por mais recente que seja o gate.
 - **As docs falam dos hooks no presente:** a camada 3 e os limites na ADR 0002, a seção Os hooks do Claude Code no fluxo, a rota no `AGENTS.md`, e um teste de drift que confere o presente.
 - **Os critérios da #17** que ficaram para depois do merge foram marcados, com a evidência de cada um.
+- **A revisão do Copilot na PR #26 achou seis brechas,** e cada uma foi fechada com um teste que falha sem a correção:
+  - o `guard-bash` segue um `git remote set-url` ou `git config remote.<r>.url` anterior na mesma linha antes de decidir o repositório do `gh`;
+  - uma PR criada pela API sem corpo é negada, como no `gh pr create`, e um `updatePullRequest` do GraphQL confere a linha `Closes`, como o `PATCH` REST;
+  - um `-R` que não pode ser lido nunca vale como este projeto para deixar passar;
+  - a mensagem de um `git merge` é conferida contra os tokens de skip;
+  - o `plan-to-issue` julga cada publicação no worktree onde o `gh` roda, e apaga o cache do gate de todo worktree do repositório.
 
 ### Números medidos
 
-- `npm run check`: 2.370 testes, dos quais 1.022 são dos hooks, em 11 arquivos de `test/hooks/`.
-- O código dos hooks tem 8,8 mil linhas; os testes e o suporte deles, 10,4 mil.
+- `npm run check`: 2.459 testes, dos quais 1.111 são dos hooks, em 11 arquivos de `test/hooks/`. Eram 2.370 e 1.022 antes da revisão do Copilot.
+- O código dos hooks tem 9,3 mil linhas; os testes e o suporte deles, 11 mil.
 - Corpus de 902 comandos Bash reais das sessões deste projeto: 816, 75 e 11 (passa, confirma, nega) na primeira rodada; 847, 44 e 11 depois das correções, com as mesmas 11 recusas certas. Mediana de 93 ms e máximo de 1,5 s.
 - As duas sondas do plano foram negadas com os hooks ativos, em modo `auto`.
+- As correções da revisão: 19 mutações, cada uma revertendo uma parte de uma correção, e todas pegas por um teste. O corpus deu de novo 847, 44 e 11, sem nenhuma decisão mudada.
 
 ### Decisões tomadas
 
@@ -45,6 +52,8 @@ Uma entrada por mudança mergeada, da mais nova para a mais antiga, escrita no p
 - **Os hooks valem assim que o `.claude/settings.json` muda.** Não foi preciso reiniciar a sessão para as sondas, e a primeira coisa que os hooks negaram foi um comando de simulação do próprio agente.
 - **A prosa que cita um comando parece um comando.** Um script que escreve documentação citando `gh` conta como capaz de rodá-lo; a edição vai pela ferramenta Edit.
 - **Um agente de verificação rodou por engano uma lista de casos** escrita num heredoc que continha `EOF`. Nada chegou ao projeto, mas a lista de casos agora é escrita como dado, nunca como shell.
+- **A revisão de fora achou o que o autor e o verificador não procuraram.** As seis brechas do Copilot são do mesmo tipo: o que um comando muda antes do `gh` ou do `git` que o hook julga (o remote, o worktree do `cd`), e o que chega por outro caminho que não o comando de sempre (a API, o `git merge`). Nenhuma das rodadas adversariais tinha olhado por aí.
+- **Para mexer nos hooks, eles precisam estar desligados.** Com os hooks ativos em modo `auto`, a edição de um arquivo do harness vira negação, como devia. As correções da revisão foram feitas com a saída de emergência do dono ligada, e uma sonda confere, depois, que os hooks voltaram a valer.
 - **A verificação adversarial parou no meio duas vezes,** porque um filtro de segurança barrou a escrita dos comandos de evasão. As brechas provadas antes disso foram fechadas, e o que não dá para ver pelo texto do comando foi para os limites da ADR 0002.
 
 ---

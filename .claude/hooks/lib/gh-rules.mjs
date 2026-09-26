@@ -2187,9 +2187,21 @@ function graphqlDecision(body, ctx) {
       argumentOf(args, 'title', variables),
     ),
   )
-  each('updatePullRequest', (args) =>
-    skipDecision([text(args, 'title').text, text(args, 'body').text], 'a PR'),
-  )
+  // A new body keeps the Closes line, as the REST PATCH of pulls/{n} does.
+  // The pull request is a node id, so its issue is not known: the shape alone.
+  each('updatePullRequest', (args) => {
+    const body = text(args, 'body')
+    return combine([
+      skipDecision([text(args, 'title').text, body.text], 'a PR'),
+      !body.known
+        ? ask(
+            'não consegui ler o novo corpo da PR para conferir a primeira linha',
+          )
+        : body.text !== null
+          ? closesDecision(body.text, null, 'da PR')
+          : pass(),
+    ])
+  })
   return combine(decisions)
 }
 

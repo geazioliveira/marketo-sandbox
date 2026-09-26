@@ -91,7 +91,7 @@ As respostas do Approve de 2026-09-25 continuam: em `auto`, os `ask` críticos v
 
 ## Resultados
 
-O que foi construído está na [entrada do changelog](../evolution/changelog.md): os quatro hooks em `.claude/hooks/`, a biblioteca em `.claude/hooks/lib/`, o `run.sh`, o `.claude/settings.json` e 1.022 testes em `test/hooks/`.
+O que foi construído está na [entrada do changelog](../evolution/changelog.md): os quatro hooks em `.claude/hooks/`, a biblioteca em `.claude/hooks/lib/`, o `run.sh`, o `.claude/settings.json` e 1.111 testes em `test/hooks/`.
 
 Como foi verificado:
 
@@ -100,6 +100,7 @@ Como foi verificado:
   - A primeira rodada deu 816 que passam, 75 que pedem confirmação e 11 recusas. Depois das correções, 847, 44 e 11.
   - As 11 recusas são as mesmas, e todas certas: merges de PRs já mergeadas, trocas de label em issues que mudaram de estado, um `gh label create` de label de estado e um `PATCH` nas configurações do repositório.
   - A mediana ficou em 93 ms, e o máximo, em 1,5 s.
+- **A revisão do Copilot na PR #26** achou seis brechas: um remote mudado antes do `gh` na mesma linha, a PR criada pela API sem corpo, um `-R` ilegível tratado como este projeto, a mensagem do `git merge`, a publicação feita de outro worktree e o cache do gate dos outros worktrees. Cada uma foi fechada com um teste que falha sem a correção, e uma verificação independente reverteu cada correção, em 19 mutações, todas pegas. O corpus não mudou nenhuma decisão.
 - **As sondas,** com os hooks ligados nesta sessão, em modo `auto`:
   - `gh issue edit 1 --remove-label needs-info` foi negado pelo `guard-bash`;
   - um `Edit` em `src/main.ts` numa sonda `claude/x` cortada de `origin/main` foi negado pelo `build-guard` ("o gate ainda não rodou neste worktree");
@@ -111,7 +112,7 @@ Desvios do plano e achados:
   - O primeiro efeito foi o `guard-bash` negar um comando de simulação que rodava um `sh` e citava `needs-info`, como a tripwire manda.
   - O segundo foi negar um script Python do próprio Learn, porque o texto que ele escrevia citava comandos `gh`: a prosa que cita um comando conta como poder rodá-lo. A edição foi feita com a ferramenta Edit.
 - **O marcador do plano pendente fica no diretório git comum,** um por repositório, e não no do worktree. Assim os três hooks o gravam, leem e limpam no mesmo lugar, mesmo quando a sessão muda de worktree.
-- **Ao publicar o plano, o `plan-to-issue` apaga também o cache do gate.** Um `# Plano` cancela o Approve, e sem isso o `build-guard` seguiria lendo o cache aberto de antes.
+- **Ao publicar o plano, o `plan-to-issue` apaga também o cache do gate de cada worktree do repositório.** Um `# Plano` cancela o Approve, e sem isso o `build-guard` seguiria lendo o cache aberto de antes, neste worktree ou em outro.
 - **O `guard-bash` foi além da lista do plano,** sempre para o lado que restringe:
   - lê as variáveis atribuídas na própria linha, o que corta falsos positivos e também pega uma label de estado guardada numa variável;
   - resolve aliases do `git` e do `gh`, segue a HEAD que um comando anterior da linha mudou e julga um push pelo repositório de destino;
@@ -137,3 +138,4 @@ Para o dono:
 - **Criado**: 2026-09-25 (Fase: Intent), do plano aprovado na issue #5 (#5)
 - **Status**: Completed
 - **Atualizado**: 2026-09-26 (Fase: Learn), os hooks existem, ligados pelo `.claude/settings.json`, e as duas sondas foram negadas com eles ativos (#5)
+- **Atualizado**: 2026-09-26 (Fase: Learn), as seis brechas da revisão do Copilot na PR #26 foram fechadas (#5)

@@ -1238,6 +1238,36 @@ describe('gh api graphql', () => {
     )
   })
 
+  it('denies an updatePullRequest body without the Closes line, as the REST PATCH does', async () => {
+    expectDeny(
+      await judge(
+        mutation(
+          'updatePullRequest(input: {pullRequestId: "PR_1", body: "Descrição nova"}) { clientMutationId }',
+        ),
+      ),
+      /a primeira linha do corpo da PR é exatamente "Closes #N\."/,
+    )
+  })
+
+  it('passes an updatePullRequest body that opens with a Closes line', async () => {
+    expectPass(
+      await judge(
+        mutation(
+          'updatePullRequest(input: {pullRequestId: "PR_1", body: "Closes #5."}) { clientMutationId }',
+        ),
+      ),
+    )
+  })
+
+  it('asks when the updatePullRequest body cannot be read', async () => {
+    expectAsk(
+      await judge(
+        'gh api graphql -f query=\'mutation($b: String!) { updatePullRequest(input: {pullRequestId: "PR_1", body: $b}) { clientMutationId } }\' -f b="$CORPO"',
+      ),
+      { reason: /não consegui ler o novo corpo da PR/ },
+    )
+  })
+
   it('passes any other mutation', async () => {
     expectPass(
       await judge(

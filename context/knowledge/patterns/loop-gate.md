@@ -132,7 +132,7 @@ Desde a #13, uma PR só é mergeada com uma revisão do Copilot no commit que é
 
 - No modo local, o gate escreve `loop-gate.json` em `$(git rev-parse --absolute-git-dir)`, com `schema`, `repo`, `branch`, `issue`, `headSha`, `open`, `verified`, `steps` e `checkedAt`. Cada worktree tem o próprio diretório git, então cada um tem o próprio cache.
 - Só o `scripts/gate.mjs` escreve nele. Os hooks do Claude Code (#5) o leem pela função `gateStatus()` de `loop-sections.mjs`: o cache só vale para a mesma branch e a mesma issue, por um prazo limitado, e só abre quando a issue foi conferida de fato (`verified`).
-- Um plano aceito no plan mode e ainda não publicado fecha o cache enquanto o marcador dele existir, por mais recente que seja o gate. Ao publicar o plano, o hook `plan-to-issue` apaga o marcador e também o cache, para o gate rodar de novo.
+- Um plano aceito no plan mode e ainda não publicado fecha o cache enquanto o marcador dele existir, por mais recente que seja o gate. Ao publicar o plano, o hook `plan-to-issue` apaga o cache de cada worktree do repositório, para o gate rodar de novo, e só então o marcador: se uma remoção falha, o marcador fica.
 - Em `main`, o gate diz que nada está sendo construído, avisa se o `main` local está à frente do `origin/main`, escreve o cache com `open: false` e sai com 0.
 
 ### O plano vigente
