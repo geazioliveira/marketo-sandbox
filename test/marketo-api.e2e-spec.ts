@@ -17,7 +17,18 @@ import { AppModule } from '../src/app.module'
  */
 
 const root = path.resolve(__dirname, '..')
-const httpMethods = ['get', 'post', 'put', 'patch', 'delete']
+// Every method OpenAPI allows, not only those the generators handle: an
+// operation they skip, such as a HEAD, still has to have a route.
+const httpMethods = [
+  'get',
+  'put',
+  'post',
+  'delete',
+  'options',
+  'head',
+  'patch',
+  'trace',
+]
 
 /** Operations per document, measured on the copies pinned in #6. */
 const operationsPerDocument = {
