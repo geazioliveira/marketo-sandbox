@@ -284,6 +284,11 @@ def prettier_environment() -> dict[str, str]:
             f"Prettier not found at {PRETTIER.relative_to(ROOT)}: run `npm ci` first. "
             "The generators never write or compare unformatted code."
         )
+    if not os.access(PRETTIER, os.X_OK):
+        raise _cannot_format(
+            f"Prettier at {PRETTIER.relative_to(ROOT)} is not executable: run `npm ci` again. "
+            "The generators never write or compare unformatted code."
+        )
     environment = _node_environment()
     # The experimental CLI formats without the per-file report the check below reads.
     environment.pop("PRETTIER_EXPERIMENTAL_CLI", None)
@@ -315,13 +320,16 @@ def format_with_prettier(paths: list[Path], output: Path | None = None) -> None:
     )
     relative = [path.relative_to(ROOT).as_posix() for path in paths]
     command = [str(PRETTIER), "--write", "--no-color", "--no-require-pragma", "--range-start=0", "--range-end=Infinity"]
-    result = subprocess.run(
-        [*command, "--ignore-path=", *relative],
-        cwd=ROOT,
-        env=prettier_environment(),
-        capture_output=True,
-        text=True,
-    )
+    try:
+        result = subprocess.run(
+            [*command, "--ignore-path=", *relative],
+            cwd=ROOT,
+            env=prettier_environment(),
+            capture_output=True,
+            text=True,
+        )
+    except OSError as error:
+        raise _cannot_format(f"Prettier could not run: {error}.{restore}") from None
     sys.stderr.write(result.stderr)
     if result.returncode != 0:
         raise _cannot_format(f"Prettier failed with exit code {result.returncode}.{restore}")

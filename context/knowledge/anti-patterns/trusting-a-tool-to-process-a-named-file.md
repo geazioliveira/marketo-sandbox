@@ -14,7 +14,7 @@ Uma ferramenta que lê um arquivo de ignore por padrão pode pular, sem mensagem
 ## O que fazer em vez disso
 
 - **Desligue os arquivos de ignore na chamada**, com `--ignore-path=` no Prettier, quando a lista de arquivos já é exatamente a que precisa ser processada.
-- **Confira o relatório por arquivo contra a lista passada** e pare com um código próprio se faltar algum, como `format_with_prettier` faz (`scripts/marketo_codegen.py:298-335`).
+- **Confira o relatório por arquivo contra a lista passada** e pare com um código próprio se faltar algum, como `format_with_prettier` faz (`scripts/marketo_codegen.py:303-343`).
 - **Fixe na chamada as opções que mudam o resultado**: `--no-color`, para o relatório não vir colorido com `CI=true`, e `--no-require-pragma`, para uma config não fazer a ferramenta processar sem formatar.
 - **Ponha no teste um ignore que casa o caminho** e uma ferramenta que pula, como `test/scripts/codegen.spec.ts` faz com um `.prettierignore` e com um Prettier embrulhado.
 

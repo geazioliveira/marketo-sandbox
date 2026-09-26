@@ -253,6 +253,29 @@ describe.concurrent('the generators, on the identity target (#7)', () => {
   )
 
   it.each(generators)(
+    '%s: a Prettier that is not executable fails on Prettier, never as stale',
+    (generator) =>
+      withTree({ prettier: false }, async (at) => {
+        const bin = path.join(at.dir, 'node_modules', '.bin')
+        mkdirSync(bin, { recursive: true })
+        writeFileSync(path.join(bin, 'prettier'), '#!/usr/bin/env node\n', {
+          mode: 0o644,
+        })
+        plantSentinels(at)
+        const before = snapshot(at)
+        for (const args of [['--check'], []]) {
+          const run = await generate(at, generator, ...args)
+          expect(run.out).toMatch(
+            /Prettier at node_modules\/\.bin\/prettier is not executable/,
+          )
+          expect(run.out).not.toMatch(/Traceback|stale|current/)
+          expect(run.status, run.out).toBe(2)
+        }
+        expect(snapshot(at)).toEqual(before)
+      }),
+  )
+
+  it.each(generators)(
     '%s: generate without Prettier fails and leaves the output untouched',
     (generator) =>
       withTree({ prettier: false }, async (at) => {
