@@ -1,7 +1,7 @@
 {
   "name": "marketo-sandbox",
   "version": "1.0.0",
-  "description": "Local mock of the Marketo Engage REST API, generated from the official Swagger documents",
+  "description": "Local mock of the Marketo Engage REST API, generated from Marketo's official Swagger documentation",
   "private": true,
   "license": "MIT",
   "scripts": {

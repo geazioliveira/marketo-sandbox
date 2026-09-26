@@ -1,8 +1,8 @@
 # marketo-sandbox
 
-A local mock of the Marketo Engage REST API, generated from the official Swagger
-documents. Every documented operation answers in the documented shape, so no
-Marketo credentials or instance are needed.
+A local mock of the Marketo Engage REST API, generated from Marketo's official
+Swagger documentation: each documented operation becomes a NestJS route that
+answers with faker-generated data, so no Marketo tenant is needed.
 
 ## Project setup
 
@@ -24,7 +24,7 @@ $ npm run start:prod
 ```
 
 The server listens on `127.0.0.1:3000` by default, so only this machine can
-reach it. `HOST` and `PORT` change that:
+reach it. `HOST` and `PORT` change that (csh and tcsh set `HOST` on their own):
 
 ```bash
 # another port
