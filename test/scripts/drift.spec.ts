@@ -1192,7 +1192,7 @@ describe('docs against the review gate after the #13 reviews', () => {
     expect(Number(filter?.[2])).toBe(copilotReviewer.databaseId)
   })
 
-  describe('the hooks of #5, which do not exist yet', () => {
+  describe('the hooks of #5, as they are', () => {
     const markdownUnder = (dir: string): string[] =>
       readdirSync(path.join(root, dir), { withFileTypes: true }).flatMap(
         (entry) => {
@@ -1201,25 +1201,32 @@ describe('docs against the review gate after the #13 reviews', () => {
           return entry.name.endsWith('.md') ? [relative] : []
         },
       )
-    // An intent records the plan as the owner approved it and is not restated
-    // after the fact, so it is left out.
+    // An intent records the plan as the owner approved it, and evolution/ and
+    // each Status block record what was true when they were written: none is
+    // restated after the fact, so they are left out.
     const docs = [...markdownUnder('docs'), ...markdownUnder('context')].filter(
-      (file) => !file.startsWith('context/intent/'),
+      (file) =>
+        !file.startsWith('context/intent/') &&
+        !file.startsWith('context/evolution/'),
     )
-    const future = /(?<!\p{L})(?:vão|vai|irão|irá|chegarem|até)(?!\p{L})/iu
+    const withoutStatus = (text: string) => text.split(/\n## Status\n/)[0]
+    // The hooks exist since #5: a sentence that still promises them is stale.
+    const future =
+      /(?<!\p{L})(?:vão|vai|irão|irá|chegarem|existirem|ainda não existem?)(?!\p{L})/iu
 
     it('are found in the docs at all', () => {
       expect(docs.some((file) => read(file).includes('hooks da #5'))).toBe(true)
     })
 
     it.each(docs)(
-      '%s names the hooks of #5 only in the future, or until they come',
+      '%s names the hooks of #5 as they are, never as to come',
       (file) => {
-        const sentences = read(file)
+        const sentences = withoutStatus(read(file))
           .split(/\r?\n/)
           .flatMap((line) => line.split(/(?<=[.!?;])\s+/))
           .filter((sentence) => sentence.includes('hooks da #5'))
-        for (const sentence of sentences) expect(sentence, file).toMatch(future)
+        for (const sentence of sentences)
+          expect(sentence, file).not.toMatch(future)
       },
     )
 
@@ -1254,15 +1261,28 @@ describe('docs against the review gate after the #13 reviews', () => {
     })
 
     it.each(scripts)(
-      '%s names the hooks of #5 in its comments only as still to come',
+      '%s names the hooks of #5 in its comments as they are, never as to come',
       (file) => {
         for (const sentence of commentSentences(read(file)).filter((text) =>
           /hooks? (?:of #5|\(#5\))/.test(text),
         ))
-          expect(sentence, file).toMatch(
-            /\b(?:will|are to|is to|until|once|do not exist yet)\b/i,
+          expect(sentence, file).not.toMatch(
+            /\b(?:will|are to|is to|do not exist yet|once they exist)\b/i,
           )
       },
     )
+
+    it('the workflow names each hook that exists in .claude/hooks, and no other', () => {
+      const guide = read('docs/development/workflow.md')
+      const [, section = ''] = guide.split('\n## Os hooks do Claude Code\n')
+      const named = [
+        ...section.split('\n## ')[0].matchAll(/^\| `([a-z-]+)` \|/gm),
+      ].map((match) => match[1])
+      const present = readdirSync(path.join(root, '.claude', 'hooks'))
+        .filter((file) => file.endsWith('.mjs'))
+        .map((file) => file.replace(/\.mjs$/, ''))
+      expect(named.length).toBeGreaterThan(0)
+      expect([...named].sort()).toEqual([...present].sort())
+    })
   })
 })

@@ -2,8 +2,8 @@
 //
 // The gate (scripts/gate.mjs), the CI check (.github/workflows/issue-link.yml
 // runs the gate), the issue forms (.github/ISSUE_TEMPLATE/*.yml, held equal by a
-// parity test) and the tests all import from here, and so will the Claude Code
-// hooks (#5), which do not exist yet.
+// parity test), the Claude Code hooks (.claude/hooks/, #5) and the tests all
+// import from here.
 // A rule restated in a second place drifts: lite-campaign's gate once refused a
 // `fix/` branch its own lifecycle pattern permitted, because each held a copy
 // (brunohab/lite-campaign#111). User-facing text is pt-BR; identifiers and
@@ -644,13 +644,14 @@ const quoteLine = (line) =>
  * What it cannot see:
  * - the agent posts from the owner's account, so an Approve the agent wrote
  *   in the owner's name looks identical. `ownerRule` states the convention
- *   that covers that gap, and the Claude Code hooks (#5) are to enforce it;
+ *   that covers that gap, and the Claude Code hooks (#5) enforce it for the
+ *   agent: guard-bash denies a comment of its that opens as an Approve;
  * - the Approve's time is its `createdAt`, and its edits are exempt, so a
  *   comment posted before the label and edited into `# Owner Approve` after
  *   it reads as an old Approve followed by the label. Telling them apart
  *   needs the comment's first version (`userContentEdits`). Until then the
- *   owner rule covers it, and the hooks (#5) are to forbid the agent to edit
- *   a comment into an Approve.
+ *   owner rule covers it, and the hooks (#5) ask before any comment edit and
+ *   deny one whose new body opens as an Approve.
  *
  * @param {{
  *   issue: { lastEditedAt?: string | null },
@@ -831,9 +832,10 @@ export const changelogHeading =
 //
 // Two conditions of a merge: a Copilot review of the commit that is the PR's
 // head, and no review thread left unresolved, whoever opened it. The gate's CI
-// mode (copilot-review, review-threads), the audit of main and the tests read
-// them from here, and so will the hooks of #5 once they exist; until then,
-// replying before resolving is a written rule.
+// mode (copilot-review, review-threads), the audit of main, the hooks of #5
+// (guard-bash, before a merge) and the tests read them from here. Replying
+// before resolving is the hooks' too: guard-bash denies resolving a thread
+// whose last comment is not a reply.
 
 /**
  * Who Copilot is, as GraphQL gives a review's author. It is matched by type and
@@ -1198,9 +1200,9 @@ export const gateCacheFile = 'loop-gate.json'
 export const gateCacheSchema = 1
 export const gateTtlHours = 8
 /**
- * The prefix of the pending-plan marker: the plan-to-issue hook (#5) will
- * write one, under the worktree's git dir, when a plan is accepted in Claude
- * Code, and will remove it only once the plan is posted on an issue.
+ * The prefix of the pending-plan marker: the plan-to-issue hook (#5) writes
+ * one, under the repository's common git dir, when a plan is accepted in
+ * Claude Code, and removes it only once the plan is posted on an issue.
  */
 export const planPendingPrefix = 'loop-plan-pending-'
 
@@ -1369,8 +1371,9 @@ export const refreshWaitMs = 240_000
  * commit whose message holds one. A merge commit's message is the PR's title
  * and body, so none may appear there nor in any commit message: a merge
  * carrying one gets neither its audit run nor its Qualidade run, and a PR
- * head carrying one gets no Qualidade check. The hooks of #5 are to refuse
- * them; until then, the written rule does.
+ * head carrying one gets no Qualidade check. The hooks of #5 refuse them in
+ * a commit message and in a PR's title and body; the written rule covers
+ * what they cannot read.
  */
 export const skipCiTokens = [
   '[skip ci]',

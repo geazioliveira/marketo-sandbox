@@ -131,7 +131,8 @@ Desde a #13, uma PR só é mergeada com uma revisão do Copilot no commit que é
 ### O cache
 
 - No modo local, o gate escreve `loop-gate.json` em `$(git rev-parse --absolute-git-dir)`, com `schema`, `repo`, `branch`, `issue`, `headSha`, `open`, `verified`, `steps` e `checkedAt`. Cada worktree tem o próprio diretório git, então cada um tem o próprio cache.
-- Só o `scripts/gate.mjs` escreve nele. Os hooks do Claude Code ainda não existem. Quando chegarem com a #5, vão lê-lo pela função `gateStatus()` de `loop-sections.mjs`: o cache só vale para a mesma branch e a mesma issue, por um prazo limitado, e só abre quando a issue foi conferida de fato (`verified`).
+- Só o `scripts/gate.mjs` escreve nele. Os hooks do Claude Code (#5) o leem pela função `gateStatus()` de `loop-sections.mjs`: o cache só vale para a mesma branch e a mesma issue, por um prazo limitado, e só abre quando a issue foi conferida de fato (`verified`).
+- Um plano aceito no plan mode e ainda não publicado fecha o cache enquanto o marcador dele existir, por mais recente que seja o gate. Ao publicar o plano, o hook `plan-to-issue` apaga o marcador e também o cache, para o gate rodar de novo.
 - Em `main`, o gate diz que nada está sendo construído, avisa se o `main` local está à frente do `origin/main`, escreve o cache com `open: false` e sai com 0.
 
 ### O plano vigente
@@ -183,9 +184,9 @@ Este repositório tem uma conta só no GitHub. O dono e o agente postam com o me
 
 - Mover `ready-for-human` para `ready-for-agent` é um ato do dono. É um segundo ato deliberado, e o gate exige que ele venha depois do Approve: é isso que dificulta fabricar um Approve por acidente.
 - Um Approve são as palavras do dono. Uma aprovação dada no chat não é Approve, e o agente nunca a transcreve para a issue.
-- Até os hooks da #5, só essa regra escrita impede o auto-Approve. Depois que eles chegarem, ela continua valendo fora das sessões do Claude Code deste projeto ([ADR 0002](../../decisions/0002-soft-enforcement-on-github-free.md)).
-- O gate não sabe quem resolveu uma thread nem se ela foi respondida antes: `resolvedBy` é sempre o login do dono, e o motivo da resolução não se lê de volta. Responder antes de resolver é regra escrita até os hooks da #5. Uma thread apagada também some do gate, e nada registra isso ([ADR 0002](../../decisions/0002-soft-enforcement-on-github-free.md)).
-- O gate data o Approve pelo `createdAt` dele e não conta as edições do próprio Approve. Um comentário postado antes da label e editado depois para virar `# Owner Approve` parece um Approve antigo seguido da label. Separar os dois exige ler a primeira versão do comentário (`userContentEdits` no GraphQL). Até lá, esse caso também fica com a regra escrita, e os hooks da #5 vão proibir o agente de editar um comentário para virar Approve.
+- Numa sessão do Claude Code deste projeto, os hooks da #5 impedem o agente de escrever o Approve. Fora delas, só essa regra escrita o impede ([ADR 0002](../../decisions/0002-soft-enforcement-on-github-free.md)).
+- O gate não sabe quem resolveu uma thread nem se ela foi respondida antes: `resolvedBy` é sempre o login do dono, e o motivo da resolução não se lê de volta. Numa sessão do Claude Code deste projeto, o `guard-bash` nega resolver uma thread cujo último comentário não é de quem resolve; fora delas, responder antes de resolver é regra escrita. Uma thread apagada também some do gate, e nada registra isso ([ADR 0002](../../decisions/0002-soft-enforcement-on-github-free.md)).
+- O gate data o Approve pelo `createdAt` dele e não conta as edições do próprio Approve. Um comentário postado antes da label e editado depois para virar `# Owner Approve` parece um Approve antigo seguido da label. Separar os dois exige ler a primeira versão do comentário (`userContentEdits` no GraphQL). Até lá, esse caso fica com a regra escrita, e os hooks da #5 pedem confirmação antes de o agente editar um comentário e negam uma edição que o transforme em Approve.
 
 ## Quando usar
 
@@ -208,4 +209,4 @@ Este repositório tem uma conta só no GitHub. O dono e o agente postam com o me
 
 - **Criado**: 2026-09-24 (Fase: Build), do gate do lite-campaign (brunohab/lite-campaign#101), dos três defeitos dele e do plano aprovado na #2 (#2)
 - **Status**: Active
-- **Atualizado**: 2026-09-25 (Fase: Build), a regra de autoria passou a distinguir a transição `needs-triage` para `ready-for-human`, feita pelo agente ao publicar o plano, do Approve e da aplicação de `ready-for-agent`, exclusivos do dono (#17)
+- **Atualizado**: 2026-09-26 (Fase: Build), os hooks da #5 passaram a ler o cache pelo `gateStatus()`, com o plano pendente fechando o cache até ser publicado, e a fazer valer, numa sessão do Claude Code, o Approve do dono e responder antes de resolver (#5)

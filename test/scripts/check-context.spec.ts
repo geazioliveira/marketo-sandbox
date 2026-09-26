@@ -22,6 +22,10 @@ import {
 import { cleanEnv } from '../support/clean-env'
 import { exec, projectRoot } from '../support/temp-repo'
 
+// Several cases run the checker as a process; with the hooks' specs (#5)
+// spawning beside them, 5 s is too short under load, as in gate.spec.ts.
+vi.setConfig({ testTimeout: 60_000 })
+
 /**
  * scripts/check-context.mjs, run the way `npm run check:context` runs it: a
  * child process whose working directory is the tree under test. Each case

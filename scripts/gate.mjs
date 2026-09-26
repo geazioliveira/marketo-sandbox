@@ -432,8 +432,9 @@ function main() {
       process.stderr.write(human)
     } else process.stdout.write(human)
 
-    // Only the local gate writes the cache the hooks (#5) are to read; a CI verdict
-    // describes a PR head, not the worktree someone is building in.
+    // Only the local gate writes the cache the hooks (#5) read; a CI verdict
+    // describes a PR head, not the worktree someone is building in. The
+    // plan-to-issue hook only removes it, when a plan is published.
     if (!ci && options.cache) {
       const gitDir = facts.gitDir
       if (gitDir !== null) {

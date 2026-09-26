@@ -35,6 +35,7 @@ A sequência:
 5. Num turno novo, o agente roda `npm run gate` e só então constrói.
 
 - Aprovação no chat não é Approve, e o agente nunca a transcreve para a issue.
+- O hook `plan-to-issue` marca o plano aceito como pendente. Até ele ser publicado, o `build-guard` pede confirmação para editar fora de `context/intent/` ([Os hooks do Claude Code](#os-hooks-do-claude-code)).
 - Se o Build descobre algo que muda o plano: o agente para, posta um novo comentário cuja primeira linha é exatamente `# Plano`, com o plano inteiro revisado (isso cancela o Approve, de propósito), e espera o dono aprovar de novo. Se a issue voltou a `needs-triage`, o agente a move para `ready-for-human`. Depois do novo Approve, o dono remove `ready-for-agent` e a aplica de novo, mesmo que ela nunca tenha saído da issue: o gate só aceita a label aplicada depois do Approve em vigor.
 
 ## Seções que uma issue precisa ter
@@ -119,7 +120,7 @@ Exemplos de primeira linha que não é nenhuma das três acima. Um teste confere
 
 Toda issue aberta tem exatamente uma label de categoria (`bug` ou `enhancement`) e exatamente uma label de estado. A issue de acompanhamento (#1) fica fora dessa regra.
 
-O contrato `agentPlanLabelTransition` em [scripts/loop-sections.mjs](../../scripts/loop-sections.mjs) registra a única edição de label de estado que o agente pode fazer: ao publicar um plano completo como `# Plano` numa issue em `needs-triage`, seja nova ou já existente, troca `needs-triage` por `ready-for-human`. Os hooks da #5 ainda irão chegar e deverão permitir só essa exceção; `ready-for-agent` continua exclusivo do dono.
+O contrato `agentPlanLabelTransition` em [scripts/loop-sections.mjs](../../scripts/loop-sections.mjs) registra a única edição de label de estado que o agente pode fazer: ao publicar um plano completo como `# Plano` numa issue em `needs-triage`, seja nova ou já existente, troca `needs-triage` por `ready-for-human`. O `guard-bash` (#5) deixa passar só essa exceção, e só numa issue em `needs-triage` cujo último comentário abre com `# Plano`; `ready-for-agent` continua exclusivo do dono.
 
 | Label | Significado | Quem aplica |
 | --- | --- | --- |
@@ -263,7 +264,7 @@ Antes da PR, o mesmo que o CI roda, e o gate:
 npm run check && OBSERVE_ENDPOINT=http://127.0.0.1:9 npm run test:e2e && npm run gate
 ```
 
-- **`npm run check`** roda, nessa ordem e parando no primeiro erro: `npm run lint` (oxlint em `src/`, `test/` e `scripts/`), `npm run typecheck` (`tsc --noEmit`, que cobre `src/` e `test/`), `npm test` (vitest), `npm run check:context` e `npm run build` (nest build, que escreve em `dist/`, ignorado pelo git).
+- **`npm run check`** roda, nessa ordem e parando no primeiro erro: `npm run lint` (oxlint em `src/`, `test/`, `scripts/` e `.claude/hooks/`), `npm run typecheck` (`tsc --noEmit`, que cobre `src/` e `test/`), `npm test` (vitest), `npm run check:context` e `npm run build` (nest build, que escreve em `dist/`, ignorado pelo git).
 - **`npm run check:context`** (`scripts/check-context.mjs`) lê `context/`, `docs/`, `AGENTS.md` e `CLAUDE.md`, e os links do template de PR. Cada problema sai com `arquivo:linha`, e os formatos estão no [guia do Context Mesh](../../context/README.md). Ele recusa:
   - link relativo ou âncora quebrados, a âncora do próprio arquivo (`#…`) inclusive;
   - arquivo fora do layout. As pastas e os nomes de `context/` estão no [Layout do guia](../../context/README.md#layout), e um arquivo fora destas pastas faz o check:context recusar a árvore; uma pasta nova entra antes em `scripts/loop-sections.mjs` e no Layout. Só um arquivo oculto que não é markdown (`.DS_Store`, `.obsidian/`) fica de fora;
@@ -298,9 +299,25 @@ Uma issue da auditoria é um relato, não um plano: o commit já está em `main`
 
 Se a issue chama de "commit direto em main, sem PR" o merge de uma PR que fecha issue, é um falso positivo: mesmo depois das 3 tentativas, o GitHub ainda não tinha ligado o merge à PR. O dono fecha essa issue citando a PR. Mover a label de estado de uma issue da auditoria é do dono, como em qualquer issue.
 
+## Os hooks do Claude Code
+
+Desde a #5, hooks de projeto em `.claude/hooks/`, ligados pelo `.claude/settings.json`, interrompem o agente antes da ação, em toda sessão do Claude Code aberta neste repositório. Eles leem os contratos de `scripts/loop-sections.mjs`, os mesmos do gate e da auditoria, e são a camada 3 da [ADR 0002](../../context/decisions/0002-soft-enforcement-on-github-free.md).
+
+| Hook | Quando roda | O que faz |
+| --- | --- | --- |
+| `guard-bash` | Antes de `Bash`, `Monitor` e `mcp__terminal__run_in_terminal` | Nega um comentário que abre como Approve, retirada ou título quase-Approve; `ready-for-agent` e qualquer outra escrita de label de estado, menos a troca de `needs-triage` por `ready-for-human` numa issue em `needs-triage` cujo último comentário abre com `# Plano`; `gh pr create` sem `Closes #N.` na primeira linha ou fora de uma branch de issue; commit e push em `main`; `gh issue reopen` e `gh repo edit`; os tokens de skip e o trailer `skip-checks: true`; resolver uma thread cujo último comentário não é de quem resolve. Pede confirmação antes de `gh pr merge` (e nega quando os checks exigidos, a revisão do Copilot na cabeça, os pedidos pendentes ou as threads, lidos ao vivo, não estão em ordem), de editar o corpo da issue ou um comentário, de uma indireção que cita o loop e de uma escrita pelo shell num caminho do harness |
+| `build-guard` | Antes de `Edit`, `Write` e `NotebookEdit` | Deixa escrever fora de `context/intent/` só com o cache do gate aberto para a branch. Em `main`, nega tudo. Com um plano pendente, ou num caminho do harness, pede confirmação |
+| `plan-to-issue` | Depois de `ExitPlanMode` e de `Bash` | Marca o plano aceito no plan mode como pendente, no diretório git comum do repositório, até ele ser publicado numa issue. Ao publicar, apaga o marcador e o cache do gate, que precisa rodar de novo |
+| `session-context` | No início da sessão e a cada mensagem | Diz a branch, a issue e o estado do gate, e lembra que aprovação no chat não é Approve |
+
+- **Só restringem.** Nenhum hook devolve `allow`: sem objeção, o fluxo normal de permissão segue. Na dúvida, pedem confirmação.
+- **Em `bypassPermissions`, `dontAsk` e `auto`,** uma confirmação crítica (merge, caminho do harness, cache não verificado, plano pendente, indireção) vira negação. Nesses casos, a ação é feita fora desse modo.
+- **Quando um hook nega ou pede confirmação,** a mensagem diz o motivo. O agente resolve a causa (roda o gate, publica o plano, responde na thread) em vez de contornar o hook.
+- **Os limites** estão na ADR 0002: os hooks param o agente, não o dono; não leem um programa rodado a partir de um arquivo; só valem nas sessões do Claude Code deste projeto.
+
 ## Saída de emergência do dono
 
-Quando os hooks do Claude Code chegarem (#5), o dono pode desligá-los na própria máquina com `"disableAllHooks": true` em `.claude/settings.local.json`, que não é versionado. É um ato do dono: o agente nunca escreve esse arquivo. Desligar os hooks não desliga o gate nem o CI.
+O dono pode desligar os hooks do Claude Code (#5) na própria máquina com `"disableAllHooks": true` em `.claude/settings.local.json`, que não é versionado. É um ato do dono: o agente nunca escreve esse arquivo. Desligar os hooks não desliga o gate nem o CI.
 
 ## Onde vai um documento novo
 

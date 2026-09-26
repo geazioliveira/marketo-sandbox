@@ -34,7 +34,7 @@ Uma mudança é HIGH quando toca pelo menos um destes:
   - a auditoria de `main` e o refresh (`scripts/audit-main.mjs`, `scripts/refresh-issue-link.mjs`);
   - o tooling do contexto (`scripts/check-context.mjs`);
   - os forms e o template de PR (`.github/ISSUE_TEMPLATE/`, `.github/pull_request_template.md`);
-  - os hooks do Claude Code, quando chegarem (#5);
+  - os hooks do Claude Code (`.claude/hooks/`, #5);
   - os testes de tudo isso, em `test/scripts/` (inferido; confirmar).
 - **Tudo o que o lite-campaign consome.** As rotas e os métodos, o formato das respostas, o seed e a data de referência (`MARKETO_MOCK_SEED`, `MARKETO_MOCK_REF_DATE`), a porta (`PORT`, 3000 por padrão, `src/main.ts:21`) e, quando existirem, a release com tag e o comando que a sobe ([project intent](../../intent/project-intent.md)).
 
@@ -80,3 +80,4 @@ As issues já seguem isso. A #7 é HIGH porque mexe nos geradores e em toda a sa
 
 - **Criado**: 2026-09-25 (Fase: Build), do que o loop das #2, #3 e #13 já pratica, registrado na #4 (#4)
 - **Status**: Active
+- **Atualizado**: 2026-09-26 (Fase: Build), os hooks do Claude Code entraram na lista do harness como existentes (#5)
