@@ -1,14 +1,13 @@
 import { NestFactory } from '@nestjs/core'
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger'
-import { AppModule, ObserveInstrument } from './app.module'
+import { AppModule } from './app.module'
 import { seedMockData } from './asset/asset-mocks'
+import { listenAddress } from './listen-address'
 
 async function bootstrap() {
   seedMockData()
 
-  const app = await NestFactory.create(AppModule, {
-    instrument: ObserveInstrument,
-  })
+  const app = await NestFactory.create(AppModule)
 
   const config = new DocumentBuilder()
     .setTitle('Marketo API')
@@ -18,6 +17,7 @@ async function bootstrap() {
   const document = SwaggerModule.createDocument(app, config)
   SwaggerModule.setup('api', app, document)
 
-  await app.listen(process.env.PORT ?? 3000)
+  const { host, port } = listenAddress(process.env)
+  await app.listen(port, host)
 }
 bootstrap()

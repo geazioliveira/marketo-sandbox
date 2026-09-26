@@ -6,7 +6,7 @@ O código gerado só muda pelo gerador ou pelo Swagger: regenere com `npm run ge
 
 ## Problema
 
-- O código de `src/asset/asset-definitions/`, `src/asset/resources/` e `src/asset/asset-mocks/` sai de três geradores Python, a partir de `docs/marketo-swagger-asset.json` ([ADR 0004](../../decisions/0004-swagger-as-single-source-with-committed-generated-code.md)). O README manda regenerar essas pastas, nunca editá-las à mão (`README.md:60-61`).
+- O código de `src/asset/asset-definitions/`, `src/asset/resources/` e `src/asset/asset-mocks/` sai de três geradores Python, a partir de `docs/marketo-swagger-asset.json` ([ADR 0004](../../decisions/0004-swagger-as-single-source-with-committed-generated-code.md)). O README manda regenerar essas pastas, nunca editá-las à mão (`README.md:50-51`).
 - Antes do loop, a saída e os geradores se separaram:
   - já no `0c8e760`, os geradores emitiam imports com o sufixo `.js` (`0c8e760:scripts/generate-marketo-definitions.py:151`, `0c8e760:scripts/generate-marketo-resources.py:73`), e nenhum arquivo commitado os tem;
   - o `01ee283` criou `check:factories` e `check:all` antes de existir o gerador de factories, que só chegou no `0ef242d`;

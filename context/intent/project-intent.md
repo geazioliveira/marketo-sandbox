@@ -23,12 +23,12 @@ As decisões por trás de cada item estão registradas, de forma retroativa, nas
 
 ## Critérios de aceite
 
-Nenhum está marcado ainda: um critério só é marcado quando um teste ou um check o prova.
+Um critério só é marcado quando um teste ou um check o prova.
 
 - [ ] Cada operação do Swagger de assets (220 operações, 186 caminhos, 23 tags) tem uma rota que chega ao próprio handler e responde um envelope bem formado. Hoje as rotas existem, mas 11 estão sombreadas: medido na #4, elas caem no handler de uma rota `:id` declarada antes ([ADR 0005](../decisions/0005-nestjs-express-one-module-per-tag.md), #8).
 - [ ] O código gerado é exatamente o que os geradores emitem: `npm run check:all` passa num clone limpo. Hoje falha (#7).
 - [ ] Com `MARKETO_MOCK_SEED`, a mesma requisição devolve o mesmo payload entre reinícios. Hoje só vale para a mesma sequência de requisições desde o boot, porque o faker recebe o seed uma vez ([ADR 0007](../decisions/0007-faker-factories-with-overrides-and-seed.md)), e não há teste.
-- [ ] Por padrão, nenhuma requisição sai da máquina e o servidor escuta em 127.0.0.1. Hoje o `ObserveModule` fica ligado e o servidor escuta em todas as interfaces (#9).
+- [x] Por padrão, nenhuma requisição sai da máquina e o servidor escuta em 127.0.0.1. Desde a #9, o `@nestjs/observe` saiu e o servidor escuta em `HOST`, com `127.0.0.1` por padrão. `test/runtime-defaults.spec.ts` prova os dois ([ADR 0010](../decisions/0010-loopback-only-by-default.md)).
 - [ ] Um consumidor fixa uma release com tag e a sobe com um comando documentado.
 - [ ] Espaços isolados, autenticação, modelo com estado, log de requisições, falhas roteirizadas e validação estrita, como pede a Track A do lite-campaign (R1–R8).
 - [ ] O mock registra qual cópia do Swagger o gerou (sha256).
@@ -39,7 +39,7 @@ Nenhum está marcado ainda: um critério só é marcado quando um teste ou um ch
 
 - Servir de proxy para um Marketo real.
 - Servir de evidência de que algo funciona numa instância real: um consumidor nunca chama o mock de "verificado".
-- Deploy ou hospedagem. O script `deploy` e o `@nestjs/mau` são sobras do starter (#9).
+- Deploy ou hospedagem. O script `deploy` e o `@nestjs/mau`, sobras do starter, saíram na #9.
 - Fidelidade de desempenho ou de carga.
 - Comportamento que o Swagger não documenta, exceto quando registrado como inferência.
 - Segurança real: os tokens são tokens de mock.
@@ -49,7 +49,6 @@ Nenhum está marcado ainda: um critério só é marcado quando um teste ou um ch
 - **A reescrita multi-API** (5 documentos Swagger, registro de alvos) está no checkout principal sem commit e entra por PR (#6).
 - **Qual cópia do Swagger de assets vale.** Aqui é `ced6c339…` (255 definições); o lite-campaign fixa `ff7ec628…` (254). A escolha sai de um diff nas rotas que o consumidor usa.
 - **Onde vive o comportamento com estado:** ao lado do código gerado, nunca dentro dele. A [ADR 0009](../decisions/0009-behaviour-beside-generated-code.md) propõe isso como `Proposed`, e a primeira sub-issue da Track A que construir comportamento a aceita ou a substitui.
-- **ObserveModule:** tornar opt-in ou remover (#9).
 - **Esquema de release e tag** que os consumidores fixam.
 - **Versão do Node:** `.nvmrc` com 24, na #2.
 
@@ -57,4 +56,4 @@ Nenhum está marcado ainda: um critério só é marcado quando um teste ou um ch
 
 - **Criado**: 2026-09-24 (Fase: Intent), a partir do código em `fb4a804` e do plano do consumidor lite-campaign (#2)
 - **Status**: In Progress
-- **Atualizado**: 2026-09-25 (Fase: Learn), a stack e as decisões em aberto apontam para as ADRs retroativas de 0004 a 0009 (#4)
+- **Atualizado**: 2026-09-26 (Fase: Learn), o critério da rede e da escuta foi marcado, e a decisão em aberto sobre o `ObserveModule` foi fechada pela [ADR 0010](../decisions/0010-loopback-only-by-default.md) (#9)

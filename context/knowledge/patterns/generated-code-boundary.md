@@ -6,7 +6,7 @@ Três pastas de `src/asset/` são saída de gerador e nunca são editadas à mã
 
 ## Problema
 
-- O README diz para nunca editar essas pastas à mão (`README.md:60-61`), mas nada nos arquivos diz que eles são gerados: não há cabeçalho de "gerado, não edite". Pôr um é parte da correção planejada na #7.
+- O README diz para nunca editar essas pastas à mão (`README.md:50-51`), mas nada nos arquivos diz que eles são gerados: não há cabeçalho de "gerado, não edite". Pôr um é parte da correção planejada na #7.
 - Antes do loop, a fronteira foi cruzada duas vezes:
   - o `e7a0bb6` moveu as 255 definições para `src/asset/asset-definitions/` sem mudar os geradores ([mover as pastas geradas sem o gerador](../anti-patterns/moving-generated-folders-without-the-generator.md));
   - o `5cc5e09` mudou os 69 arquivos de `src/asset/resources/` e deixou em 46 deles um prefixo de import que nenhuma versão do gerador emite ([editar código gerado à mão](../anti-patterns/hand-editing-generated-code.md)).
@@ -27,7 +27,7 @@ Três pastas de `src/asset/` são saída de gerador e nunca são editadas à mã
 
 - Os arquivos de cada pasta são os que o gerador lista em `generated_files` (`scripts/generate-marketo-definitions.py:161-166`, `scripts/generate-marketo-resources.py:265-282`, `scripts/generate-marketo-factories.py:279-297`).
 - `seed.ts` e `request-id.ts` também são gerados (`scripts/generate-marketo-factories.py:227-271`). Mudar o seed é mudar o gerador.
-- O resto de `src/` é escrito à mão: `src/main.ts`, `src/app.module.ts`, `src/app.controller.ts`, `src/app.controller.spec.ts`, `src/app.service.ts` e `src/asset/asset.module.ts`, que nenhum gerador emite.
+- O resto de `src/` é escrito à mão: `src/main.ts`, `src/listen-address.ts`, `src/app.module.ts` e `src/asset/asset.module.ts`, que nenhum gerador emite.
 
 ### A regra
 
@@ -69,3 +69,4 @@ Três pastas de `src/asset/` são saída de gerador e nunca são editadas à mã
 
 - **Criado**: 2026-09-25 (Fase: Build), registro retroativo de `0c8e760`..`fb4a804` (#4)
 - **Status**: Active
+- **Atualizado**: 2026-09-26 (Fase: Learn), a lista de arquivos escritos à mão perdeu o Hello World e ganhou o `src/listen-address.ts` (#9)

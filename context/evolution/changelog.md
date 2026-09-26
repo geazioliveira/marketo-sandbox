@@ -4,6 +4,49 @@ Uma entrada por mudança mergeada, da mais nova para a mais antiga, escrita no p
 
 ---
 
+## 2026-09-26: Nada sai da máquina por padrão, e as sobras do starter saíram (#9)
+
+**Fase**: Learn
+**Tipo**: Feature
+
+### O que foi construído / corrigido
+
+- **A telemetria saiu.** O `@nestjs/observe` saiu do `AppModule`, do `src/main.ts` e das dependências. A guarda `test/runtime-defaults.spec.ts` falha se ele voltar ao `package.json` ou a um import em `src/`.
+- **O servidor escuta em loopback.** O endereço vem de `listenAddress(process.env)`, com `HOST` padrão `127.0.0.1` e `PORT` padrão 3000. Uma variável vazia conta como ausente.
+- **As sobras do starter saíram.** O Hello World deu lugar a um smoke e2e: `GET /rest/asset/v1/folders.json` responde 200 com o envelope, e `GET /` responde 404. Também saíram o `deploy`, o `@nestjs/mau` e o boilerplate do README. O pacote virou `marketo-sandbox`, e o lockfile foi regenerado com o faker como dependência de runtime.
+- **O `format:check` entrou no `npm run check`,** logo depois do lint. Ele cobre `src`, `test` e `scripts`, o mesmo escopo do `format`.
+- **O CI e o fluxo rodam o e2e sem `OBSERVE_ENDPOINT`.** O teste de drift que casava o endereço saiu, e o de paridade passou a exigir o passo `e2e` sem `env`.
+
+### Números medidos
+
+- `npm run check`: exit 0, com 1.345 testes em 8 arquivos. O lint não deu nenhum aviso (antes, 1 em `src/app.module.ts:16`), e o `format:check`, o typecheck, o `check:context` e o build passaram.
+- `npm run test:e2e`, sem variável nenhuma: 2 testes passaram. Com o caminho do smoke trocado por um inexistente, o teste falha com 404.
+- `npm install --package-lock-only`, rodado duas vezes: nenhuma mudança na segunda. O lockfile foi de 395 para 348 entradas (`git diff --numstat 610e101 -- package-lock.json`: +6/−683), e o `npm ci` instala 305 pacotes em vez de 352.
+- `node dist/main` por 75 s, com um preload que registra toda conexão: escuta só em `127.0.0.1`, 8 threads (13 em `610e101`), nenhuma worker thread e nenhuma conexão para fora do loopback. O `/api-json` foi de 221 para 220 operações.
+- Em `610e101`, com a telemetria apontada para um listener local: 2 `POST /applications/telemetry` em 20 s com 5 GETs, e 1 por minuto com o app ocioso, com as chaves vazias.
+
+### Decisões tomadas
+
+- [0010: O mock só fala com a própria máquina por padrão](../decisions/0010-loopback-only-by-default.md): o Observe foi removido em vez de virar opt-in, e o `HOST` tem padrão `127.0.0.1`. Isso fecha a decisão em aberto do project intent.
+- As ADRs 0002, 0004, 0005, 0006, 0007 e 0008 ganharam uma linha `Atualizado`, com as citações que a mudança deslocou.
+
+### Patterns aplicados ou criados
+
+- [Padrão com `??` para uma variável de ambiente](../knowledge/anti-patterns/nullish-default-for-an-env-var.md), novo.
+- [A fronteira do código gerado](../knowledge/patterns/generated-code-boundary.md): a lista de arquivos escritos à mão mudou.
+- [Revisão classificada por risco](../knowledge/patterns/risk-classified-review.md): o `HOST` entrou no que o lite-campaign consome.
+
+### Aprendizados / surpresas
+
+- **O contorno do CI não fazia o que dizia.** O e2e de um teste nunca mandou telemetria, porque o `TestingModule` não recebe o `instrument`. E a porta 9 funcionava porque o `fetch` a recusa como "bad port", sem abrir socket.
+- **Um preload de rede vê as worker threads,** ao contrário do que o plano supunha. Ele serviu de prova na Verificação.
+- **`??` não protege uma variável vazia.** `HOST=` com `??` escutaria em todas as interfaces, que é o contrário do padrão.
+- **Uma linha citada anda sem avisar.** Tirar o cabeçalho do README, 47 pacotes do lockfile e as linhas do Observe fez a #9 trocar 52 citações `arquivo:linha` em 14 arquivos de contexto, e o `check:context` não confere essas linhas. A varredura comparou o conteúdo de `610e101` com o da branch. A primeira passada deixou 4 citações para trás, e a revisão adversarial as achou. Uma citação que descreve um commit antigo leva o SHA na frente (`fb4a804:src/main.ts:7`), para não andar de novo.
+- **Planos em paralelo.** Enquanto uma sessão media para escrever o plano, outra publicou um plano da #9 e o dono o aprovou. Reler o timeline da issue logo antes de postar evita um `# Plano` que revogaria o Approve.
+- **Telemetria na instalação.** O `@scarf/scarf` manda um evento a cada `npm ci`, e isso ficou na #20.
+
+---
+
 ## 2026-09-25: Plano publicado passa a aguardar validação (#17)
 
 **Fase**: Learn

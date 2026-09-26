@@ -9,7 +9,7 @@
   - `5cc5e09` trocou cada stub por `return makeX()`, importando `../../asset-mocks/factories/*`, antes de as factories existirem;
   - `0ef242d` trouxe o gerador, [scripts/generate-marketo-factories.py](../../scripts/generate-marketo-factories.py) (311 linhas);
   - `b91681a` gerou os 259 arquivos de `src/asset/asset-mocks/`: 255 factories, `factories/index.ts`, `request-id.ts`, `seed.ts` e `index.ts`;
-  - `fb4a804` chamou `seedMockData()` no boot (`src/main.ts:7`).
+  - `fb4a804` chamou `seedMockData()` no boot (`fb4a804:src/main.ts:7`).
 
 ## Decisão
 
@@ -26,7 +26,7 @@
 - **O seed vem do ambiente.** `seedMockData()` lê `MARKETO_MOCK_SEED` e `MARKETO_MOCK_REF_DATE`, com a data padrão `2024-01-01T00:00:00.000Z` (`src/asset/asset-mocks/seed.ts:4`, `:11-14`):
   - sem seed, ela volta sem tocar no faker (`:15-17`), e as respostas são aleatórias;
   - com seed, chama `faker.seed(seed)` e `faker.setDefaultRefDate(refDate)` (`:19-22`);
-  - o boot a chama uma vez, antes de criar a aplicação (`src/main.ts:7`). O README documenta as duas variáveis (`README.md:77-87`).
+  - o boot a chama uma vez, antes de criar a aplicação (`src/main.ts:8`). O README documenta as duas variáveis (`README.md:67-77`).
 - **Tudo isso é código gerado.** `seed.ts`, `request-id.ts` e os dois `index.ts` também saem do gerador (`scripts/generate-marketo-factories.py:227-297`). A fronteira da [ADR 0004](0004-swagger-as-single-source-with-committed-generated-code.md) vale para eles.
 - **faker é dependência de runtime.** `@faker-js/faker` `^10.6.0` está em `dependencies` (`package.json:35`) desde o `01ee283`. Os serviços chamam as factories a cada requisição, e esse foi o motivo da mudança (inferido; confirmar). O lockfile o trava em 10.6.0.
 
@@ -37,7 +37,7 @@
 - **O envelope fixo.** O gerador diz o motivo: um envelope "must look like a successful call, not random noise" (`scripts/generate-marketo-factories.py:30`).
 - **As heurísticas.** O gerador também diz: dados "contextually believable" (`:38`), e o enum recuperado da descrição "so mocks stay valid" (`:55-56`).
 - **A data de referência.** Sem ela, helpers relativos como `faker.date.recent()` ficam presos ao relógio e mudam entre execuções (`src/asset/asset-mocks/seed.ts:20-21`).
-- **O seed por variável de ambiente.** Uma variável fixa os dados sem mudar código, e esse foi o motivo (inferido; confirmar). O README promete a mesma resposta entre reinícios (`README.md:79-80`).
+- **O seed por variável de ambiente.** Uma variável fixa os dados sem mudar código, e esse foi o motivo (inferido; confirmar). O README promete a mesma resposta entre reinícios (`README.md:69-70`).
 - **Aleatório por padrão.** O histórico não diz por quê. Dados que variam expõem um cliente que depende de um valor que o contrato não garante (inferido; confirmar).
 
 ## Alternativas consideradas
@@ -64,8 +64,8 @@ O histórico não registra que alternativas foram avaliadas. Cada motivo abaixo 
   - **`MARKETO_MOCK_REF_DATE` sozinha não faz nada.** Sem seed, `seedMockData()` volta antes de `setDefaultRefDate` (`:15-22`);
   - **os overrides são rasos.** `...overrides` troca a propriedade de topo inteira, e `Partial<X>` também é raso: em `makeSnippetResponse`, um override de `folder` troca a pasta gerada inteira e precisa trazer uma `SnippetFolder` completa, com `value`, `type` e `folderName` (`src/asset/asset-definitions/models/snippet-folder.ts:3-16`);
   - **o envelope nunca é de erro.** `success: false` com `errors` só sai com um override, e nenhum código faz isso hoje. As falhas roteirizadas são da Track A ([ADR 0009](0009-behaviour-beside-generated-code.md));
-  - **nada testa as factories nem o seed.** Nenhum spec os importa, e o critério do seed no [project intent](../intent/project-intent.md#critérios-de-aceite) segue sem teste;
-  - **o lockfile está defasado.** A raiz dele lista faker em `devDependencies` (`package-lock.json:20-21`) e marca a entrada com `"dev": true` (`package-lock.json:218-222`). O `01ee283` acrescentou o `@nestjs/swagger` ao lockfile, mas não levou a mudança do faker. Com o npm 11.9.0, isso ainda não tira o faker de uma instalação de produção: o npm recalcula as marcas a partir do `package.json`, e `npm ci --omit=dev --dry-run` instala `@faker-js/faker 10.6.0`, medido na leitura da #4. Outra versão do npm, ou uma ferramenta que confie na marca `dev` do lockfile, pode deixar de fora o faker de que o runtime precisa (inferido; confirmar). A #9 corrige;
+  - **nada testa o seed, e as factories só passam pelo smoke da #9.** Nenhum spec importa as factories nem o seed: o smoke e2e só confere o envelope de `GET /rest/asset/v1/folders.json` (`test/app.e2e-spec.ts:19-27`), e o critério do seed no [project intent](../intent/project-intent.md#critérios-de-aceite) segue sem teste;
+  - **o lockfile ficou defasado até a #9.** No `610e101`, a raiz dele listava faker em `devDependencies` (`610e101:package-lock.json:20-21`) e marcava a entrada com `"dev": true` (`610e101:package-lock.json:218-222`). O `01ee283` acrescentou o `@nestjs/swagger` ao lockfile, mas não levou a mudança do faker. Com o npm 11.9.0, isso não tirava o faker de uma instalação de produção: o npm recalcula as marcas a partir do `package.json`, e `npm ci --omit=dev --dry-run` instalava `@faker-js/faker 10.6.0`, medido na leitura da #4. Outra versão do npm, ou uma ferramenta que confiasse na marca `dev` do lockfile, podia deixar de fora o faker de que o runtime precisa (inferido; confirmar). A #9 regenerou o lockfile: a raiz lista faker em `dependencies` (`package-lock.json:11-12`), e a entrada perdeu a marca `dev` (`package-lock.json:216-219`);
   - **mudar uma heurística ou o envelope é mudar o gerador.** Mas o gerador escreve em `src/asset-mocks` (`scripts/generate-marketo-factories.py:27`), não em `src/asset/asset-mocks`, e o `check:factories` acusa os 259 arquivos como ausentes (#7).
 
 ## Relacionados
@@ -79,9 +79,10 @@ O histórico não registra que alternativas foram avaliadas. Cada motivo abaixo 
 - [Pattern: A fronteira do código gerado](../knowledge/patterns/generated-code-boundary.md)
 - [Anti-pattern: Editar código gerado à mão](../knowledge/anti-patterns/hand-editing-generated-code.md), sobre o `5cc5e09`, que trocou os stubs pelas factories sem rodar o gerador
 - [Feature: Registro retroativo do projeto](../intent/feature-retroactive-record.md)
-- Os geradores no layout antigo (#7) e o lockfile defasado (#9)
+- Os geradores no layout antigo (#7) e o lockfile regenerado (#9)
 
 ## Status
 
 - **Criado**: 2026-09-25 (Fase: Build), registro retroativo de `0c8e760`..`fb4a804` (#4)
 - **Status**: Accepted
+- **Atualizado**: 2026-09-26 (Fase: Learn), a #9 regenerou o lockfile, que passou a listar o faker em `dependencies` sem a marca `dev`, e o smoke e2e da #9 passou a exercitar as factories de `folders.json`; as citações de `src/main.ts` e do `README.md` seguiram as linhas novas (#9)

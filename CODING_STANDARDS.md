@@ -20,4 +20,5 @@ As regras vivem no Context Mesh. Esta página só aponta para elas.
 - [Limite da auditoria tirado do evento](context/knowledge/anti-patterns/audit-bound-from-the-event.md)
 - [Mensagem de commit que diz menos do que o commit faz](context/knowledge/anti-patterns/commit-message-understating-its-content.md)
 - [Mover as pastas geradas sem o gerador](context/knowledge/anti-patterns/moving-generated-folders-without-the-generator.md)
+- [Padrão com `??` para uma variável de ambiente](context/knowledge/anti-patterns/nullish-default-for-an-env-var.md)
 - [Rota literal declarada depois de uma rota com parâmetro](context/knowledge/anti-patterns/literal-route-after-param-route.md)

@@ -1,5 +1,5 @@
-import { Module } from '@nestjs/common';
-import { AssetResourcesModule } from './resources/asset-resources.module';
+import { Module } from '@nestjs/common'
+import { AssetResourcesModule } from './resources/asset-resources.module'
 
 @Module({
   imports: [AssetResourcesModule],

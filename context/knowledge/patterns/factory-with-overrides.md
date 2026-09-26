@@ -9,7 +9,7 @@ Toda definição do Swagger tem uma factory `makeX(overrides)` que devolve um ob
 - No `0c8e760`, os 23 services lançavam `NotImplementedException`: nenhuma rota devolvia dado (`0c8e760:src/asset/resources/snippets/snippets.service.ts:1-8`).
 - Um simulador escrito à mão dentro de cada cliente se afasta da API. O do lite-campaign foi a origem de brunohab/lite-campaign#47, #54, #60 e #61 ([project intent](../../intent/project-intent.md)).
 - Um teste ou um comportamento precisa de uma resposta inteira e plausível, mas só se importa com alguns campos. Escrever o resto à mão em cada lugar repete o Swagger.
-- Sem seed, as respostas são aleatórias (`README.md:79`), e um consumidor não consegue comparar payloads.
+- Sem seed, as respostas são aleatórias (`README.md:69`), e um consumidor não consegue comparar payloads.
 
 ## Solução
 
@@ -55,8 +55,8 @@ Toda definição do Swagger tem uma factory `makeX(overrides)` que devolve um ob
 
 ### O seed
 
-- `seedMockData()` roda no começo do `bootstrap`, antes de o app ser criado (`src/main.ts:7`).
-- Com `MARKETO_MOCK_SEED`, ele chama `faker.seed` e fixa a data de referência dos helpers relativos, `MARKETO_MOCK_REF_DATE` ou `2024-01-01T00:00:00.000Z` (`src/asset/asset-mocks/seed.ts:4,11-23`, `README.md:77-87`).
+- `seedMockData()` roda no começo do `bootstrap`, antes de o app ser criado (`src/main.ts:8`).
+- Com `MARKETO_MOCK_SEED`, ele chama `faker.seed` e fixa a data de referência dos helpers relativos, `MARKETO_MOCK_REF_DATE` ou `2024-01-01T00:00:00.000Z` (`src/asset/asset-mocks/seed.ts:4,11-23`, `README.md:67-77`).
 - Sem a variável, ele volta sem tocar no faker, e as respostas são aleatórias (`src/asset/asset-mocks/seed.ts:15-17`). Um seed `0` conta como ausente: `Number('0') || undefined` é `undefined` (`src/asset/asset-mocks/seed.ts:12`).
 - O seed vale para a instância compartilhada do faker (`src/asset/asset-mocks/seed.ts:19`). Então a mesma requisição só devolve o mesmo payload quando chega na mesma posição da sequência de chamadas desde o início do processo, como a #4 mediu ([ADR 0007](../../decisions/0007-faker-factories-with-overrides-and-seed.md)). Nenhum teste prova a reprodutibilidade ainda ([project intent](../../intent/project-intent.md)).
 - `seed.ts` também é gerado (`scripts/generate-marketo-factories.py:243-271`). Mudar o seed é mudar o gerador.

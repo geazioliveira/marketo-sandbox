@@ -3,20 +3,20 @@
 ## Contexto
 
 - O mock precisa de uma rota HTTP para cada uma das 220 operações do Swagger de assets, que o documento agrupa em 23 tags ([ADR 0004](0004-swagger-as-single-source-with-committed-generated-code.md)).
-- O projeto nasceu do starter TypeScript do Nest: `package.json:2-4` ainda diz `nest-typescript-starter` e "Nest TypeScript starter repository". Essas sobras são da #9.
+- O projeto nasceu do starter TypeScript do Nest: `610e101:package.json:2-4` ainda dizia `nest-typescript-starter` e "Nest TypeScript starter repository". A #9 tirou essas sobras.
 - **No histórico.**
   - `0c8e760` traz o NestJS e os 23 módulos de recurso gerados, 70 arquivos em `src/asset/resources/`. Os services respondiam `throw new NotImplementedException(...)` em toda operação (`0c8e760:src/asset/resources/snippets/snippets.service.ts`).
   - `a967f26` muda o gerador de resources: o service passa a devolver uma factory (`a967f26:scripts/generate-marketo-resources.py:189`), e cada módulo passa a exportar o service (`:236`).
   - `5cc5e09` leva essas mudanças aos 69 arquivos commitados sem o gerador, que importa um `marketo_codegen` que só chega em `0ef242d`. Nos 23 módulos, acrescenta o `exports`. Nos 23 services, troca o `NotImplementedException` pela factory, com imports `../../`, onde o gerador emite `../../../`. Nos 23 controllers, troca o prefixo dos imports de `../../../asset-definitions` para `../../asset-definitions`. A mensagem só fala dos exports ([Anti-pattern: Mensagem de commit que diz menos do que o commit faz](../knowledge/anti-patterns/commit-message-understating-its-content.md)).
-  - `fb4a804` serve a UI do Swagger em `api` (`src/main.ts:13-19`) e semeia o faker antes de criar o app (`src/main.ts:7`).
+  - `fb4a804` serve a UI do Swagger em `api` (`fb4a804:src/main.ts:13-19`) e semeia o faker antes de criar o app (`fb4a804:src/main.ts:7`).
 
 ## Decisão
 
-- **NestJS 12 sobre Express.** `@nestjs/common`, `@nestjs/core` e `@nestjs/platform-express` estão em `^12.0.1` (`package.json:36-37`, `:39`), travados em 12.0.1 no `package-lock.json`. O lock traz o Express 5.2.1 e o path-to-regexp 8.4.2.
+- **NestJS 12 sobre Express.** `@nestjs/common`, `@nestjs/core` e `@nestjs/platform-express` estão em `^12.0.1` (`package.json:36-38`), travados em 12.0.1 no `package-lock.json`. O lock traz o Express 5.2.1 e o path-to-regexp 8.4.2.
 - **Um módulo por tag do Swagger.** O gerador agrupa as operações pela primeira tag (`scripts/generate-marketo-resources.py:266-270`).
   - Cada tag vira uma pasta `src/asset/resources/<tag-em-kebab>/` com três arquivos: controller, service e módulo. São 23 × 3 arquivos, mais o `asset-resources.module.ts`: 70.
   - As classes levam o `PascalCase` da tag (`scripts/generate-marketo-resources.py:105`, `:178`, `:225`). Uma tag "(New)" vira uma pasta `-new`, como `emails-new` (`scripts/marketo_codegen.py:23-27`).
-- **A árvore de módulos.** `AppModule` importa `AssetModule` (`src/app.module.ts:5,19`), que importa `AssetResourcesModule` (`src/asset/asset.module.ts:5`), que importa os 23 módulos em ordem alfabética (`src/asset/resources/asset-resources.module.ts:26-51`). Quem ordena é o gerador (`scripts/generate-marketo-resources.py:279-281`).
+- **A árvore de módulos.** `AppModule` importa `AssetModule` (`src/app.module.ts:2,5`), que importa `AssetResourcesModule` (`src/asset/asset.module.ts:5`), que importa os 23 módulos em ordem alfabética (`src/asset/resources/asset-resources.module.ts:26-51`). Quem ordena é o gerador (`scripts/generate-marketo-resources.py:279-281`).
 - **A forma de um recurso**, com os arquivos de `src/asset/resources/snippets/` como exemplo ([Pattern: A forma de um módulo de recurso](../knowledge/patterns/resource-module-shape.md)):
   - **O módulo** declara o controller e o service e exporta o service (`snippets.module.ts:5-10`).
   - **O controller** não tem prefixo: `@Controller()` (`snippets.controller.ts:13`). Cada rota carrega o caminho inteiro do Swagger, com `{id}` trocado por `:id` (`scripts/generate-marketo-resources.py:70-71`), como `@Get('rest/asset/v1/snippet/:id.json')` (`snippets.controller.ts:17`). O nome do método é o `operationId` (`scripts/generate-marketo-resources.py:114,145`). Os parâmetros usam `@Param`, `@Query`, `@Body` e, nos três controllers das tags "(New)", `@Headers('x-app-type')`, 33 vezes, sempre sem pipe (`snippets.controller.ts:19`, `scripts/generate-marketo-resources.py:33-39`).
@@ -31,7 +31,7 @@
 
 ## Racional
 
-- **NestJS.** O projeto começou do starter do Nest (`package.json:2-4`). Decorators de rota e injeção de dependência dão um lugar por operação e um service trocável por módulo (inferido; confirmar).
+- **NestJS.** O projeto começou do starter do Nest (`0c8e760:package.json:2-4`). Decorators de rota e injeção de dependência dão um lugar por operação e um service trocável por módulo (inferido; confirmar).
 - **Express.** É a plataforma com que o starter vem (inferido; confirmar).
 - **Um módulo por tag.** É o agrupamento que o próprio Swagger dá, com as 23 tags declaradas e todas usadas, e deixa cada recurso do Marketo numa pasta (inferido; confirmar).
 - **Caminho inteiro, sem prefixo.** A rota fica igual ao caminho do Swagger, com a sintaxe de parâmetro trocada: acha-se por busca, e o gerador não precisa decompor o caminho (inferido; confirmar).
@@ -82,3 +82,4 @@ O histórico não registra alternativas. As linhas abaixo são as óbvias, e cad
 
 - **Criado**: 2026-09-25 (Fase: Build), registro retroativo de `0c8e760`..`fb4a804` (#4)
 - **Status**: Accepted
+- **Atualizado**: 2026-09-26 (Fase: Learn), a #9 renomeou o pacote e tirou do `AppModule` o Observe, o `AppController` e o `AppService`; as citações do `package.json` e do `src/app.module.ts` seguiram as linhas novas, e as que descrevem o starter passaram a apontar para o commit (#9)
