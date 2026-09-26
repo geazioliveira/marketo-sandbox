@@ -34,7 +34,7 @@ npm run check:all      # sai com 0 só quando a saída commitada é a que os ger
 
 ### O que o check confere
 
-- O modo `--check` existe nos três geradores (`scripts/generate-marketo-definitions.py:149-164`, `scripts/generate-marketo-resources.py:359-374`, `scripts/generate-marketo-factories.py:307-328`).
+- O modo `--check` existe nos três geradores (`scripts/generate-marketo-definitions.py:149-164`, `scripts/generate-marketo-resources.py:399-414`, `scripts/generate-marketo-factories.py:307-328`).
 - Ele gera tudo em `.codegen-tmp`, formata com o Prettier e compara arquivo por arquivo com o que está commitado (`scripts/marketo_codegen.py:253-281`).
 - O Prettier dos geradores lê só o `.prettierignore` (`scripts/marketo_codegen.py:229-233`). Sem isso, ele leria o `.gitignore` e pularia o `.codegen-tmp`.
 - Ele acusa arquivo ausente, arquivo mudado e todo `*.ts` a mais na pasta de saída da área, e sai com 1. A mensagem lista até 10 caminhos e dá as duas contagens (`scripts/marketo_codegen.py:266-276`).
