@@ -12,7 +12,7 @@ npm run gate
 
 `npm run gate` antes de começar e de novo antes da PR. O gate lê a branch, descobre a issue, e diz quais passos estão feitos, quais faltam e se o Build pode começar. [O gate do loop](../../context/knowledge/patterns/loop-gate.md) diz o que bloqueia, o que só é relatado e o que nenhum script consegue conferir.
 
-1. **Issue.** O plano nasce numa issue de `geazioliveira/marketo-sandbox`, com as seções listadas abaixo, a label de categoria e a label `ready-for-human`. Os forms de issue aplicam as duas. Um relato sem plano entra com `needs-triage`.
+1. **Issue.** O plano nasce numa issue de `geazioliveira/marketo-sandbox`, com as seções listadas abaixo, a label de categoria e a label `ready-for-human`. Os forms de issue aplicam as duas. Um relato sem plano entra com `needs-triage`; quando o agente publica o plano, troca `needs-triage` por `ready-for-human` no mesmo passo.
 2. **Approve.** O dono lê o plano no GitHub, comenta `# Owner Approve` com as próprias palavras e, depois desse comentário, move a label de `ready-for-human` para `ready-for-agent`. A ordem importa: o gate só aceita um `ready-for-agent` aplicado depois do Approve em vigor. O agente nunca faz nenhum dos dois.
 3. **Branch.** Uma branch para a issue, cortada do `origin/main`, como manda o [ciclo de vida de issue e branch](../../context/knowledge/patterns/issue-branch-lifecycle.md). Uma issue tem uma branch só: outra branch da mesma issue que compartilhe história não publicada com esta bloqueia o gate, e só esta branch e a cópia dela em `origin` ficam de fora ([o passo `stacked`](../../context/knowledge/patterns/loop-gate.md#o-passo-stacked)). Rode `npm run gate` aqui: ele precisa estar aberto antes do primeiro commit.
 4. **Intent.** O primeiro commit toca só `context/intent/`: cria ou atualiza o `feature-<slug>.md` ou o `bug-<slug>.md` da issue, com status `In Progress`.
@@ -29,13 +29,13 @@ O plano redigido no plan mode do Claude Code é um rascunho do plano de uma issu
 A sequência:
 
 1. No plan mode, o agente redige o plano, com as seções exigidas e o nome exato da branch.
-2. O agente cria a issue (`gh issue create … --label enhancement --label ready-for-human`) ou, numa issue que já existe, posta um comentário cuja primeira linha é exatamente `# Plano`.
+2. O agente cria a issue (`gh issue create … --label enhancement --label ready-for-human`) ou, numa issue que já existe, posta um comentário cuja primeira linha é exatamente `# Plano`. Se ela está em `needs-triage`, troca essa label por `ready-for-human` logo após publicar o comentário.
 3. O agente para e informa o link da issue.
 4. O dono lê no GitHub, escreve `# Owner Approve` com as próprias palavras e, depois, move a label.
 5. Num turno novo, o agente roda `npm run gate` e só então constrói.
 
 - Aprovação no chat não é Approve, e o agente nunca a transcreve para a issue.
-- Se o Build descobre algo que muda o plano: o agente para, posta um novo comentário cuja primeira linha é exatamente `# Plano`, com o plano inteiro revisado (isso cancela o Approve, de propósito), e espera o dono aprovar de novo. Depois do novo Approve, o dono remove `ready-for-agent` e a aplica de novo, mesmo que ela nunca tenha saído da issue: o gate só aceita a label aplicada depois do Approve em vigor.
+- Se o Build descobre algo que muda o plano: o agente para, posta um novo comentário cuja primeira linha é exatamente `# Plano`, com o plano inteiro revisado (isso cancela o Approve, de propósito), e espera o dono aprovar de novo. Se a issue voltou a `needs-triage`, o agente a move para `ready-for-human`. Depois do novo Approve, o dono remove `ready-for-agent` e a aplica de novo, mesmo que ela nunca tenha saído da issue: o gate só aceita a label aplicada depois do Approve em vigor.
 
 ## Seções que uma issue precisa ter
 
@@ -119,11 +119,13 @@ Exemplos de primeira linha que não é nenhuma das três acima. Um teste confere
 
 Toda issue aberta tem exatamente uma label de categoria (`bug` ou `enhancement`) e exatamente uma label de estado. A issue de acompanhamento (#1) fica fora dessa regra.
 
+O contrato `agentPlanLabelTransition` em [scripts/loop-sections.mjs](../../scripts/loop-sections.mjs) registra a única edição de label de estado que o agente pode fazer: ao publicar um plano completo como `# Plano` numa issue em `needs-triage`, seja nova ou já existente, troca `needs-triage` por `ready-for-human`. Os hooks da #5 ainda irão chegar e deverão permitir só essa exceção; `ready-for-agent` continua exclusivo do dono.
+
 | Label | Significado | Quem aplica |
 | --- | --- | --- |
-| `needs-triage` | O dono precisa avaliar esta issue | O agente, só no `gh issue create` de um relato sem plano, e a [auditoria de main](#auditoria-de-main), na issue que ela abre. Depois, só o dono |
+| `needs-triage` | Relato ainda sem plano para validação | O agente, no `gh issue create` de um relato sem plano, e a [auditoria de main](#auditoria-de-main), na issue que ela abre. Quando publicar o plano, o agente a remove |
 | `needs-info` | Esperando mais informação de quem abriu | Só o dono |
-| `ready-for-human` | Precisa de decisão humana, incluindo um Approve ainda não registrado | O form de issue, ou o agente só no `gh issue create` com o plano no corpo. Depois, só o dono |
+| `ready-for-human` | Há um plano publicado que precisa da validação do dono | O form de issue ou o agente ao criar uma issue com plano ou publicar `# Plano` numa issue em `needs-triage`. O dono a remove depois do Approve |
 | `ready-for-agent` | Especificada e aprovada pelo dono: o agente pode construir | Só o dono, depois do Approve, e de novo depois de cada novo Approve |
 | `wontfix` | Não será feita (decisão do dono) | Só o dono |
 
@@ -147,6 +149,9 @@ gh issue create --repo geazioliveira/marketo-sandbox --parent <n> --title "..." 
 
 # Comentar (a primeira linha de um plano revisado é exatamente "# Plano")
 gh issue comment <n> --repo geazioliveira/marketo-sandbox --body-file comentario.md
+
+# Agente: depois de publicar o plano numa issue em needs-triage, sinalizar a validação pendente
+gh issue edit <n> --repo geazioliveira/marketo-sandbox --remove-label needs-triage --add-label ready-for-human
 
 # Só o dono: mover a label depois do comentário de Approve
 gh issue edit <n> --repo geazioliveira/marketo-sandbox --remove-label ready-for-human --add-label ready-for-agent

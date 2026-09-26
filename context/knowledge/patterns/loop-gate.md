@@ -179,7 +179,7 @@ O gate lê a primeira linha não vazia de cada comentário, sem os espaços das 
 
 Este repositório tem uma conta só no GitHub. O dono e o agente postam com o mesmo login, então nada nos metadados de uma issue distingue um comentário do dono de um que o agente escreveu com a voz do dono. Nenhum script rodado com essa conta fecha esse buraco. Por isso o gate imprime, em toda execução, inclusive nas que passam:
 
-> O dono move a label e escreve o Approve. O agente nunca faz nenhum dos dois.
+> Ao publicar um plano completo numa issue em `needs-triage`, o agente a troca por `ready-for-human`. Só o dono escreve o Approve e aplica `ready-for-agent`.
 
 - Mover `ready-for-human` para `ready-for-agent` é um ato do dono. É um segundo ato deliberado, e o gate exige que ele venha depois do Approve: é isso que dificulta fabricar um Approve por acidente.
 - Um Approve são as palavras do dono. Uma aprovação dada no chat não é Approve, e o agente nunca a transcreve para a issue.
@@ -208,4 +208,4 @@ Este repositório tem uma conta só no GitHub. O dono e o agente postam com o me
 
 - **Criado**: 2026-09-24 (Fase: Build), do gate do lite-campaign (brunohab/lite-campaign#101), dos três defeitos dele e do plano aprovado na #2 (#2)
 - **Status**: Active
-- **Atualizado**: 2026-09-25 (Fase: Build), o modo CI ganhou os passos `copilot-review` e `review-threads`, logo depois de `pr-first-line`: uma revisão do Copilot (`Bot` com o `databaseId` dele) no commit da cabeça, que não falhou, e nenhuma thread de revisão aberta, de qualquer autor, bloqueiam fora de draft; uma revisão que conta entre as 100 mais recentes basta; as mensagens de recusa terminam com o gate em modo CI, que renova o veredito; e o re-disparo depois de uma revisão passou a ter duas etapas, o sinal sem permissão nenhuma e o refresh de `main` (#13)
+- **Atualizado**: 2026-09-25 (Fase: Build), a regra de autoria passou a distinguir a transição `needs-triage` para `ready-for-human`, feita pelo agente ao publicar o plano, do Approve e da aplicação de `ready-for-agent`, exclusivos do dono (#17)

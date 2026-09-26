@@ -41,6 +41,7 @@ import {
   skipCiTokens,
   skipChecksTrailer,
   stepIds,
+  ownerRule,
   withdrawHeading,
 } from '../../scripts/loop-sections.mjs'
 
@@ -164,6 +165,14 @@ const effects = new Map<string, ReturnType<typeof commentOpening>>([
 ])
 
 describe('docs against scripts/loop-sections.mjs', () => {
+  it('the gate pattern quotes the rule the gate prints on every run', () => {
+    const quoted = read(loopGate)
+      .split(/\r?\n/)
+      .filter((line) => line.startsWith('> '))
+      .map((line) => line.slice(2).replaceAll('`', ''))
+    expect(quoted).toContain(ownerRule)
+  })
+
   it('the lifecycle pattern states exactly the branch shapes the gate accepts', () => {
     const text = read(lifecycle)
     for (const prefix of branchPrefixes)

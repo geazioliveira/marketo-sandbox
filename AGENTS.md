@@ -14,7 +14,8 @@ O trabalho segue Intent, Build e Learn, com Plan, Approve e Execute dentro do Bu
 - Nenhum plano nasce fora de uma issue, e toda PR fecha uma issue. Não existe lane sem issue.
 - Rode `npm run gate` antes de começar e de novo antes da PR. Se ele bloquear, pare e resolva o que ele aponta.
 - Antes da PR, rode também `npm run check` e o e2e, como diz [a seção Check do fluxo](docs/development/workflow.md#check). É o que o check `Qualidade / check` roda.
-- O dono move a label e escreve o Approve. O agente nunca faz nenhum dos dois.
+- Ao publicar um plano completo numa issue em `needs-triage`, o agente troca essa label por `ready-for-human` no mesmo passo, para sinalizar que o dono precisa validá-lo.
+- Só o dono escreve o Approve e move `ready-for-human` para `ready-for-agent`. O agente nunca faz nenhum desses dois atos.
 - Um plano aceito no plan mode do Claude Code só autoriza postá-lo na issue. Aprovação no chat não é Approve, e o agente nunca a transcreve para a issue.
 - Um plano revisado é um comentário cuja primeira linha é exatamente `# Plano`. Nunca abra um comentário com um título que mencione "approve" (heading de qualquer nível, linha sublinhada, linha em negrito, citação): depois de um Approve, isso o cancela. Depois do Approve, não edite o corpo da issue nem comentário nenhum: isso também o revoga.
 - Nunca escreva `[skip ci]`, `[ci skip]`, `[no ci]`, `[skip actions]` ou `[actions skip]`, nem o trailer `skip-checks: true`, no título ou no corpo de uma PR, nem numa mensagem de commit: a mensagem do merge é o título e o corpo da PR, e o push do merge ficaria sem o `Qualidade / check` e sem a auditoria de `main` ([o fluxo](docs/development/workflow.md#pull-requests-e-merge)).

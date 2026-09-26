@@ -4,6 +4,35 @@ Uma entrada por mudança mergeada, da mais nova para a mais antiga, escrita no p
 
 ---
 
+## 2026-09-25: Plano publicado passa a aguardar validação (#17)
+
+**Fase**: Learn
+**Tipo**: Decision
+
+### O que foi construído / corrigido
+
+- Ao publicar um plano completo numa issue em `needs-triage`, o agente troca essa label por `ready-for-human` no mesmo passo. O dono continua sendo o único a escrever `# Owner Approve` e aplicar `ready-for-agent`.
+- A regra agora aparece no `AGENTS.md`, no fluxo, na ADR 0001, no pattern do gate, no glossário, no contrato `agentPlanLabelTransition` e na mensagem que o gate imprime. Esta PR separa a documentação compartilhada dos hooks da #5, que ainda irão chegar.
+
+### Números medidos
+
+- `npm run check`: 1.338 testes passaram; lint, typecheck, `check:context` e build passaram. `check:context` leu 38 arquivos, 489 links internos, 30 blocos Status, 9 decisões no índice e 7 entradas do changelog.
+- `OBSERVE_ENDPOINT=http://127.0.0.1:9 npm run test:e2e`: 1 teste passou.
+
+### Decisões tomadas
+
+- A transição de triagem para validação é do agente quando ele publica o plano. O Approve e a aplicação de `ready-for-agent` permanecem atos do dono ([ADR 0001](../decisions/0001-context-mesh-in-the-repository.md)).
+
+### Patterns aplicados ou criados
+
+- [O gate do loop](../knowledge/patterns/loop-gate.md): sua mensagem distingue os dois papéis.
+
+### Aprendizados / surpresas
+
+- Os documentos gerais do Context Mesh já estavam em `main`. Só a regra mais recente precisava de PR própria; o intent ficou na branch da #5, e os hooks da #5 ainda irão chegar. A revisão do Copilot mostrou que a mensagem do gate e o contrato de labels precisavam mudar juntos.
+
+---
+
 ## 2026-09-25: Registro retroativo das decisões, dos padrões e dos erros de antes do loop (#4)
 
 **Fase**: Learn
