@@ -54,6 +54,7 @@
 - [ADR 0008: A toolchain](0008-toolchain.md), com o Prettier e o Python dos geradores
 - [Bug: Os geradores pulam o Prettier em silêncio, não se marcam como gerados e ficam fora do CI](../intent/bug-codegen-header-prettier-ci.md)
 - [Pattern: Gerar e conferir](../knowledge/patterns/generate-and-check.md)
+- [Anti-pattern: Confiar que a ferramenta processou o arquivo passado pelo nome](../knowledge/anti-patterns/trusting-a-tool-to-process-a-named-file.md)
 
 ## Status
 

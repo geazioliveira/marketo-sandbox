@@ -13,11 +13,13 @@
 
 ## Causa raiz
 
-- `format_with_prettier` retorna sem fazer nada quando o binário falta (`scripts/marketo_codegen.py:227-228`), e o `--check` chama a diferença de defasagem.
-- O Prettier 3 pula em silêncio um arquivo ignorado, mesmo passado pelo nome: sai com 0 no `--write` e no `-l`, e no `--check` diz que está tudo formatado (Prettier 3.9.6). A #6 tirou o `.gitignore` do caminho com `--ignore-path .prettierignore` (`:232`), mas o `.prettierignore` continua podendo pular, e o `--log-level warn` esconde o relatório por arquivo que mostraria o pulo.
-- `_node_environment` (`:213-222`) usa o primeiro node que achar, ignora um `NODE_BIN` inválido e, sem nenhum, deixa o `subprocess` falhar depois do `rmtree`.
-- Nenhum gerador emite um marcador: `write_output` e `check_output` (`:240-281`) escrevem o conteúdo como veio dos `render*`.
-- O `check:all` ficou fora do `npm run check` e do CI enquanto não podia passar (`package.json:32`, `.github/workflows/check.yml:10-11`). Desde a #6 ele passa.
+As citações desta seção são do código de antes da correção, em `3ddceb4`.
+
+- `format_with_prettier` retorna sem fazer nada quando o binário falta (`3ddceb4:scripts/marketo_codegen.py:227-228`), e o `--check` chama a diferença de defasagem.
+- O Prettier 3 pula em silêncio um arquivo ignorado, mesmo passado pelo nome: sai com 0 no `--write` e no `-l`, e no `--check` diz que está tudo formatado (Prettier 3.9.6). A #6 tirou o `.gitignore` do caminho com `--ignore-path .prettierignore` (`3ddceb4:scripts/marketo_codegen.py:232`), mas o `.prettierignore` continua podendo pular, e o `--log-level warn` esconde o relatório por arquivo que mostraria o pulo.
+- `_node_environment` (`3ddceb4:scripts/marketo_codegen.py:213-222`) usa o primeiro node que achar, ignora um `NODE_BIN` inválido e, sem nenhum, deixa o `subprocess` falhar depois do `rmtree`.
+- Nenhum gerador emite um marcador: `write_output` e `check_output` (`3ddceb4:scripts/marketo_codegen.py:240-281`) escrevem o conteúdo como veio dos `render*`.
+- O `check:all` ficou fora do `npm run check` e do CI enquanto não podia passar (`3ddceb4:package.json:32`, `3ddceb4:.github/workflows/check.yml:10-11`). Desde a #6 ele passa.
 
 ## Abordagem da correção
 
@@ -33,14 +35,14 @@ A branch `fix/7-codegen-header-prettier-ci` nasce de `origin/main` em `3ddceb4` 
 
 ## Critérios de aceite
 
-- [ ] `test/scripts/codegen.spec.ts`: sem `node_modules/.bin/prettier`, o `--check` e o modo de gerar dos três geradores saem com 2 e uma mensagem que cita o Prettier e o `npm ci`, sem "stale" e sem mudar a saída commitada. Antes, o `--check` de definições e de resources sai com 1 e "stale", e gerar sai com 0 gravando sem formatação.
-- [ ] No mesmo spec, com `NODE_BIN` numa pasta sem node, os três geradores saem com 2 nos dois modos, sem traceback e sem tocar a saída. Antes, o `NODE_BIN` era ignorado. O caso sem node em nenhum candidato vai para a Verificação, numa máquina sem `/usr/local/bin/node`.
-- [ ] No mesmo spec, com um `.prettierignore` que casa tudo menos `src/`, o `--check` passa na saída commitada; e com um `.prettierignore` que casa `src/`, gerar reescreve a saída byte a byte. Antes, defasagem falsa no check e saída sem formatação no gerar (definições e resources).
-- [ ] No mesmo spec, com um `node_modules/.bin/prettier` que repassa tudo ao Prettier real menos o argumento `--ignore-path=`, o `--check` dos três geradores sai com 2 e diz quantos arquivos o Prettier não formatou. Sem a conferência, definições e resources dizem "stale" e saem com 1, e factories diz "current" e sai com 0.
-- [ ] No mesmo spec, todo arquivo que um gerador escreve começa com o cabeçalho. Antes, nenhum.
-- [ ] Num clone limpo, todo arquivo gerado commitado começa com o cabeçalho, `npm run check:all` passa, `npm run generate:all` não muda nada e `npm run format:check` passa.
-- [ ] `npm run check` termina com `npm run check:all`, e a run do `Qualidade / check` da PR mostra as linhas "are current" de todas as áreas.
-- [ ] Na cabeça da PR, nenhuma linha de `context/`, `docs/`, `AGENTS.md`, `README.md` ou `.github/` descreve como pendente o que a #7 entrega. As menções à #7 que ficam vão listadas na Verificação, e `npm run check:context` passa.
+- [x] `test/scripts/codegen.spec.ts`: sem `node_modules/.bin/prettier`, o `--check` e o modo de gerar dos três geradores saem com 2 e uma mensagem que cita o Prettier e o `npm ci`, sem "stale" e sem mudar a saída commitada. Antes, o `--check` de definições e de resources sai com 1 e "stale", e gerar sai com 0 gravando sem formatação.
+- [x] No mesmo spec, com `NODE_BIN` numa pasta sem node, os três geradores saem com 2 nos dois modos, sem traceback e sem tocar a saída. Antes, o `NODE_BIN` era ignorado. O caso sem node em nenhum candidato vai para a Verificação, numa máquina sem `/usr/local/bin/node`.
+- [x] No mesmo spec, com um `.prettierignore` que casa tudo menos `src/`, o `--check` passa na saída commitada; e com um `.prettierignore` que casa `src/`, gerar reescreve a saída byte a byte. Antes, defasagem falsa no check e saída sem formatação no gerar (definições e resources).
+- [x] No mesmo spec, com um `node_modules/.bin/prettier` que repassa tudo ao Prettier real menos o argumento `--ignore-path=`, o `--check` dos três geradores sai com 2 e diz quantos arquivos o Prettier não formatou. Sem a conferência, definições e resources dizem "stale" e saem com 1, e factories diz "current" e sai com 0.
+- [x] No mesmo spec, todo arquivo que um gerador escreve começa com o cabeçalho. Antes, nenhum.
+- [x] Num clone limpo, todo arquivo gerado commitado começa com o cabeçalho, `npm run check:all` passa, `npm run generate:all` não muda nada e `npm run format:check` passa.
+- [x] `npm run check` termina com `npm run check:all`, e a run do `Qualidade / check` da PR mostra as linhas "are current" de todas as áreas.
+- [x] Na cabeça da PR, nenhuma linha de `context/`, `docs/`, `AGENTS.md`, `README.md` ou `.github/` descreve como pendente o que a #7 entrega. As menções à #7 que ficam vão listadas na Verificação, e `npm run check:context` passa.
 - [ ] A PR fecha só a #7, com revisão do Copilot na cabeça, nenhuma thread aberta e veredito fresco do gate.
 
 ## Decisões relacionadas
@@ -49,20 +51,39 @@ A branch `fix/7-codegen-header-prettier-ci` nasce de `origin/main` em `3ddceb4` 
 - [ADR 0003: Revisão do Copilot na cabeça e nenhuma thread aberta antes do merge](../decisions/0003-copilot-review-and-no-open-threads-before-merge.md)
 - [ADR 0004: O Swagger como fonte única, com o código gerado commitado](../decisions/0004-swagger-as-single-source-with-committed-generated-code.md), que a #6 emendou com o `--ignore-path .prettierignore`
 - [ADR 0008: A toolchain](../decisions/0008-toolchain.md), com o Python e o Prettier dos geradores
-- A ADR 0011, criada no Build, registra que os geradores formatam sem arquivo de ignore e falham quando não formatam (pergunta 1 do plano vigente, aceita no Approve)
+- [ADR 0011: Os geradores formatam sem arquivo de ignore e falham quando não formatam](../decisions/0011-generators-format-without-ignore-files.md), da pergunta 1 do plano vigente, aceita no Approve
 
 ## Patterns relacionados
 
 - [Gerar e conferir](../knowledge/patterns/generate-and-check.md)
 - [A fronteira do código gerado](../knowledge/patterns/generated-code-boundary.md)
 - [Revisão classificada por risco](../knowledge/patterns/risk-classified-review.md)
+- [Anti-pattern: Confiar que a ferramenta processou o arquivo passado pelo nome](../knowledge/anti-patterns/trusting-a-tool-to-process-a-named-file.md)
 
 ## Resultados
 
-- Escrito no Learn.
+- **O que foi construído**, na branch `fix/7-codegen-header-prettier-ci`:
+  - `918e6a0`: este intent;
+  - `d32e5c8`: `test/scripts/codegen.spec.ts`, vermelho: 20 dos 31 casos falhavam;
+  - `8f358fb`: os geradores saem com 2 quando não conseguem formatar. O Prettier roda com `--write --no-color --no-require-pragma --ignore-path=`, e cada caminho passado precisa aparecer no relatório por arquivo. O Prettier e o node são conferidos antes de a saída ser tocada, e o node vem do `NODE_BIN`, do `PATH`, de `~/.nvm`, de `/usr/local/bin` ou de `/opt/homebrew/bin`;
+  - `e782bc2`: o cabeçalho de gerado, com o parâmetro `header` obrigatório em `write_output` e `check_output`;
+  - `4bb09b2`: a saída regenerada, só o cabeçalho: 1.083 arquivos, 1.083 hunks `@@ -0,0 +1,3 @@` e 3.249 linhas;
+  - `232b930`: o `check:all` no fim do `npm run check`, com o `forms-parity.spec.ts` pinando a cadeia e os três `check:*`, o fluxo e o comentário do `check.yml`;
+  - `a440771`: a documentação, a [ADR 0011](../decisions/0011-generators-format-without-ignore-files.md), as emendas das ADRs 0002, 0004 a 0009 e as 72 citações de arquivos gerados e as dos geradores, deslocadas pelas linhas novas;
+  - o Learn: este intent, o anti-pattern, o project intent e o changelog.
+- **A causa raiz se confirmou.** Os três defeitos vinham de o gerador confiar no Prettier sem conferir: o binário ausente era pulado, uma regra de ignore pulava o arquivo em silêncio, e o node ausente virava traceback. O cabeçalho e o CI eram lacunas, não defeitos.
+- **Medido**: o spec passa de 20 falhas em 31 casos para 31 de 31, em cerca de 5 s; o `check:all` sai com 0 nas 16 linhas "are current", e um segundo `generate:all` não muda nada; o `npm run check` passa em 212 s locais, com 1.378 testes, e o e2e com 14; sem node em nenhum candidato, numa máquina sem `/usr/local/bin/node` nem `/opt/homebrew/bin/node`, o gerador sai com 2, a mensagem cita o `NODE_BIN` e o `.nvmrc`, e a saída não muda.
+- **Desvios do plano aprovado**:
+  - a ADR 0011 e as emendas das ADRs entraram no commit da documentação, junto com os trechos que elas corrigem, em vez do Learn, para nenhum link ficar quebrado entre commits;
+  - a mensagem da conferência ficou "Prettier did not process N of M files", porque ela prova que o Prettier processou cada arquivo, não que o formatou;
+  - o `forms-parity.spec.ts` também pina os scripts `check:all` e `check:*`, para uma PR não afrouxar o check por eles;
+  - o README ganhou o cabeçalho e o python3 dentro das linhas que já existiam, para não deslocar as citações dele.
+- **Fica para depois**: o sha256 do Swagger por área (#19); o código gerado fora do schema (#24), que também regenera a saída; e gerar numa pasta temporária e mover no fim, para uma falha do Prettier no modo de gerar não deixar a saída sem formatação.
+
+  O último critério, a revisão do Copilot na cabeça, as threads e o veredito fresco, é conferido no fluxo da PR, depois deste Learn.
 
 ## Status
 
 - **Criado**: 2026-09-26 (Fase: Intent), do plano vigente na issue #7, revisado depois do merge da #6 (#7)
-- **Status**: In Progress
-- **Atualizado**: 2026-09-26 (Fase: Build), branch `fix/7-codegen-header-prettier-ci` cortada de `3ddceb4` (#7)
+- **Status**: Resolved
+- **Atualizado**: 2026-09-26 (Fase: Learn), os geradores saem com 2 quando não conseguem formatar, todo arquivo gerado abre com o cabeçalho, e o `check:all` roda no `npm run check` e no CI (#7)
