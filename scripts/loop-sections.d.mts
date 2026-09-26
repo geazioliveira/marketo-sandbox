@@ -323,10 +323,13 @@ export declare const gateCacheFile: string
 export declare const gateCacheSchema: number
 export declare const gateTtlHours: number
 export declare const planPendingPrefix: string
+export declare function planPendingFile(
+  sessionId: string | null | undefined,
+): string
 
 export declare function gateStatus(
   cache: GateCache | null | undefined,
-  context: { branch: string; now?: number; pendingSince?: string | null },
+  context: { branch: string; now?: number; pendingPlan?: boolean },
 ): { state: GateState; cache?: GateCache }
 
 // The audit of main and the issue-link refresh

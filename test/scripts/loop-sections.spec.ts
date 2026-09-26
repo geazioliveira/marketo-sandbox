@@ -33,6 +33,8 @@ import {
   gateCacheSchema,
   gateCiCommand,
   gateStatus,
+  planPendingFile,
+  planPendingPrefix,
   gateTtlHours,
   hasContent,
   headAndRest,
@@ -1418,8 +1420,8 @@ describe('gateStatus', () => {
     checkedAt: '2026-09-24T11:00:00Z',
     ...extra,
   })
-  const status = (value: GateCache | null, pendingSince?: string | null) =>
-    gateStatus(value, { branch, now, pendingSince }).state
+  const status = (value: GateCache | null, pendingPlan?: boolean) =>
+    gateStatus(value, { branch, now, pendingPlan }).state
 
   it('is missing without a cache', () => {
     expect(status(null)).toBe('missing')
@@ -1444,9 +1446,28 @@ describe('gateStatus', () => {
     expect(status(cache({ checkedAt }))).toBe('stale')
   })
 
-  it('is pending-plan when a plan was accepted after the check', () => {
-    expect(status(cache(), '2026-09-24T11:30:00Z')).toBe('pending-plan')
-    expect(status(cache(), '2026-09-24T10:30:00Z')).toBe('open')
+  it('is pending-plan while the marker exists, however recently the gate ran', () => {
+    // The gate ran at 11:00, after any plan; the marker still closes it.
+    expect(status(cache(), true)).toBe('pending-plan')
+    expect(status(cache({ checkedAt: '2026-09-24T11:59:00Z' }), true)).toBe(
+      'pending-plan',
+    )
+    expect(status(null, true)).toBe('pending-plan')
+    expect(status(cache({ open: false }), true)).toBe('pending-plan')
+    expect(status(cache(), false)).toBe('open')
+    expect(status(cache())).toBe('open')
+  })
+
+  it('names one pending-plan marker per session, never a path', () => {
+    expect(planPendingFile('3f2c-9a_B')).toBe(
+      'loop-plan-pending-3f2c-9a_B.json',
+    )
+    expect(planPendingFile('../../etc/passwd')).toBe(
+      'loop-plan-pending-______etc_passwd.json',
+    )
+    expect(planPendingFile('')).toBe('loop-plan-pending-_.json')
+    expect(planPendingFile(undefined)).toBe('loop-plan-pending-_.json')
+    expect(planPendingFile('a/b').startsWith(planPendingPrefix)).toBe(true)
   })
 
   it('is unverified when the issue was not read', () => {

@@ -1197,19 +1197,40 @@ export const loopSteps = [
 export const gateCacheFile = 'loop-gate.json'
 export const gateCacheSchema = 1
 export const gateTtlHours = 8
-/** Will be written by the plan-to-issue hook (#5) when a plan is accepted in Claude Code and not yet posted. */
+/**
+ * The prefix of the pending-plan marker: the plan-to-issue hook (#5) will
+ * write one, under the worktree's git dir, when a plan is accepted in Claude
+ * Code, and will remove it only once the plan is posted on an issue.
+ */
 export const planPendingPrefix = 'loop-plan-pending-'
 
 /**
- * How a hook reads the cache the gate wrote.
+ * The file name of Claude Code session `sessionId`'s pending-plan marker.
+ * Every character outside [A-Za-z0-9_-] becomes `_`, so a session id never
+ * names a path outside the git dir.
+ */
+export function planPendingFile(sessionId) {
+  const id = String(sessionId ?? '').replace(/[^A-Za-z0-9_-]/g, '_')
+  return `${planPendingPrefix}${id === '' ? '_' : id}.json`
+}
+
+/**
+ * How a hook reads the cache the gate wrote. A plan accepted and not yet
+ * posted (`pendingPlan`: its marker exists) keeps the cache closed however
+ * recently the gate ran: the plan is published first, and only its
+ * publication removes the marker.
  * @param {object | null} cache the parsed loop-gate.json, or null
- * @param {{ branch: string, now?: number, pendingSince?: string | null }} context
+ * @param {{ branch: string, now?: number, pendingPlan?: boolean }} context
  * @returns {{ state: 'missing' | 'mismatch' | 'stale' | 'pending-plan' | 'unverified' | 'open' | 'closed', cache?: object }}
  */
 export function gateStatus(
   cache,
-  { branch, now = Date.now(), pendingSince = null },
+  { branch, now = Date.now(), pendingPlan = false },
 ) {
+  if (pendingPlan === true)
+    return cache == null
+      ? { state: 'pending-plan' }
+      : { state: 'pending-plan', cache }
   if (cache == null) return { state: 'missing' }
   if (
     cache.schema !== gateCacheSchema ||
@@ -1221,8 +1242,6 @@ export function gateStatus(
   const ageHours = (now - checked) / 36e5
   if (!(ageHours >= 0 && ageHours <= gateTtlHours))
     return { state: 'stale', cache }
-  if (pendingSince != null && String(pendingSince) > String(cache.checkedAt))
-    return { state: 'pending-plan', cache }
   if (cache.verified !== true) return { state: 'unverified', cache }
   return { state: cache.open === true ? 'open' : 'closed', cache }
 }
