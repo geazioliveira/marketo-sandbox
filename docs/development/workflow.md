@@ -260,7 +260,7 @@ O check da PR também se atualiza sozinho depois de uma revisão. Uma revisão e
 Antes da PR, o mesmo que o CI roda, e o gate:
 
 ```sh
-npm run check && OBSERVE_ENDPOINT=http://127.0.0.1:9 npm run test:e2e && npm run gate
+npm run check && npm run test:e2e && npm run gate
 ```
 
 - **`npm run check`** roda, nessa ordem e parando no primeiro erro: `npm run lint` (oxlint em `src/`, `test/` e `scripts/`), `npm run format:check` (`prettier --check` em `src/`, `test/` e `scripts/`, os mesmos arquivos que o script `format` reescreve), `npm run typecheck` (`tsc --noEmit`, que cobre `src/` e `test/`), `npm test` (vitest), `npm run check:context` e `npm run build` (nest build, que escreve em `dist/`, ignorado pelo git).
@@ -272,9 +272,8 @@ npm run check && OBSERVE_ENDPOINT=http://127.0.0.1:9 npm run test:e2e && npm run
   - título de entrada do changelog fora do formato;
   - caminho absoluto de máquina (`/Users/`, `/Volumes/`, `/home/<x>/`, `/private/tmp/`, `/private/var/`, `/var/folders/`, `/tmp/<x>/`);
   - no template de PR, qualquer link relativo. O template vira o corpo da PR, onde um link relativo resolve a partir da página da PR e dá 404. Lá o link aponta para `https://github.com/geazioliveira/marketo-sandbox/blob/main/<caminho>`, que o check confere como um link relativo, ou não há link.
-- **O e2e** (`npm run test:e2e`) sobe o app inteiro, e com ele o `ObserveModule`, que manda telemetria por padrão. `OBSERVE_ENDPOINT` aponta essa telemetria para uma porta fechada de loopback, para que nada saia da máquina. Deixar o Observe opt-in é a #9.
-- **No CI**, o job `check` (`Qualidade / check`) roda em toda PR, em todo push em `main` e à mão. Os passos são `npm ci`, `npm run check`, o passo `e2e` (`npm run test:e2e` com o mesmo `OBSERVE_ENDPOINT`) e a conferência de que a árvore ficou limpa. Numa PR, um push novo cancela a run velha. Em `main`, nenhuma run é cancelada nem substituída: cada commit tem o seu grupo de concorrência, e todo push em `main` que dispara run ganha um veredito; o que um push sem run trouxe entra na auditoria seguinte ([Auditoria de main](#auditoria-de-main)).
-- **Se o e2e falhar num runner limpo**, ele sai do `check` como falha conhecida, com a causa registrada, e o conserto vai para a #9 (resposta 1 do dono na #3).
+- **O e2e** (`npm run test:e2e`) sobe o app inteiro e confere que uma rota de assets responde com o envelope do Marketo e que `/` responde 404. Desde a #9 o app não manda telemetria, então o e2e roda sem variável de ambiente nenhuma.
+- **No CI**, o job `check` (`Qualidade / check`) roda em toda PR, em todo push em `main` e à mão. Os passos são `npm ci`, `npm run check`, o passo `e2e` (`npm run test:e2e`) e a conferência de que a árvore ficou limpa. Numa PR, um push novo cancela a run velha. Em `main`, nenhuma run é cancelada nem substituída: cada commit tem o seu grupo de concorrência, e todo push em `main` que dispara run ganha um veredito; o que um push sem run trouxe entra na auditoria seguinte ([Auditoria de main](#auditoria-de-main)).
 - O `npm run check:all`, que confere se o código gerado é o que os geradores emitem, é uma falha conhecida, acompanhada na #7. Ele fica fora do `check` até lá.
 
 ## Auditoria de main
