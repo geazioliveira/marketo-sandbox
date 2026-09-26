@@ -1,0 +1,21 @@
+import { faker } from '@faker-js/faker'
+import { mockRequestId } from '../../../mocks/request-id'
+import type { ResponseOfListOperationOutputData } from '../../lead-database-definitions/responses/response-of-list-operation-output-data'
+import { makeListOperationOutputData } from './list-operation-output-data'
+
+export function makeResponseOfListOperationOutputData(
+  overrides: Partial<ResponseOfListOperationOutputData> = {},
+): ResponseOfListOperationOutputData {
+  return {
+    errors: [],
+    moreResult: faker.datatype.boolean(),
+    nextPageToken: faker.lorem.word(),
+    requestId: mockRequestId(),
+    result: faker.helpers.multiple(() => makeListOperationOutputData(), {
+      count: { min: 1, max: 3 },
+    }),
+    success: true,
+    warnings: [],
+    ...overrides,
+  }
+}

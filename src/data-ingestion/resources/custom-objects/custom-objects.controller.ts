@@ -1,0 +1,36 @@
+import {
+  Body,
+  Controller,
+  Headers,
+  HttpCode,
+  Param,
+  Post,
+} from '@nestjs/common'
+import { CustomObjectsService } from './custom-objects.service'
+
+import type { SyncCustomObjectsRequest } from '../../data-ingestion-definitions/requests/sync-custom-objects-request'
+
+@Controller()
+export class CustomObjectsController {
+  constructor(private readonly customObjectsService: CustomObjectsService) {}
+
+  @Post('subscriptions/:munchkinId/customobjects/:customObjectAPIName')
+  @HttpCode(202)
+  async syncCustomObjects(
+    @Param('munchkinId') munchkinId: string,
+    @Param('customObjectAPIName') customObjectAPIName: string,
+    @Headers('X-Mkto-User-Token') xMktoUserToken: string,
+    @Body() body: SyncCustomObjectsRequest,
+    @Headers('X-Correlation-Id') xCorrelationId?: string,
+    @Headers('X-Request-Source') xRequestSource?: string,
+  ): Promise<void> {
+    return this.customObjectsService.syncCustomObjects(
+      munchkinId,
+      customObjectAPIName,
+      xMktoUserToken,
+      body,
+      xCorrelationId,
+      xRequestSource,
+    )
+  }
+}

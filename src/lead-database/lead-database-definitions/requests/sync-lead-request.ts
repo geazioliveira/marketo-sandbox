@@ -1,0 +1,27 @@
+import type { Lead } from '../models/lead'
+
+export type SyncLeadRequestAction =
+  'createOnly' | 'updateOnly' | 'createOrUpdate' | 'createDuplicate'
+
+export interface SyncLeadRequest {
+  /**
+   * Type of sync operation to perform. Defaults to createOrUpdate if unset
+   */
+  action?: SyncLeadRequestAction
+  /**
+   * If set to true, the call will return immediately
+   */
+  asyncProcessing?: boolean
+  /**
+   * List of leads for input
+   */
+  input: Array<Lead>
+  /**
+   * Field to deduplicate on. The field must be present in each lead record of the input. Defaults to email if unset
+   */
+  lookupField?: string
+  /**
+   * Name of the partition to operate on, if applicable. Should be set whenever possible, when interacting with an instance where partitions are enabled.
+   */
+  partitionName?: string
+}

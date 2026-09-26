@@ -1,0 +1,44 @@
+export type CreateLeadFieldDataType =
+  | 'boolean'
+  | 'currency'
+  | 'date'
+  | 'datetime'
+  | 'email'
+  | 'float'
+  | 'integer'
+  | 'percent'
+  | 'phone'
+  | 'score'
+  | 'string'
+  | 'url'
+
+export interface CreateLeadField {
+  /**
+   * UI display-name of the field. Must be unique, cannot contain special characters
+   */
+  displayName: string
+  /**
+   * API name of the field. Must be unique, start with a letter, and only contain letters, numbers, or underscore
+   */
+  name: string
+  /**
+   * Description of the field. Default is no description
+   */
+  description?: string
+  /**
+   * Datatype of the field
+   */
+  dataType: CreateLeadFieldDataType
+  /**
+   * If set to true, the field is hidden. Default is false
+   */
+  isHidden?: boolean
+  /**
+   * If set to true, field is encoded as HTML in email. Default is true
+   */
+  isHtmlEncodingInEmail?: boolean
+  /**
+   * If set to true, field is marked as sensitive. Default is false
+   */
+  isSensitive?: boolean
+}

@@ -1,0 +1,21 @@
+import { faker } from '@faker-js/faker'
+import { mockRequestId } from '../../../mocks/request-id'
+import type { ResponseOfLeadChange } from '../../lead-database-definitions/responses/response-of-lead-change'
+import { makeLeadChange } from './lead-change'
+
+export function makeResponseOfLeadChange(
+  overrides: Partial<ResponseOfLeadChange> = {},
+): ResponseOfLeadChange {
+  return {
+    errors: [],
+    moreResult: faker.datatype.boolean(),
+    nextPageToken: faker.lorem.word(),
+    requestId: mockRequestId(),
+    result: faker.helpers.multiple(() => makeLeadChange(), {
+      count: { min: 1, max: 3 },
+    }),
+    success: true,
+    warnings: [],
+    ...overrides,
+  }
+}

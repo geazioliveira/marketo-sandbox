@@ -1,0 +1,52 @@
+import {
+  Body,
+  Controller,
+  Headers,
+  HttpCode,
+  Param,
+  Post,
+} from '@nestjs/common'
+import { ListsService } from './lists.service'
+
+import type { ListOperationRequest } from '../../data-ingestion-definitions/requests/list-operation-request'
+
+@Controller()
+export class ListsController {
+  constructor(private readonly listsService: ListsService) {}
+
+  @Post('subscriptions/:munchkinId/lists')
+  @HttpCode(202)
+  async addToList(
+    @Param('munchkinId') munchkinId: string,
+    @Headers('X-Mkto-User-Token') xMktoUserToken: string,
+    @Body() body: ListOperationRequest,
+    @Headers('X-Correlation-Id') xCorrelationId?: string,
+    @Headers('X-Request-Source') xRequestSource?: string,
+  ): Promise<void> {
+    return this.listsService.addToList(
+      munchkinId,
+      xMktoUserToken,
+      body,
+      xCorrelationId,
+      xRequestSource,
+    )
+  }
+
+  @Post('subscriptions/:munchkinId/lists/remove')
+  @HttpCode(202)
+  async removeFromList(
+    @Param('munchkinId') munchkinId: string,
+    @Headers('X-Mkto-User-Token') xMktoUserToken: string,
+    @Body() body: ListOperationRequest,
+    @Headers('X-Correlation-Id') xCorrelationId?: string,
+    @Headers('X-Request-Source') xRequestSource?: string,
+  ): Promise<void> {
+    return this.listsService.removeFromList(
+      munchkinId,
+      xMktoUserToken,
+      body,
+      xCorrelationId,
+      xRequestSource,
+    )
+  }
+}

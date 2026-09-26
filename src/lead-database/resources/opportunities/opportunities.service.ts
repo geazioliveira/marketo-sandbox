@@ -1,0 +1,71 @@
+import { Injectable } from '@nestjs/common'
+import { makeResponseOfCustomObject } from '../../lead-database-mocks/factories/response-of-custom-object'
+import { makeResponseOfLeadField } from '../../lead-database-mocks/factories/response-of-lead-field'
+import { makeResponseOfObjectMetaData } from '../../lead-database-mocks/factories/response-of-object-meta-data'
+
+import type { ResponseOfCustomObject } from '../../lead-database-definitions/responses/response-of-custom-object'
+import type { ResponseOfLeadField } from '../../lead-database-definitions/responses/response-of-lead-field'
+import type { ResponseOfObjectMetaData } from '../../lead-database-definitions/responses/response-of-object-meta-data'
+
+@Injectable()
+export class OpportunitiesService {
+  async getOpportunityFieldByNameUsingGET(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfLeadField> {
+    return makeResponseOfLeadField()
+  }
+
+  async getOpportunityFieldsUsingGET(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfLeadField> {
+    return makeResponseOfLeadField()
+  }
+
+  async getOpportunitiesUsingGET(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfCustomObject> {
+    return makeResponseOfCustomObject()
+  }
+
+  async syncOpportunitiesUsingPOST(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfCustomObject> {
+    return makeResponseOfCustomObject()
+  }
+
+  async deleteOpportunitiesUsingPOST(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfCustomObject> {
+    return makeResponseOfCustomObject()
+  }
+
+  async describeUsingGET_4(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfObjectMetaData> {
+    return makeResponseOfObjectMetaData()
+  }
+
+  async getOpportunityRolesUsingGET(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfCustomObject> {
+    return makeResponseOfCustomObject()
+  }
+
+  async syncOpportunityRolesUsingPOST(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfCustomObject> {
+    return makeResponseOfCustomObject()
+  }
+
+  async deleteOpportunityRolesUsingPOST(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfCustomObject> {
+    return makeResponseOfCustomObject()
+  }
+
+  async describeOpportunityRoleUsingGET(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfObjectMetaData> {
+    return makeResponseOfObjectMetaData()
+  }
+}

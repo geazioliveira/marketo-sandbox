@@ -1,0 +1,16 @@
+import { faker } from '@faker-js/faker'
+import type { SyncNamedAccountListRequest } from '../../lead-database-definitions/requests/sync-named-account-list-request'
+import { makeNamedAccountList } from './named-account-list'
+
+export function makeSyncNamedAccountListRequest(
+  overrides: Partial<SyncNamedAccountListRequest> = {},
+): SyncNamedAccountListRequest {
+  return {
+    action: faker.helpers.arrayElement(['createOnly', 'updateOnly'] as const),
+    dedupeBy: faker.lorem.word(),
+    input: faker.helpers.multiple(() => makeNamedAccountList(), {
+      count: { min: 1, max: 3 },
+    }),
+    ...overrides,
+  }
+}

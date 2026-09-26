@@ -1,5 +1,5 @@
 import { faker } from '@faker-js/faker'
-import { mockRequestId } from '../request-id'
+import { mockRequestId } from '../../../mocks/request-id'
 import type { ResponseOfProgramResponse } from '../../asset-definitions/responses/response-of-program-response'
 import { makeProgramResponse } from './program-response'
 

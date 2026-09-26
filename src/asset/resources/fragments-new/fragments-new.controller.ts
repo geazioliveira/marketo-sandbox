@@ -3,6 +3,7 @@ import {
   Controller,
   Get,
   Headers,
+  HttpCode,
   Param,
   Post,
   Query,
@@ -28,6 +29,7 @@ export class FragmentsNewController {
   constructor(private readonly fragmentsNewService: FragmentsNewService) {}
 
   @Post('rest/asset/v2/fragment')
+  @HttpCode(200)
   async createContentUsingPOST_fragment(
     @Query('access_token') accessToken: string,
     @Headers('x-app-type') xAppType: 'marketo',
@@ -41,6 +43,7 @@ export class FragmentsNewController {
   }
 
   @Post('rest/asset/v2/fragment/clone')
+  @HttpCode(200)
   async cloneContentUsingPOST_fragment(
     @Query('access_token') accessToken: string,
     @Headers('x-app-type') xAppType: 'marketo',
@@ -103,6 +106,7 @@ export class FragmentsNewController {
   }
 
   @Post('rest/asset/v2/fragment/state/transition')
+  @HttpCode(200)
   async stateTransitionUsingPOST_fragment(
     @Query('access_token') accessToken: string,
     @Headers('x-app-type') xAppType: 'marketo',
@@ -116,6 +120,7 @@ export class FragmentsNewController {
   }
 
   @Post('rest/asset/v2/fragment/usedby')
+  @HttpCode(200)
   async getContentUsedByUsingPOST_fragment(
     @Query('access_token') accessToken: string,
     @Headers('x-app-type') xAppType: 'marketo',
@@ -142,6 +147,7 @@ export class FragmentsNewController {
   }
 
   @Post('rest/asset/v2/fragment/:id/delete')
+  @HttpCode(200)
   async deleteContentUsingPOST_fragment(
     @Query('access_token') accessToken: string,
     @Headers('x-app-type') xAppType: 'marketo',
@@ -155,6 +161,7 @@ export class FragmentsNewController {
   }
 
   @Post('rest/asset/v2/fragment/:id/update')
+  @HttpCode(200)
   async updateContentUsingPOST_fragment(
     @Query('access_token') accessToken: string,
     @Headers('x-app-type') xAppType: 'marketo',
@@ -170,6 +177,7 @@ export class FragmentsNewController {
   }
 
   @Post('rest/asset/v2/fragment/bulk/get')
+  @HttpCode(200)
   async bulkGetUsingPOST_fragment(
     @Query('access_token') accessToken: string,
     @Headers('x-app-type') xAppType: string,
@@ -183,6 +191,7 @@ export class FragmentsNewController {
   }
 
   @Post('rest/asset/v2/fragment/bulk/delete')
+  @HttpCode(200)
   async bulkDeleteUsingPOST_fragment(
     @Query('access_token') accessToken: string,
     @Headers('x-app-type') xAppType: string,
@@ -196,6 +205,7 @@ export class FragmentsNewController {
   }
 
   @Post('rest/asset/v2/fragment/bulk/usedby')
+  @HttpCode(200)
   async bulkUsedByUsingPOST_fragment(
     @Query('access_token') accessToken: string,
     @Headers('x-app-type') xAppType: string,

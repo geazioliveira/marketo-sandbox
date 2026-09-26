@@ -1,5 +1,5 @@
 import { faker } from '@faker-js/faker'
-import { mockRequestId } from '../request-id'
+import { mockRequestId } from '../../../mocks/request-id'
 import type { ResponseOfSnippetContentResponse } from '../../asset-definitions/responses/response-of-snippet-content-response'
 import { makeSnippetContentResponse } from './snippet-content-response'
 

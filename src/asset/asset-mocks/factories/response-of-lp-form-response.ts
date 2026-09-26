@@ -1,5 +1,5 @@
 import { faker } from '@faker-js/faker'
-import { mockRequestId } from '../request-id'
+import { mockRequestId } from '../../../mocks/request-id'
 import type { ResponseOfLpFormResponse } from '../../asset-definitions/responses/response-of-lp-form-response'
 import { makeLpFormResponse } from './lp-form-response'
 

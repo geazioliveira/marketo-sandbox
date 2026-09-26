@@ -1,0 +1,24 @@
+import { faker } from '@faker-js/faker'
+import type { SalesPerson } from '../../lead-database-definitions/models/sales-person'
+import { makeReason } from './reason'
+
+export function makeSalesPerson(
+  overrides: Partial<SalesPerson> = {},
+): SalesPerson {
+  return {
+    id: faker.number.int({ min: 1, max: 99999 }),
+    reasons: faker.helpers.multiple(() => makeReason(), {
+      count: { min: 1, max: 3 },
+    }),
+    seq: faker.number.int({ min: 1, max: 1000 }),
+    status: faker.helpers.arrayElement([
+      'created',
+      'updated',
+      'deleted',
+      'skipped',
+      'added',
+      'removed',
+    ] as const),
+    ...overrides,
+  }
+}

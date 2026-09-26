@@ -4,10 +4,10 @@ import { makeResponseOfIdResponse } from '../../asset-mocks/factories/response-o
 import { makeResponseOfProgramResponse } from '../../asset-mocks/factories/response-of-program-response'
 import { makeResponseOfSmartListResponseWithRules } from '../../asset-mocks/factories/response-of-smart-list-response-with-rules'
 
-import type { ResponseOfBrowseAllPrograms } from '../../asset-definitions/models/response-of-browse-all-programs'
+import type { ResponseOfBrowseAllPrograms } from '../../asset-definitions/responses/response-of-browse-all-programs'
 import type { ResponseOfIdResponse } from '../../asset-definitions/responses/response-of-id-response'
 import type { ResponseOfProgramResponse } from '../../asset-definitions/responses/response-of-program-response'
-import type { ResponseOfSmartListResponseWithRules } from '../../asset-definitions/models/response-of-smart-list-response-with-rules'
+import type { ResponseOfSmartListResponseWithRules } from '../../asset-definitions/responses/response-of-smart-list-response-with-rules'
 
 @Injectable()
 export class ProgramsService {

@@ -1,4 +1,12 @@
-import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common'
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  Param,
+  Post,
+  Query,
+} from '@nestjs/common'
 import { LandingPagesService } from './landing-pages.service'
 
 import type { CloneLandingPageRequest } from '../../asset-definitions/requests/clone-landing-page-request'
@@ -37,6 +45,7 @@ export class LandingPagesController {
   }
 
   @Post('rest/asset/v1/landingPage/:id.json')
+  @HttpCode(200)
   async updateLandingPageUsingPOST(
     @Param('id') id: number,
     @Body() updateLandingPageRequest: UpdateLandingPageRequest,
@@ -48,6 +57,7 @@ export class LandingPagesController {
   }
 
   @Post('rest/asset/v1/landingPage/:id/approveDraft.json')
+  @HttpCode(200)
   async approveLandingPageUsingPOST(
     @Param('id') id: number,
   ): Promise<ResponseOfIdResponse> {
@@ -55,6 +65,7 @@ export class LandingPagesController {
   }
 
   @Post('rest/asset/v1/landingPage/:id/clone.json')
+  @HttpCode(200)
   async cloneLandingPageUsingPOST(
     @Param('id') id: number,
     @Body() cloneLandingPageRequest: CloneLandingPageRequest,
@@ -66,6 +77,7 @@ export class LandingPagesController {
   }
 
   @Post('rest/asset/v1/landingPage/:id/delete.json')
+  @HttpCode(200)
   async deleteLandingPageByIdUsingPOST(
     @Param('id') id: number,
   ): Promise<ResponseOfIdResponse> {
@@ -73,6 +85,7 @@ export class LandingPagesController {
   }
 
   @Post('rest/asset/v1/landingPage/:id/discardDraft.json')
+  @HttpCode(200)
   async discardLandingPageByIdUsingPOST(
     @Param('id') id: number,
   ): Promise<ResponseOfIdResponse> {
@@ -80,6 +93,7 @@ export class LandingPagesController {
   }
 
   @Post('rest/asset/v1/landingPage/:id/unapprove.json')
+  @HttpCode(200)
   async unapproveLandingPageByIdUsingPOST(
     @Param('id') id: number,
   ): Promise<ResponseOfLandingPageResponse> {
@@ -87,6 +101,7 @@ export class LandingPagesController {
   }
 
   @Post('rest/asset/v1/landingPage/:id/variable/:variableId.json')
+  @HttpCode(200)
   async updateLandingPageVariableUsingPOST(
     @Param('id') id: number,
     @Param('variableId') variableId: string,
@@ -123,6 +138,7 @@ export class LandingPagesController {
   }
 
   @Post('rest/asset/v1/landingPages.json')
+  @HttpCode(200)
   async createLandingPageUsingPOST(
     @Body() createLandingPageRequest: CreateLandingPageRequest,
   ): Promise<ResponseOfLandingPageResponse> {

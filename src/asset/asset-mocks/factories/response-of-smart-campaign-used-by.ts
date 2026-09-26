@@ -1,6 +1,6 @@
 import { faker } from '@faker-js/faker'
-import { mockRequestId } from '../request-id'
-import type { ResponseOfSmartCampaignUsedBy } from '../../asset-definitions/models/response-of-smart-campaign-used-by'
+import { mockRequestId } from '../../../mocks/request-id'
+import type { ResponseOfSmartCampaignUsedBy } from '../../asset-definitions/responses/response-of-smart-campaign-used-by'
 import { makeSmartCampaignUsedBy } from './smart-campaign-used-by'
 
 export function makeResponseOfSmartCampaignUsedBy(

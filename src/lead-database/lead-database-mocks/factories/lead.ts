@@ -1,0 +1,14 @@
+import { faker } from '@faker-js/faker'
+import type { Lead } from '../../lead-database-definitions/models/lead'
+import { makeProgramMembership } from './program-membership'
+import { makeReason } from './reason'
+
+export function makeLead(overrides: Partial<Lead> = {}): Lead {
+  return {
+    id: faker.number.int({ min: 1, max: 99999 }),
+    membership: makeProgramMembership(),
+    reason: makeReason(),
+    status: faker.lorem.word(),
+    ...overrides,
+  }
+}

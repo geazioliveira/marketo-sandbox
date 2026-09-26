@@ -1,5 +1,5 @@
 import { faker } from '@faker-js/faker'
-import { mockRequestId } from '../request-id'
+import { mockRequestId } from '../../../mocks/request-id'
 import type { ResponseOfEmailContentResponse } from '../../asset-definitions/responses/response-of-email-content-response'
 import { makeEmailContentResponse } from './email-content-response'
 

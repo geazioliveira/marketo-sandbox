@@ -1,5 +1,5 @@
 import { faker } from '@faker-js/faker'
-import { mockRequestId } from '../request-id'
+import { mockRequestId } from '../../../mocks/request-id'
 import type { ResponseOfFormVisibilityRuleResponse } from '../../asset-definitions/responses/response-of-form-visibility-rule-response'
 import { makeFormVisibilityRuleResponse } from './form-visibility-rule-response'
 

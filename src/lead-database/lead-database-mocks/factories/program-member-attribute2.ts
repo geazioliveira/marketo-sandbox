@@ -1,0 +1,26 @@
+import { faker } from '@faker-js/faker'
+import type { ProgramMemberAttribute2 } from '../../lead-database-definitions/models/program-member-attribute2'
+import { makeLeadAttribute2Fields2 } from './lead-attribute2-fields2'
+import { makeLeadAttribute2SearchableFields } from './lead-attribute2-searchable-fields'
+
+export function makeProgramMemberAttribute2(
+  overrides: Partial<ProgramMemberAttribute2> = {},
+): ProgramMemberAttribute2 {
+  return {
+    name: faker.lorem.words({ min: 2, max: 3 }),
+    description: faker.lorem.sentence(),
+    createdAt: faker.date.recent().toISOString(),
+    updatedAt: faker.date.recent().toISOString(),
+    dedupeFields: faker.helpers.multiple(() => faker.lorem.word(), {
+      count: { min: 1, max: 3 },
+    }),
+    searchableFields: faker.helpers.multiple(
+      () => makeLeadAttribute2SearchableFields(),
+      { count: { min: 1, max: 3 } },
+    ),
+    fields: faker.helpers.multiple(() => makeLeadAttribute2Fields2(), {
+      count: { min: 1, max: 3 },
+    }),
+    ...overrides,
+  }
+}

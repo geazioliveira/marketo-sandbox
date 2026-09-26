@@ -1,0 +1,22 @@
+import { faker } from '@faker-js/faker'
+import type { ExportProgramMemberFilter } from '../../lead-database-definitions/models/export-program-member-filter'
+import { makeDateRange } from './date-range'
+
+export function makeExportProgramMemberFilter(
+  overrides: Partial<ExportProgramMemberFilter> = {},
+): ExportProgramMemberFilter {
+  return {
+    programId: faker.number.int({ min: 1, max: 99999 }),
+    programIds: faker.helpers.multiple(
+      () => faker.number.int({ min: 1, max: 1000 }),
+      { count: { min: 1, max: 3 } },
+    ),
+    isExhausted: faker.datatype.boolean(),
+    nurtureCadence: faker.helpers.arrayElement(['paused', 'normal'] as const),
+    statusNames: faker.helpers.multiple(() => faker.lorem.word(), {
+      count: { min: 1, max: 3 },
+    }),
+    updatedAt: makeDateRange(),
+    ...overrides,
+  }
+}

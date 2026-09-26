@@ -1,0 +1,21 @@
+import { faker } from '@faker-js/faker'
+import { mockRequestId } from '../../../mocks/request-id'
+import type { ResponseOfUsageData } from '../../lead-database-definitions/responses/response-of-usage-data'
+import { makeUsageData } from './usage-data'
+
+export function makeResponseOfUsageData(
+  overrides: Partial<ResponseOfUsageData> = {},
+): ResponseOfUsageData {
+  return {
+    errors: [],
+    moreResult: faker.datatype.boolean(),
+    nextPageToken: faker.lorem.word(),
+    requestId: mockRequestId(),
+    result: faker.helpers.multiple(() => makeUsageData(), {
+      count: { min: 1, max: 3 },
+    }),
+    success: true,
+    warnings: [],
+    ...overrides,
+  }
+}

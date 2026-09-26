@@ -1,0 +1,24 @@
+export interface ImportLeadResponse {
+  /**
+   * Unique integer id of the import batch
+   */
+  batchId: number
+  importId?: string
+  message?: string
+  /**
+   * Number of rows processed so far
+   */
+  numOfLeadsProcessed: number
+  /**
+   * Number of rows failed so far
+   */
+  numOfRowsFailed?: number
+  /**
+   * Number of rows with a warning so far
+   */
+  numOfRowsWithWarning?: number
+  /**
+   * Status of the batch
+   */
+  status: string
+}

@@ -1,0 +1,20 @@
+export type ResponseOfIdentityTokenType = 'bearer'
+
+export interface ResponseOfIdentity {
+  /**
+   * The token that you pass with subsequent calls to authenticate with the target instance
+   */
+  access_token: string
+  /**
+   * The owning API-only user of the custom service that was used to authenticate
+   */
+  scope: string
+  /**
+   * Remaining lifespan of the current token in seconds
+   */
+  expires_in: number
+  /**
+   * The OAuth authentication method
+   */
+  token_type: ResponseOfIdentityTokenType
+}

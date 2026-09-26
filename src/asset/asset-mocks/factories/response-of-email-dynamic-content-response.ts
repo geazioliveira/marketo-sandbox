@@ -1,5 +1,5 @@
 import { faker } from '@faker-js/faker'
-import { mockRequestId } from '../request-id'
+import { mockRequestId } from '../../../mocks/request-id'
 import type { ResponseOfEmailDynamicContentResponse } from '../../asset-definitions/responses/response-of-email-dynamic-content-response'
 import { makeEmailDynamicContentResponse } from './email-dynamic-content-response'
 

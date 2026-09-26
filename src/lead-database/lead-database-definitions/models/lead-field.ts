@@ -1,0 +1,42 @@
+export interface LeadField {
+  /**
+   * UI display-name of the field
+   */
+  displayName: string
+  /**
+   * API name of the field
+   */
+  name: string
+  /**
+   * Description of the field
+   */
+  description: string
+  /**
+   * Datatype of the field
+   */
+  dataType: string
+  /**
+   * Max length of the field. Only applicable to text, string, and text area.
+   */
+  length?: number
+  /**
+   * If set to true, the field is hidden
+   */
+  isHidden: boolean
+  /**
+   * If set to true, field is encoded as HTML in email
+   */
+  isHtmlEncodingInEmail: boolean
+  /**
+   * If set to true, field is marked as sensitive
+   */
+  isSensitive: boolean
+  /**
+   * If set to true, field is custom
+   */
+  isCustom: boolean
+  /**
+   * If set to true, field was created using REST API
+   */
+  isApiCreated: boolean
+}

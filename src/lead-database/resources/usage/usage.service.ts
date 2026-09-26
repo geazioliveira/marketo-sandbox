@@ -1,0 +1,33 @@
+import { Injectable } from '@nestjs/common'
+import { makeResponseOfErrorsData } from '../../lead-database-mocks/factories/response-of-errors-data'
+import { makeResponseOfUsageData } from '../../lead-database-mocks/factories/response-of-usage-data'
+
+import type { ResponseOfErrorsData } from '../../lead-database-definitions/responses/response-of-errors-data'
+import type { ResponseOfUsageData } from '../../lead-database-definitions/responses/response-of-usage-data'
+
+@Injectable()
+export class UsageService {
+  async getDailyErrorsUsingGET(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfErrorsData> {
+    return makeResponseOfErrorsData()
+  }
+
+  async getLast7DaysErrorsUsingGET(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfErrorsData> {
+    return makeResponseOfErrorsData()
+  }
+
+  async getDailyUsageUsingGET(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfUsageData> {
+    return makeResponseOfUsageData()
+  }
+
+  async getLast7DaysUsageUsingGET(
+    ..._arguments: unknown[]
+  ): Promise<ResponseOfUsageData> {
+    return makeResponseOfUsageData()
+  }
+}

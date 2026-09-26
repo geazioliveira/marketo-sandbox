@@ -1,0 +1,29 @@
+import { faker } from '@faker-js/faker'
+import type { NamedAccountList } from '../../lead-database-definitions/models/named-account-list'
+import { makeReason } from './reason'
+
+export function makeNamedAccountList(
+  overrides: Partial<NamedAccountList> = {},
+): NamedAccountList {
+  return {
+    createdAt: faker.date.recent().toISOString(),
+    marketoGUID: faker.lorem.word(),
+    name: faker.lorem.words({ min: 2, max: 3 }),
+    reasons: faker.helpers.multiple(() => makeReason(), {
+      count: { min: 1, max: 3 },
+    }),
+    seq: faker.number.int({ min: 1, max: 1000 }),
+    status: faker.helpers.arrayElement([
+      'created',
+      'updated',
+      'deleted',
+      'skipped',
+      'added',
+      'removed',
+    ] as const),
+    type: faker.lorem.word(),
+    updateable: faker.datatype.boolean(),
+    updatedAt: faker.date.recent().toISOString(),
+    ...overrides,
+  }
+}

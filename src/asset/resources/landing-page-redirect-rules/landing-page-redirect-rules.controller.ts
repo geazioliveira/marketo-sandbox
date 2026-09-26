@@ -1,10 +1,18 @@
-import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common'
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  Param,
+  Post,
+  Query,
+} from '@nestjs/common'
 import { LandingPageRedirectRulesService } from './landing-page-redirect-rules.service'
 
 import type { CreateLandingPageRedirectRuleRequest } from '../../asset-definitions/requests/create-landing-page-redirect-rule-request'
 import type { ResponseOfIdResponse } from '../../asset-definitions/responses/response-of-id-response'
-import type { ResponseOfLandingPageDomains } from '../../asset-definitions/models/response-of-landing-page-domains'
-import type { ResponseOfLandingPageRedirectRules } from '../../asset-definitions/models/response-of-landing-page-redirect-rules'
+import type { ResponseOfLandingPageDomains } from '../../asset-definitions/responses/response-of-landing-page-domains'
+import type { ResponseOfLandingPageRedirectRules } from '../../asset-definitions/responses/response-of-landing-page-redirect-rules'
 import type { UpdateLandingPageRedirectRuleRequest } from '../../asset-definitions/requests/update-landing-page-redirect-rule-request'
 
 @Controller()
@@ -33,6 +41,7 @@ export class LandingPageRedirectRulesController {
   }
 
   @Post('rest/asset/v1/redirectRules.json')
+  @HttpCode(200)
   async createLandingPageRedirectRuleUsingPOST(
     @Body()
     createLandingPageRedirectRuleRequest: CreateLandingPageRedirectRuleRequest,
@@ -52,6 +61,7 @@ export class LandingPageRedirectRulesController {
   }
 
   @Post('rest/asset/v1/redirectRule/:id.json')
+  @HttpCode(200)
   async updateLandingPageRedirectRuleUsingPOST(
     @Param('id') id: number,
     @Body()
@@ -64,6 +74,7 @@ export class LandingPageRedirectRulesController {
   }
 
   @Post('rest/asset/v1/redirectRule/:id/delete.json')
+  @HttpCode(200)
   async deleteLandingPageRedirectRuleUsingPOST(
     @Param('id') id: number,
   ): Promise<ResponseOfIdResponse> {

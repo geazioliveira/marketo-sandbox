@@ -1,6 +1,6 @@
 import { faker } from '@faker-js/faker'
-import { mockRequestId } from '../request-id'
-import type { ResponseOfTagResponseGetAll } from '../../asset-definitions/models/response-of-tag-response-get-all'
+import { mockRequestId } from '../../../mocks/request-id'
+import type { ResponseOfTagResponseGetAll } from '../../asset-definitions/responses/response-of-tag-response-get-all'
 import { makeTagResponseGetAll } from './tag-response-get-all'
 
 export function makeResponseOfTagResponseGetAll(

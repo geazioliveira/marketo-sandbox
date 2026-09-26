@@ -1,0 +1,15 @@
+import { faker } from '@faker-js/faker'
+import type { DeleteCompanyRequest } from '../../lead-database-definitions/requests/delete-company-request'
+import { makeCompany } from './company'
+
+export function makeDeleteCompanyRequest(
+  overrides: Partial<DeleteCompanyRequest> = {},
+): DeleteCompanyRequest {
+  return {
+    deleteBy: faker.lorem.word(),
+    input: faker.helpers.multiple(() => makeCompany(), {
+      count: { min: 1, max: 3 },
+    }),
+    ...overrides,
+  }
+}

@@ -1,0 +1,19 @@
+import { faker } from '@faker-js/faker'
+import type { ImportCustomObjectResponse } from '../../lead-database-definitions/responses/import-custom-object-response'
+
+export function makeImportCustomObjectResponse(
+  overrides: Partial<ImportCustomObjectResponse> = {},
+): ImportCustomObjectResponse {
+  return {
+    batchId: faker.number.int({ min: 1, max: 99999 }),
+    importTime: faker.lorem.word(),
+    message: faker.lorem.sentence(),
+    numOfObjectsProcessed: faker.number.int({ min: 1, max: 1000 }),
+    numOfRowsFailed: faker.number.int({ min: 1, max: 1000 }),
+    numOfRowsWithWarning: faker.number.int({ min: 1, max: 1000 }),
+    objectApiName: faker.lorem.words({ min: 2, max: 3 }),
+    operation: faker.lorem.word(),
+    status: faker.lorem.word(),
+    ...overrides,
+  }
+}

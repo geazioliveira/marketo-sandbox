@@ -2,7 +2,7 @@ import { Controller, Get, Query } from '@nestjs/common'
 import { TagsService } from './tags.service'
 
 import type { ResponseOfTagResponse } from '../../asset-definitions/responses/response-of-tag-response'
-import type { ResponseOfTagResponseGetAll } from '../../asset-definitions/models/response-of-tag-response-get-all'
+import type { ResponseOfTagResponseGetAll } from '../../asset-definitions/responses/response-of-tag-response-get-all'
 
 @Controller()
 export class TagsController {

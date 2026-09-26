@@ -1,5 +1,5 @@
 import { faker } from '@faker-js/faker'
-import { mockRequestId } from '../request-id'
+import { mockRequestId } from '../../../mocks/request-id'
 import type { FragmentNewResponse } from '../../asset-definitions/responses/fragment-new-response'
 import { makeFragmentDetailDTO } from './fragment-detail-dto'
 

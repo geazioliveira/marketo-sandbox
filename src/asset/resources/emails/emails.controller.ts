@@ -1,4 +1,12 @@
-import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common'
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  Param,
+  Post,
+  Query,
+} from '@nestjs/common'
 import { EmailsService } from './emails.service'
 
 import type { CloneEmailRequest } from '../../asset-definitions/requests/clone-email-request'
@@ -43,6 +51,7 @@ export class EmailsController {
   }
 
   @Post('rest/asset/v1/email/:id.json')
+  @HttpCode(200)
   async updateEmailUsingPOST(
     @Param('id') id: number,
     @Body() updateEmailRequest: UpdateEmailMetaDataRequest,
@@ -51,6 +60,7 @@ export class EmailsController {
   }
 
   @Post('rest/asset/v1/email/:id/approveDraft.json')
+  @HttpCode(200)
   async approveDraftUsingPOST(
     @Param('id') id: number,
   ): Promise<ResponseOfIdResponse> {
@@ -58,6 +68,7 @@ export class EmailsController {
   }
 
   @Post('rest/asset/v1/email/:id/clone.json')
+  @HttpCode(200)
   async cloneEmailUsingPOST(
     @Param('id') id: number,
     @Body() cloneEmailRequest: CloneEmailRequest,
@@ -74,6 +85,7 @@ export class EmailsController {
   }
 
   @Post('rest/asset/v1/email/:id/content.json')
+  @HttpCode(200)
   async updateEmailContentUsingPOST(
     @Param('id') id: number,
     @Body() updateEmailRequest: UpdateEmailComponentDataRequest,
@@ -85,6 +97,7 @@ export class EmailsController {
   }
 
   @Post('rest/asset/v1/email/:id/content/rearrange.json')
+  @HttpCode(200)
   async rearrangeModulesUsingPOST(
     @Param('id') id: number,
     @Body() positions?: string,
@@ -93,6 +106,7 @@ export class EmailsController {
   }
 
   @Post('rest/asset/v1/email/:id/content/:htmlId.json')
+  @HttpCode(200)
   async updateEmailComponentContentUsingPOST(
     @Param('id') id: number,
     @Param('htmlId') htmlId: string,
@@ -106,6 +120,7 @@ export class EmailsController {
   }
 
   @Post('rest/asset/v1/email/:id/content/:moduleId/add.json')
+  @HttpCode(200)
   async addModuleUsingPOST(
     @Param('id') id: number,
     @Param('moduleId') moduleId: string,
@@ -116,6 +131,7 @@ export class EmailsController {
   }
 
   @Post('rest/asset/v1/email/:id/content/:moduleId/delete.json')
+  @HttpCode(200)
   async deleteModuleUsingPOST(
     @Param('id') id: number,
     @Param('moduleId') moduleId: string,
@@ -124,6 +140,7 @@ export class EmailsController {
   }
 
   @Post('rest/asset/v1/email/:id/content/:moduleId/duplicate.json')
+  @HttpCode(200)
   async duplicateModuleUsingPOST(
     @Param('id') id: number,
     @Param('moduleId') moduleId: string,
@@ -133,6 +150,7 @@ export class EmailsController {
   }
 
   @Post('rest/asset/v1/email/:id/content/:moduleId/rename.json')
+  @HttpCode(200)
   async renameUsingPOST(
     @Param('id') id: number,
     @Param('moduleId') moduleId: string,
@@ -142,6 +160,7 @@ export class EmailsController {
   }
 
   @Post('rest/asset/v1/email/:id/delete.json')
+  @HttpCode(200)
   async deleteEmailUsingPOST(
     @Param('id') id: number,
   ): Promise<ResponseOfIdResponse> {
@@ -149,6 +168,7 @@ export class EmailsController {
   }
 
   @Post('rest/asset/v1/email/:id/discardDraft.json')
+  @HttpCode(200)
   async discardDraftUsingPOST(
     @Param('id') id: number,
   ): Promise<ResponseOfIdResponse> {
@@ -169,6 +189,7 @@ export class EmailsController {
   }
 
   @Post('rest/asset/v1/email/:id/dynamicContent/:contentId.json')
+  @HttpCode(200)
   async updateEmailDynamicContentUsingPOST(
     @Param('id') id: number,
     @Param('contentId') contentId: string,
@@ -182,6 +203,7 @@ export class EmailsController {
   }
 
   @Post('rest/asset/v1/email/:id/sendSample.json')
+  @HttpCode(200)
   async sendSampleEmailUsingPOST(
     @Param('id') id: number,
     @Body() sendSampleEmailRequest: SendSampleEmailRequest,
@@ -193,6 +215,7 @@ export class EmailsController {
   }
 
   @Post('rest/asset/v1/email/:id/unapprove.json')
+  @HttpCode(200)
   async unapproveDraftUsingPOST(
     @Param('id') id: number,
   ): Promise<ResponseOfIdResponse> {
@@ -200,6 +223,7 @@ export class EmailsController {
   }
 
   @Post('rest/asset/v1/email/:id/variable/:name.json')
+  @HttpCode(200)
   async updateVariableUsingPOST(
     @Param('id') id: number,
     @Param('name') name: string,
@@ -244,6 +268,7 @@ export class EmailsController {
   }
 
   @Post('rest/asset/v1/emails.json')
+  @HttpCode(200)
   async createEmailUsingPOST(
     @Body() createEmailRequest: CreateEmailRequest,
   ): Promise<ResponseOfEmailResponse> {
@@ -266,6 +291,7 @@ export class EmailsController {
   }
 
   @Post('rest/asset/v1/email/:id/fullContent.json')
+  @HttpCode(200)
   async createEmailFullContentUsingPOST(
     @Param('id') id: number,
     @Body() updateEmailFullContentRequest: UpdateEmailFullContentRequest,

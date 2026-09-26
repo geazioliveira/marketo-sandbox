@@ -1,7 +1,7 @@
 import { NestFactory } from '@nestjs/core'
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger'
 import { AppModule, ObserveInstrument } from './app.module'
-import { seedMockData } from './asset/asset-mocks'
+import { seedMockData } from './mocks'
 
 async function bootstrap() {
   seedMockData()

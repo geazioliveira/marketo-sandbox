@@ -1,5 +1,5 @@
 import { faker } from '@faker-js/faker'
-import { mockRequestId } from '../request-id'
+import { mockRequestId } from '../../../mocks/request-id'
 import type { ResponseOfGetLandingPageFullContentResponse } from '../../asset-definitions/responses/response-of-get-landing-page-full-content-response'
 import { makeGetLandingPageFullContentResponse } from './get-landing-page-full-content-response'
 

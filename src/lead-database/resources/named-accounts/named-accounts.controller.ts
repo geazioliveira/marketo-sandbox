@@ -1,0 +1,83 @@
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  Param,
+  Post,
+  Query,
+} from '@nestjs/common'
+import { NamedAccountsService } from './named-accounts.service'
+
+import type { DeleteNamedAccountRequest } from '../../lead-database-definitions/requests/delete-named-account-request'
+import type { ResponseOfLeadField } from '../../lead-database-definitions/responses/response-of-lead-field'
+import type { ResponseOfNamedAccount } from '../../lead-database-definitions/responses/response-of-named-account'
+import type { ResponseOfObjectMetaData } from '../../lead-database-definitions/responses/response-of-object-meta-data'
+import type { SyncNamedAccountRequest } from '../../lead-database-definitions/requests/sync-named-account-request'
+
+@Controller()
+export class NamedAccountsController {
+  constructor(private readonly namedAccountsService: NamedAccountsService) {}
+
+  @Get('rest/v1/namedaccounts/schema/fields/:fieldApiName.json')
+  async getNamedAccountFieldByNameUsingGET(
+    @Param('fieldApiName') fieldApiName: string,
+  ): Promise<ResponseOfLeadField> {
+    return this.namedAccountsService.getNamedAccountFieldByNameUsingGET(
+      fieldApiName,
+    )
+  }
+
+  @Get('rest/v1/namedaccounts/schema/fields.json')
+  async getNamedAccountFieldsUsingGET(
+    @Query('batchSize') batchSize?: number,
+    @Query('nextPageToken') nextPageToken?: string,
+  ): Promise<ResponseOfLeadField> {
+    return this.namedAccountsService.getNamedAccountFieldsUsingGET(
+      batchSize,
+      nextPageToken,
+    )
+  }
+
+  @Get('rest/v1/namedaccounts.json')
+  async getNamedAccountsUsingGET(
+    @Query('filterType') filterType: string,
+    @Query('filterValues') filterValues: Array<string>,
+    @Query('fields') fields?: Array<string>,
+    @Query('batchSize') batchSize?: number,
+    @Query('nextPageToken') nextPageToken?: string,
+  ): Promise<ResponseOfNamedAccount> {
+    return this.namedAccountsService.getNamedAccountsUsingGET(
+      filterType,
+      filterValues,
+      fields,
+      batchSize,
+      nextPageToken,
+    )
+  }
+
+  @Post('rest/v1/namedaccounts.json')
+  @HttpCode(200)
+  async syncNamedAccountsUsingPOST(
+    @Body() syncAccountRequest: SyncNamedAccountRequest,
+  ): Promise<ResponseOfNamedAccount> {
+    return this.namedAccountsService.syncNamedAccountsUsingPOST(
+      syncAccountRequest,
+    )
+  }
+
+  @Post('rest/v1/namedaccounts/delete.json')
+  @HttpCode(200)
+  async deleteNamedAccountsUsingPOST(
+    @Body() deleteAccountRequest: DeleteNamedAccountRequest,
+  ): Promise<ResponseOfNamedAccount> {
+    return this.namedAccountsService.deleteNamedAccountsUsingPOST(
+      deleteAccountRequest,
+    )
+  }
+
+  @Get('rest/v1/namedaccounts/describe.json')
+  async describeUsingGET_3(): Promise<ResponseOfObjectMetaData> {
+    return this.namedAccountsService.describeUsingGET_3()
+  }
+}

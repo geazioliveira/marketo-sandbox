@@ -1,0 +1,15 @@
+import { faker } from '@faker-js/faker'
+import type { DeleteSalesPersonRequest } from '../../lead-database-definitions/requests/delete-sales-person-request'
+import { makeSalesPerson } from './sales-person'
+
+export function makeDeleteSalesPersonRequest(
+  overrides: Partial<DeleteSalesPersonRequest> = {},
+): DeleteSalesPersonRequest {
+  return {
+    deleteBy: faker.lorem.word(),
+    input: faker.helpers.multiple(() => makeSalesPerson(), {
+      count: { min: 1, max: 3 },
+    }),
+    ...overrides,
+  }
+}

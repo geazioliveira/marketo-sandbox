@@ -1,4 +1,4 @@
-import { Body, Controller, Param, Post } from '@nestjs/common'
+import { Body, Controller, HttpCode, Param, Post } from '@nestjs/common'
 import { FileContentsService } from './file-contents.service'
 
 import type { ResponseOfFileResponse } from '../../asset-definitions/responses/response-of-file-response'
@@ -9,6 +9,7 @@ export class FileContentsController {
   constructor(private readonly fileContentsService: FileContentsService) {}
 
   @Post('rest/asset/v1/file/:id/content.json')
+  @HttpCode(200)
   async updateContentUsingPOST(
     @Param('id') id: number,
     @Body() request: UpdateFileContentRequest,

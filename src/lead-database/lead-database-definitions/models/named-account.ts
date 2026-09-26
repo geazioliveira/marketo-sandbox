@@ -1,0 +1,20 @@
+import type { Reason } from './reason'
+
+export type NamedAccountStatus =
+  'created' | 'updated' | 'deleted' | 'skipped' | 'added' | 'removed'
+
+export interface NamedAccount {
+  /**
+   * Unique GUID of the custom object records
+   */
+  marketoGUID: string
+  /**
+   * List of reasons why an operation did not succeed. Reasons are only present in API responses and should not be submitted
+   */
+  reasons?: Array<Reason>
+  /**
+   * Integer indicating the sequence of the record in response. This value is correlated to the order of the records included in the request input. Seq should only be part of responses and should not be submitted.
+   */
+  seq: number
+  status?: NamedAccountStatus
+}

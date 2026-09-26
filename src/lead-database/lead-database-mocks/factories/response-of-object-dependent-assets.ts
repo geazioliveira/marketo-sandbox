@@ -1,0 +1,19 @@
+import { faker } from '@faker-js/faker'
+import { mockRequestId } from '../../../mocks/request-id'
+import type { ResponseOfObjectDependentAssets } from '../../lead-database-definitions/responses/response-of-object-dependent-assets'
+import { makeObjectDependentAsset } from './object-dependent-asset'
+
+export function makeResponseOfObjectDependentAssets(
+  overrides: Partial<ResponseOfObjectDependentAssets> = {},
+): ResponseOfObjectDependentAssets {
+  return {
+    errors: [],
+    requestId: mockRequestId(),
+    result: faker.helpers.multiple(() => makeObjectDependentAsset(), {
+      count: { min: 1, max: 3 },
+    }),
+    success: true,
+    warnings: [],
+    ...overrides,
+  }
+}

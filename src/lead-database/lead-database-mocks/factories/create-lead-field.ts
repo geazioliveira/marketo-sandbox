@@ -1,0 +1,30 @@
+import { faker } from '@faker-js/faker'
+import type { CreateLeadField } from '../../lead-database-definitions/models/create-lead-field'
+
+export function makeCreateLeadField(
+  overrides: Partial<CreateLeadField> = {},
+): CreateLeadField {
+  return {
+    displayName: faker.lorem.words({ min: 2, max: 3 }),
+    name: faker.lorem.words({ min: 2, max: 3 }),
+    description: faker.lorem.sentence(),
+    dataType: faker.helpers.arrayElement([
+      'boolean',
+      'currency',
+      'date',
+      'datetime',
+      'email',
+      'float',
+      'integer',
+      'percent',
+      'phone',
+      'score',
+      'string',
+      'url',
+    ] as const),
+    isHidden: faker.datatype.boolean(),
+    isHtmlEncodingInEmail: faker.datatype.boolean(),
+    isSensitive: faker.datatype.boolean(),
+    ...overrides,
+  }
+}

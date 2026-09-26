@@ -1,0 +1,135 @@
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  Param,
+  Post,
+  Query,
+} from '@nestjs/common'
+import { ProgramMembersService } from './program-members.service'
+
+import type { CreateLeadFieldRequest } from '../../lead-database-definitions/requests/create-lead-field-request'
+import type { DeleteProgramMemberRequest } from '../../lead-database-definitions/requests/delete-program-member-request'
+import type { ResponseOfCreateLeadField } from '../../lead-database-definitions/responses/response-of-create-lead-field'
+import type { ResponseOfLeadField } from '../../lead-database-definitions/responses/response-of-lead-field'
+import type { ResponseOfProgramMember } from '../../lead-database-definitions/responses/response-of-program-member'
+import type { ResponseOfProgramMemberAttributes2 } from '../../lead-database-definitions/responses/response-of-program-member-attributes2'
+import type { ResponseOfProgramMemberData } from '../../lead-database-definitions/responses/response-of-program-member-data'
+import type { ResponseOfProgramMemberDelete } from '../../lead-database-definitions/responses/response-of-program-member-delete'
+import type { ResponseOfProgramMemberStatus } from '../../lead-database-definitions/responses/response-of-program-member-status'
+import type { ResponseOfUpdateLeadField } from '../../lead-database-definitions/responses/response-of-update-lead-field'
+import type { SyncProgramMemberDataRequest } from '../../lead-database-definitions/requests/sync-program-member-data-request'
+import type { SyncProgramMemberStatusRequest } from '../../lead-database-definitions/requests/sync-program-member-status-request'
+import type { UpdateLeadFieldRequest } from '../../lead-database-definitions/requests/update-lead-field-request'
+
+@Controller()
+export class ProgramMembersController {
+  constructor(private readonly programMembersService: ProgramMembersService) {}
+
+  @Get('rest/v1/programs/members/schema/fields/:fieldApiName.json')
+  async getProgramMemberFieldByNameUsingGET(
+    @Param('fieldApiName') fieldApiName: string,
+  ): Promise<ResponseOfLeadField> {
+    return this.programMembersService.getProgramMemberFieldByNameUsingGET(
+      fieldApiName,
+    )
+  }
+
+  @Post('rest/v1/programs/members/schema/fields/:fieldApiName.json')
+  @HttpCode(200)
+  async updateProgramMemberFieldUsingPOST(
+    @Param('fieldApiName') fieldApiName: string,
+    @Body() updateLeadFieldRequest: UpdateLeadFieldRequest,
+  ): Promise<ResponseOfUpdateLeadField> {
+    return this.programMembersService.updateProgramMemberFieldUsingPOST(
+      fieldApiName,
+      updateLeadFieldRequest,
+    )
+  }
+
+  @Get('rest/v1/programs/members/schema/fields.json')
+  async getProgramMemberFieldsUsingGET(
+    @Query('batchSize') batchSize?: number,
+    @Query('nextPageToken') nextPageToken?: string,
+  ): Promise<ResponseOfLeadField> {
+    return this.programMembersService.getProgramMemberFieldsUsingGET(
+      batchSize,
+      nextPageToken,
+    )
+  }
+
+  @Post('rest/v1/programs/members/schema/fields.json')
+  @HttpCode(200)
+  async createProgramMemberFieldUsingPOST(
+    @Body() createLeadFieldRequest: CreateLeadFieldRequest,
+  ): Promise<ResponseOfCreateLeadField> {
+    return this.programMembersService.createProgramMemberFieldUsingPOST(
+      createLeadFieldRequest,
+    )
+  }
+
+  @Post('rest/v1/programs/:programId/members/status.json')
+  @HttpCode(200)
+  async syncProgramMemberStatusUsingPOST(
+    @Param('programId') programId: number,
+    @Body() syncProgramMemberStatusRequest: SyncProgramMemberStatusRequest,
+  ): Promise<ResponseOfProgramMemberStatus> {
+    return this.programMembersService.syncProgramMemberStatusUsingPOST(
+      programId,
+      syncProgramMemberStatusRequest,
+    )
+  }
+
+  @Get('rest/v1/programs/:programId/members.json')
+  async getProgramMembersUsingGET(
+    @Param('programId') programId: number,
+    @Query('filterType') filterType: string,
+    @Query('filterValues') filterValues: Array<string>,
+    @Query('startAt') startAt?: string,
+    @Query('endAt') endAt?: string,
+    @Query('fields') fields?: Array<string>,
+    @Query('batchSize') batchSize?: number,
+    @Query('nextPageToken') nextPageToken?: string,
+  ): Promise<ResponseOfProgramMember> {
+    return this.programMembersService.getProgramMembersUsingGET(
+      programId,
+      filterType,
+      filterValues,
+      startAt,
+      endAt,
+      fields,
+      batchSize,
+      nextPageToken,
+    )
+  }
+
+  @Post('rest/v1/programs/:programId/members.json')
+  @HttpCode(200)
+  async syncProgramMemberDataUsingPOST(
+    @Param('programId') programId: number,
+    @Body() syncProgramMemberDataRequest: SyncProgramMemberDataRequest,
+  ): Promise<ResponseOfProgramMemberData> {
+    return this.programMembersService.syncProgramMemberDataUsingPOST(
+      programId,
+      syncProgramMemberDataRequest,
+    )
+  }
+
+  @Post('rest/v1/programs/:programId/members/delete.json')
+  @HttpCode(200)
+  async deleteProgramMemberUsingPOST(
+    @Param('programId') programId: number,
+    @Body() deleteProgramMemberRequest: DeleteProgramMemberRequest,
+  ): Promise<ResponseOfProgramMemberDelete> {
+    return this.programMembersService.deleteProgramMemberUsingPOST(
+      programId,
+      deleteProgramMemberRequest,
+    )
+  }
+
+  @Get('rest/v1/programs/members/describe.json')
+  async describeProgramMemberUsingGET2(): Promise<ResponseOfProgramMemberAttributes2> {
+    return this.programMembersService.describeProgramMemberUsingGET2()
+  }
+}
