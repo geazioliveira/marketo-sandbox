@@ -119,7 +119,7 @@ Exemplos de primeira linha que não é nenhuma das três acima. Um teste confere
 
 Toda issue aberta tem exatamente uma label de categoria (`bug` ou `enhancement`) e exatamente uma label de estado. A issue de acompanhamento (#1) fica fora dessa regra.
 
-O contrato `agentPlanLabelTransition` em [scripts/loop-sections.mjs](../../scripts/loop-sections.mjs) registra a única edição de label de estado que o agente pode fazer depois de criar uma issue: `needs-triage` → `ready-for-human`, imediatamente após publicar um plano completo como `# Plano`. Os hooks da #5 ainda irão chegar e deverão permitir só essa exceção; `ready-for-agent` continua exclusivo do dono.
+O contrato `agentPlanLabelTransition` em [scripts/loop-sections.mjs](../../scripts/loop-sections.mjs) registra a única edição de label de estado que o agente pode fazer: ao publicar um plano completo como `# Plano` numa issue em `needs-triage`, seja nova ou já existente, troca `needs-triage` por `ready-for-human`. Os hooks da #5 ainda irão chegar e deverão permitir só essa exceção; `ready-for-agent` continua exclusivo do dono.
 
 | Label | Significado | Quem aplica |
 | --- | --- | --- |
