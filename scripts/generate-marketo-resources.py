@@ -69,14 +69,14 @@ def nest_route(path: str) -> str:
 
 
 def route_pattern(path: str) -> re.Pattern[str]:
-    """The request paths a Swagger path accepts, where each `{param}` takes one segment."""
+    """The request paths a Swagger path accepts, ignoring case as Express does; `{param}` is one segment."""
     parts = re.split(r"(\{[^}]+})", path)
-    return re.compile("".join("[^/]+" if part.startswith("{") else re.escape(part) for part in parts))
+    return re.compile("(?i)" + "".join("[^/]+" if part.startswith("{") else re.escape(part) for part in parts))
 
 
 def captures(earlier: tuple[str, str, dict[str, Any]], later: tuple[str, str, dict[str, Any]]) -> bool:
-    """Whether `earlier`, registered first, would take a request meant for `later`."""
-    sample = re.sub(r"\{[^}]+}", "1", later[1])
+    """Whether `earlier`, registered first, takes the requests of `later`: `{}` fits no literal."""
+    sample = re.sub(r"\{[^}]+}", "{}", later[1])
     return (
         earlier[0] == later[0]
         and earlier[1] != later[1]
