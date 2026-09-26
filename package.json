@@ -1,12 +1,11 @@
 {
-  "name": "nest-typescript-starter",
+  "name": "marketo-sandbox",
   "version": "1.0.0",
-  "description": "Nest TypeScript starter repository",
+  "description": "Local mock of the Marketo Engage REST API, generated from the official Swagger documents",
   "private": true,
   "license": "MIT",
   "scripts": {
     "build": "nest build",
-    "deploy": "nest deploy",
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
     "generate:definitions": "python3 scripts/generate-marketo-definitions.py",
     "check:definitions": "python3 scripts/generate-marketo-definitions.py --check",
@@ -35,7 +34,6 @@
     "@faker-js/faker": "^10.6.0",
     "@nestjs/common": "^12.0.1",
     "@nestjs/core": "^12.0.1",
-    "@nestjs/observe": "^0.3.0",
     "@nestjs/platform-express": "^12.0.1",
     "@nestjs/swagger": "^12.0.2",
     "reflect-metadata": "^0.2.2",
@@ -43,7 +41,6 @@
   },
   "devDependencies": {
     "@nestjs/cli": "^12.0.0",
-    "@nestjs/mau": "^0.2.6",
     "@nestjs/schematics": "^12.0.0",
     "@nestjs/testing": "^12.0.1",
     "@types/express": "^5.0.0",
