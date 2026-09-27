@@ -218,11 +218,17 @@ _PROCESSED = re.compile(r"^(?P<path>.+) \d+ms(?: \(unchanged\))?(?: \(cached\))?
 
 
 def _document_path(source: Path) -> str | None:
-    """The document as written relative to the repository, without following links; None outside it."""
-    for candidate in (Path(os.path.abspath(source)), source.resolve()):
-        if candidate.is_relative_to(ROOT):
-            return candidate.relative_to(ROOT).as_posix()
-    return None
+    """The document as written relative to the repository, without following links; None outside it.
+
+    The repository is found by identity, not by spelling, so a path through a link or in another
+    letter case on a case-insensitive disk still counts as inside it (#7).
+    """
+    written = Path(os.path.abspath(source))
+    for parent in written.parents:
+        if parent.exists() and os.path.samefile(parent, ROOT):
+            return written.relative_to(parent).as_posix()
+    resolved = source.resolve()
+    return resolved.relative_to(ROOT).as_posix() if resolved.is_relative_to(ROOT) else None
 
 
 def generated_header(generator: str, target: Target | None = None) -> str:
@@ -298,8 +304,10 @@ def prettier_environment() -> dict[str, str]:
             "The generators never write or compare unformatted code."
         )
     environment = _node_environment()
-    # The experimental CLI formats without the per-file report the check below reads.
-    environment.pop("PRETTIER_EXPERIMENTAL_CLI", None)
+    # Prettier's own variables change what its CLI prints: PRETTIER_EXPERIMENTAL_CLI formats without
+    # the per-file report the check below reads, and PRETTIER_PERF_REPEAT neither writes nor reports.
+    for key in [key for key in environment if key.startswith("PRETTIER_")]:
+        del environment[key]
     if shutil.which("node", path=environment.get("PATH")) is None:
         raise _cannot_format(
             "Node.js not found in NODE_BIN, PATH, ~/.nvm, /usr/local/bin or /opt/homebrew/bin: Prettier needs it. "
@@ -320,12 +328,15 @@ def format_with_prettier(paths: list[Path], output: Path | None = None) -> None:
     """
     if not paths:
         return
-    restore = (
-        f" {output.relative_to(ROOT).as_posix()} was rewritten unformatted: restore it with "
-        f"`git checkout -- {output.relative_to(ROOT).as_posix()}` before committing."
-        if output
-        else ""
-    )
+    restore = ""
+    if output:
+        folder = output.relative_to(ROOT).as_posix()
+        undo = (
+            f"restore it with `git checkout -- {folder} && git clean -fd -- {folder}`"
+            if output in _registered_outputs()
+            else "delete it"
+        )
+        restore = f" {folder} was rewritten unformatted: run the generator again once Prettier works, or {undo}."
     relative = [path.relative_to(ROOT).as_posix() for path in paths]
     command = [str(PRETTIER), "--write", "--no-color", "--no-require-pragma", "--range-start=0", "--range-end=Infinity"]
     try:
@@ -420,6 +431,13 @@ def custom_target(swagger: Path, area: str) -> Target:
     return target
 
 
+def _registered_outputs() -> set[Path]:
+    """The output folders of the registered targets and the shared mocks: all tracked by git."""
+    return {SHARED_MOCKS} | {
+        folder for target in TARGETS.values() for folder in (target.definitions, target.resources, target.mocks)
+    }
+
+
 def refuse_foreign_files(output: Path, files: dict[Path, str]) -> None:
     """Before an unregistered area's folder is deleted, check that it only holds files this run writes.
 
@@ -427,10 +445,7 @@ def refuse_foreign_files(output: Path, files: dict[Path, str]) -> None:
     no longer produces has to go. A folder named with `--area` may hold anything, so a file this run
     would not write again is refused instead of deleted.
     """
-    registered = {SHARED_MOCKS} | {
-        folder for target in TARGETS.values() for folder in (target.definitions, target.resources, target.mocks)
-    }
-    if output in registered:
+    if output in _registered_outputs():
         return
     foreign = sorted(
         path.relative_to(ROOT)
