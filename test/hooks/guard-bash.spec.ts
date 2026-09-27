@@ -80,6 +80,8 @@ interface GhCall {
   key?: string
   mode?: string
   violation?: string
+  /** The variables that pick gh's account, as the fake gh saw them (ninth round). */
+  auth?: Record<string, string | null>
 }
 
 interface Live {
@@ -3426,6 +3428,297 @@ describe.concurrent(
       } finally {
         rmSync(root, { recursive: true, force: true })
       }
+    })
+  },
+)
+
+// ---------------------------------------------------------------------------
+// Ninth round of Copilot's review of #26
+
+describe.concurrent(
+  'the account a gh command runs as (Copilot review of #26, ninth round)',
+  () => {
+    const modes = ['default', 'auto'] as const
+    const accountVariables = [
+      'GH_TOKEN',
+      'GITHUB_TOKEN',
+      'GH_ENTERPRISE_TOKEN',
+      'GITHUB_ENTERPRISE_TOKEN',
+      'GH_CONFIG_DIR',
+    ] as const
+    type AccountVariable = (typeof accountVariables)[number]
+
+    /** What the hook inherits for each variable: the account its live reads use. */
+    const hookValue = (name: AccountVariable) =>
+      name === 'GH_CONFIG_DIR'
+        ? path.join(feature.root, 'gh-do-hook')
+        : `valor-do-hook-${name}`
+
+    const merge = 'gh pr merge 7'
+    const transition =
+      'gh issue edit 5 --remove-label needs-triage --add-label ready-for-human'
+    const resolve = `gh api graphql -f query='mutation { resolveReviewThread(input: {threadId: "PRRT_1"}) { thread { isResolved } } }'`
+    /**
+     * What each check would read: a merge that is not ready (a deny), and a
+     * transition and a thread in order (a pass). Read with the hook's
+     * account, each would be judged by the wrong one.
+     */
+    const fixtures: Record<string, unknown> = {
+      [merge]: {
+        prs: { 7: { pr: readyPr({ threads: [{ isResolved: false }] }) } },
+      },
+      [transition]: {
+        issues: {
+          5: {
+            labels: ['enhancement', 'needs-triage'],
+            lastCommentBody: '# Plano\n\n## Contexto e porquê\n\nTexto.',
+          },
+        },
+      },
+      [resolve]: {
+        viewer: { login: 'geazioliveira' },
+        threads: { PRRT_1: { lastAuthor: 'geazioliveira' } },
+      },
+    }
+    const other = /o comando pode rodar o gh com outra conta que a do hook/
+    const switched =
+      /a linha tem um gh auth login, logout, switch ou refresh, ou um gh config set/
+
+    /**
+     * `env -i` with what it takes out of the clean environment put back as
+     * the hook has it (HOME, XDG_CONFIG_HOME and the git config), so that
+     * only the account variables change: the git config gh reads would
+     * otherwise leave the target unknown (seventh round) before any read.
+     */
+    const envI = (env: NodeJS.ProcessEnv) =>
+      `env -i ${[
+        'HOME',
+        'XDG_CONFIG_HOME',
+        'GIT_CONFIG_GLOBAL',
+        'GIT_CONFIG_NOSYSTEM',
+      ]
+        .map((name) => `${name}='${env[name]}'`)
+        .join(' ')}`
+
+    /**
+     * The ways a line changes a variable for the command: on it, exported or
+     * assigned before it, taken out by env -u, or by env -i (envI). `env` is
+     * the hook's environment.
+     */
+    const forms: [
+      string,
+      (name: AccountVariable, line: string, env: NodeJS.ProcessEnv) => string,
+    ][] = [
+      ['on the command', (name, line) => `${name}=outro ${line}`],
+      ['exported before it', (name, line) => `export ${name}=outro; ${line}`],
+      ['assigned before it', (name, line) => `${name}=outro; ${line}`],
+      ['taken out by env -u', (name, line) => `env -u ${name} ${line}`],
+      ['taken out by env -i', (_, line, env) => `${envI(env)} ${line}`],
+    ]
+
+    /** A critical ask that read nothing: an ask, a deny in auto. */
+    function expectUnread(
+      run: HookRun,
+      mode: string,
+      calls: () => GhCall[],
+      reason: RegExp,
+    ) {
+      if (mode === 'auto')
+        expectDeny(run, /Em auto, a confirmação vira negação/)
+      else expectAsk(run)
+      expect(reasonOf(run)).toMatch(reason)
+      expect(calls()).toEqual([])
+    }
+
+    test.for(
+      modes.flatMap((mode) =>
+        accountVariables.flatMap((name) =>
+          forms.map(([form, line]) => [mode, name, form, line] as const),
+        ),
+      ),
+    )(
+      'gh pr merge with %s … %s %s reads nothing and asks, critical',
+      async ([mode, name, , line], { live }) => {
+        const gh = live(fixtures[merge], { [name]: hookValue(name) })
+        const run = await guard(line(name, merge, gh.env), {
+          env: gh.env,
+          mode,
+        })
+        expectUnread(run, mode, gh.calls, other)
+        expect(reasonOf(run)).toContain(name)
+      },
+    )
+
+    test.for(
+      modes.flatMap((mode) =>
+        [transition, resolve].flatMap((check) =>
+          accountVariables.map((name) => [mode, check, name] as const),
+        ),
+      ),
+    )(
+      'in %s, %s with its own %s reads nothing and asks, critical',
+      async ([mode, check, name], { live }) => {
+        const gh = live(fixtures[check], { [name]: hookValue(name) })
+        expectUnread(
+          await guard(`${name}=outro ${check}`, { env: gh.env, mode }),
+          mode,
+          gh.calls,
+          other,
+        )
+      },
+    )
+
+    test.for(
+      modes.flatMap((mode) =>
+        [
+          `gh auth switch --user outra && ${merge}`,
+          `gh auth login --with-token < /dev/null; ${merge}`,
+          `gh auth logout --hostname github.com --user outra; ${merge}`,
+          `gh auth refresh --hostname github.com -s repo && ${merge}`,
+          `gh config set -h github.com git_protocol ssh && ${merge}`,
+          // A substitution runs before the command that holds it.
+          `${merge} --subject "$(gh auth switch --user outra)"`,
+          // An alias the line defines, run before the merge.
+          `gh alias set sw 'auth switch' && gh sw --user outra && ${merge}`,
+          `gh auth switch --user outra && ${transition}`,
+          `gh auth switch --user outra && ${resolve}`,
+        ].map((line) => [mode, line] as const),
+      ),
+    )(
+      'in %s, `%s` reads nothing and asks, critical',
+      async ([mode, line], { live }) => {
+        const check = line.endsWith(transition)
+          ? transition
+          : line.endsWith(resolve)
+            ? resolve
+            : merge
+        const gh = live(fixtures[check])
+        const run = await guard(line, { env: gh.env, mode })
+        if (mode === 'auto') expectDeny(run)
+        else expectAsk(run)
+        expect(reasonOf(run)).toMatch(switched)
+        expect(gh.calls()).toEqual([])
+      },
+    )
+
+    /**
+     * Lines whose gh runs with the hook's own account: read live, as today,
+     * with the environment the hook inherited. `inherited` is what the hook
+     * inherits besides the clean environment.
+     */
+    const controls: [
+      string,
+      (env: NodeJS.ProcessEnv) => string,
+      Partial<Record<AccountVariable, true>>,
+    ][] = [
+      ['no override', () => merge, { GH_TOKEN: true, GH_CONFIG_DIR: true }],
+      [
+        'GH_TOKEN equal to the inherited one',
+        () => `GH_TOKEN=${hookValue('GH_TOKEN')} ${merge}`,
+        { GH_TOKEN: true },
+      ],
+      [
+        'GH_CONFIG_DIR exported equal to the inherited one',
+        () => `export GH_CONFIG_DIR='${hookValue('GH_CONFIG_DIR')}'; ${merge}`,
+        { GH_CONFIG_DIR: true },
+      ],
+      [
+        'env -u of a variable the hook does not inherit',
+        () => `env -u GH_TOKEN -u GITHUB_TOKEN ${merge}`,
+        {},
+      ],
+      [
+        'env -i with no account variable inherited',
+        (env) => `${envI(env)} ${merge}`,
+        {},
+      ],
+      // gh's config dir is XDG_CONFIG_HOME/gh while it is set: HOME alone
+      // does not move it.
+      ['HOME under XDG_CONFIG_HOME', () => `HOME=/outra ${merge}`, {}],
+      [
+        'gh auth status and gh auth token before it',
+        () => `gh auth status && gh auth token >/dev/null && ${merge}`,
+        { GH_TOKEN: true },
+      ],
+    ]
+
+    test.for(
+      modes.flatMap((mode) =>
+        controls.map(
+          ([name, line, inherited]) => [mode, name, line, inherited] as const,
+        ),
+      ),
+    )(
+      'in %s, %s: read live with the hook’s own account, as today',
+      async ([mode, , line, inherited], { live }) => {
+        const extra = Object.fromEntries(
+          Object.keys(inherited).map((name) => [
+            name,
+            hookValue(name as AccountVariable),
+          ]),
+        )
+        const gh = live(fixtures[merge], extra)
+        expectDeny(
+          await guard(line(gh.env), { env: gh.env, mode }),
+          /1 thread\(s\) de revisão aberta\(s\)/,
+        )
+        const calls = gh.calls()
+        expect(calls).toEqual([
+          expect.objectContaining({ call: 'prByNumber', key: '7' }),
+        ])
+        // The read authenticated with what the hook inherits, nothing else.
+        for (const name of accountVariables)
+          expect(calls[0].auth?.[name]).toBe(extra[name] ?? null)
+        expect(calls[0].auth?.HOME).toBe(gh.env.HOME)
+        expect(calls[0].auth?.XDG_CONFIG_HOME).toBe(gh.env.XDG_CONFIG_HOME)
+      },
+    )
+
+    // A relative GH_CONFIG_DIR is gh's from the directory it runs in. From
+    // one the hook cannot read (`cd "$X"`), it may be any, even when its
+    // text leads, from the input's cwd, to the hook's own; the merge names
+    // its repository (-R), so its target is still read.
+    const byName = `${merge} -R geazioliveira/marketo-sandbox`
+    const relative: [string, () => string, boolean][] = [
+      [
+        'relative, after a cd the hook cannot read',
+        () => `cd "$X" && GH_CONFIG_DIR=../../gh-do-hook ${byName}`,
+        true,
+      ],
+      [
+        'relative, in the input’s cwd, the hook’s own dir',
+        () => `GH_CONFIG_DIR=../gh-do-hook ${merge}`,
+        false,
+      ],
+      [
+        'absolute, the hook’s own dir, after a cd the hook cannot read',
+        () =>
+          `cd "$X" && GH_CONFIG_DIR='${hookValue('GH_CONFIG_DIR')}' ${byName}`,
+        false,
+      ],
+    ]
+
+    test.for(
+      modes.flatMap((mode) =>
+        relative.map(
+          ([name, line, changed]) => [mode, name, line, changed] as const,
+        ),
+      ),
+    )('in %s, GH_CONFIG_DIR %s', async ([mode, , line, changed], { live }) => {
+      const inherited = hookValue('GH_CONFIG_DIR')
+      const gh = live(fixtures[merge], { GH_CONFIG_DIR: inherited })
+      const run = await guard(line(), { env: gh.env, mode })
+      if (changed) {
+        expectUnread(run, mode, gh.calls, other)
+        expect(reasonOf(run)).toContain('GH_CONFIG_DIR')
+        return
+      }
+      expectDeny(run, /1 thread\(s\) de revisão aberta\(s\)/)
+      const calls = gh.calls()
+      expect(calls).toEqual([
+        expect.objectContaining({ call: 'prByNumber', key: '7' }),
+      ])
+      expect(calls[0].auth?.GH_CONFIG_DIR).toBe(inherited)
     })
   },
 )

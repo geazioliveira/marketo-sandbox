@@ -2103,6 +2103,9 @@ async function decide(input, libs) {
   // One live client per GitHub host, made when a rule first reads it: each
   // command's reads go to the host that command goes to, never to the one
   // the hook's own environment names (Copilot review of #26, fifth round).
+  // They authenticate with the hook's environment, never with a token the
+  // command sets; a command that may run gh with another account is not
+  // read at all (gh-rules' accountChange; ninth round).
   const githubFor = gh.githubClients()
 
   // One repoAt per directory, and only when a rule asks for it: `gh issue
@@ -2153,6 +2156,11 @@ async function decide(input, libs) {
     // when a change lands where the hook cannot tell.
     remotes: new Map(),
     remotesLost: false,
+    // Whether a command of the line may switch the account gh runs as (gh
+    // auth login, logout, switch, refresh, gh config set): the live reads,
+    // made with the hook's account, then judge no gh command of the line
+    // (Copilot review of #26, ninth round).
+    accountSwitched: false,
     evaluators: [],
     opaque: [],
     // Set once a program the hook does not read has run: from then on, a
@@ -2301,6 +2309,7 @@ async function decide(input, libs) {
         permissionMode: input.permission_mode,
         githubFor,
         env: process.env,
+        accountSwitched: state.accountSwitched,
         files,
         ghAliases: state.ghAliases,
         judgeOther: async (other, otherCtx) =>
@@ -2318,6 +2327,9 @@ async function decide(input, libs) {
         get: () => withRemotes(adjust(repoOf(where))),
       })
       decisions.push(await gh.ghDecision(command, ctx))
+      // An alias the line defined is known only now: one that switches the
+      // account does so for the commands after it (ninth round).
+      if (gh.ghSwitchesAccount(command, ctx)) state.accountSwitched = true
       for (const [name, expansion] of gh.ghAliasDefinitions(command, ctx))
         state.ghAliases.set(name, expansion)
       if (gh.ghMovesHead(command, ctx)) {
@@ -2563,6 +2575,25 @@ async function decide(input, libs) {
       )
     )
       state.remotesLost = true
+
+    // The same for the account gh runs as (Copilot review of #26, ninth
+    // round), with no change the hook can follow: a gh auth login, logout,
+    // switch or refresh, or a gh config set, anywhere on the line may run
+    // before any gh of it (a substitution, a `bash -c`), and which account it
+    // leaves is not read. So no gh command of such a line is read live with
+    // the hook's account: a rule that needed the read asks, critical.
+    if (
+      parsed.commands.some(
+        (command) =>
+          programOf(command) === 'gh' &&
+          command.known?.[0] !== false &&
+          gh.ghSwitchesAccount(command, {
+            env: process.env,
+            ghAliases: new Map(),
+          }),
+      )
+    )
+      state.accountSwitched = true
 
     // The same for the links (Copilot review of #26, eighth round): a link a
     // substitution or a `bash -c` script makes may be there before a command

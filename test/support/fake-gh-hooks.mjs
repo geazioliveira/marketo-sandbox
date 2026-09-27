@@ -15,6 +15,11 @@
 // wrong GitHub instead of a refusal. The log line of every call records the
 // host, and the GH_HOST and GH_REPO the process saw.
 //
+// It records too, as `auth`, the variables that pick the account gh runs as
+// (Copilot review of #26, ninth round): the tokens, and the ones that name
+// gh's config dir, where its stored logins are. A spec reads there which
+// account a live read authenticated with; an unset variable is null.
+//
 // FAKE_GH_FIXTURE names a JSON file:
 //   {
 //     repo?: 'owner/name',                 the only repository answered
@@ -91,6 +96,17 @@ function hostOf() {
   ).toLowerCase()
 }
 
+/** The variables that pick gh's account, as this process saw them. */
+const accountVariables = [
+  'GH_TOKEN',
+  'GITHUB_TOKEN',
+  'GH_ENTERPRISE_TOKEN',
+  'GITHUB_ENTERPRISE_TOKEN',
+  'GH_CONFIG_DIR',
+  'XDG_CONFIG_HOME',
+  'HOME',
+]
+
 function record(entry) {
   if (process.env.FAKE_GH_LOG)
     appendFileSync(
@@ -100,6 +116,9 @@ function record(entry) {
         host: hostOf(),
         envHost: process.env.GH_HOST ?? null,
         envRepo: process.env.GH_REPO ?? null,
+        auth: Object.fromEntries(
+          accountVariables.map((name) => [name, process.env[name] ?? null]),
+        ),
         ...entry,
       })}\n`,
     )

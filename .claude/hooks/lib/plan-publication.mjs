@@ -25,7 +25,13 @@ import {
   releaseHeld,
   startBudget,
 } from './budget.mjs'
-import { ghRepoDir, githubClients, targetOf as ghTarget } from './gh-rules.mjs'
+import {
+  accountChange,
+  ghRepoDir,
+  ghSwitchesAccount,
+  githubClients,
+  targetOf as ghTarget,
+} from './gh-rules.mjs'
 import { autonomousModes, contextOutput, readInput } from './io.mjs'
 import {
   clearGateCaches,
@@ -208,7 +214,9 @@ function placeOf(command, baseCwd, repoOf) {
  *
  * `readHost` is the GitHub a publication to this project goes to, where
  * confirmLive asks whether it went through (Copilot review of #26, fifth
- * round): github.com, whatever GH_HOST the hook itself inherits.
+ * round): github.com, whatever GH_HOST the hook itself inherits. It asks
+ * with the hook's account, so a publication whose gh may run with another
+ * one (gh-rules' accountChange; ninth round) is not confirmed there.
  * @returns {{ project: boolean, issue: number | null, unknown: boolean, why?: string, advice?: string, host?: string, readHost?: string }}
  */
 function targetOf(command, kind, place, exported, repoOf) {
@@ -560,8 +568,19 @@ function onCommand(input, baseCwd, sessionId, { live }) {
     )
   const urls = issueUrls(input.tool_response)
   // One client per host, bound to the host the publication goes to, never
-  // to the one the hook inherits (Copilot review of #26, fifth round).
+  // to the one the hook inherits (Copilot review of #26, fifth round). It
+  // authenticates with the hook's account, never with a token the command
+  // sets (ninth round).
   const githubFor = githubClients()
+  // A gh auth login, logout, switch or refresh, or a gh config set, anywhere
+  // on the line may run before the publication and leave gh on another
+  // account, which the hook does not follow (ninth round, as guard-bash).
+  const accountSwitched = parsed.commands.some(
+    (command) =>
+      path.basename(String(command.argv[0] ?? '')) === 'gh' &&
+      command.known?.[0] !== false &&
+      ghSwitchesAccount(command, { env: process.env }),
+  )
   const notes = []
   for (const { command, kind, place, exported: before } of placed) {
     const target = targetOf(command, kind, place, before, repoOf)
@@ -644,6 +663,19 @@ function onCommand(input, baseCwd, sessionId, { live }) {
       )
       continue
     } else {
+      // GitHub's word is read with the hook's account: viewerDidAuthor and
+      // the account's newest issues say nothing of a publication made with
+      // another one (Copilot review of #26, ninth round). The marker stays.
+      const account = accountChange(
+        { ...command, env: { ...before, ...command.env } },
+        { env: process.env, cwd: place.dir, accountSwitched },
+      )
+      if (account !== null) {
+        notes.push(
+          `não confiro no GitHub se \`${shortText(command)}\` publicou o plano: ${account}, e a leitura ao vivo usaria a conta do hook; o marcador continua: publique o plano pelo Bash, cuja saída mostra a URL.`,
+        )
+        continue
+      }
       const marks = [place.repo, sessionRepo]
         .filter((repo) => marked(repo))
         .map((repo) => repo.commonDir)

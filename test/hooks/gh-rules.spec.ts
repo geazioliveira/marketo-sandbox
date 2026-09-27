@@ -94,6 +94,8 @@ interface GhRulesLib {
     ctx: Partial<GhCtx>,
   ): [string, { known: boolean; text: string | null } | null][]
   ghMovesHead(command: unknown, ctx: Partial<GhCtx>): boolean
+  ghSwitchesAccount(command: unknown, ctx?: Partial<GhCtx>): boolean
+  accountChange(command: unknown, ctx?: Partial<GhCtx>): string | null
   tripwireMutations: string[]
 }
 
@@ -116,6 +118,8 @@ interface GhCtx {
   files?: (file: string) => { known: boolean; text: string | null } | undefined
   ghAliases?: Map<string, { known: boolean; text: string | null } | null>
   judgeOther?: (command: unknown, ctx: GhCtx) => Promise<Decision>
+  /** An earlier command of the line may have switched gh's account (ninth round). */
+  accountSwitched?: boolean
 }
 
 let gh: GhRulesLib
@@ -3569,5 +3573,296 @@ describe('gh api parameters on the query string (Copilot review of #26, sixth ro
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Ninth round of Copilot's review of #26
+
+describe('the account a gh command runs as (Copilot review of #26, ninth round)', () => {
+  // What the hook inherits, and its live reads authenticate with.
+  const inherited = {
+    GH_TOKEN: 'token-do-hook',
+    GITHUB_TOKEN: 'token-github-do-hook',
+    GH_ENTERPRISE_TOKEN: 'token-ghe-do-hook',
+    GITHUB_ENTERPRISE_TOKEN: 'token-github-ghe-do-hook',
+    GH_CONFIG_DIR: '/casa/gh',
+    HOME: '/casa',
+    XDG_CONFIG_HOME: '/casa/.config',
+  }
+  const resolve = `gh api graphql -f query='mutation { resolveReviewThread(input: {threadId: "PRRT_1"}) { thread { isResolved } } }'`
+  /** The three checks read live, and what each would read: all in order. */
+  const checks = [
+    ['gh pr merge', 'gh pr merge 7', { prMergeState: mergeAnswer() }],
+    [
+      'the label transition',
+      'gh issue edit 5 --remove-label needs-triage --add-label ready-for-human',
+      { issueState: issueAnswer() },
+    ],
+    [
+      'resolveReviewThread',
+      resolve,
+      {
+        threadLastAuthor: { ok: true, value: 'geazioliveira' },
+        viewer: { ok: true, value: 'geazioliveira' },
+      },
+    ],
+  ] as const
+  const other = /o comando pode rodar o gh com outra conta que a do hook/
+
+  /** Each variable set to another value, emptied (env -u, unset) or to one it cannot read. */
+  const changes = Object.keys(inherited)
+    .filter((name) => !['HOME', 'XDG_CONFIG_HOME'].includes(name))
+    .flatMap((name) => [
+      [name, `${name}=outro`],
+      [name, `${name}=''`],
+      [name, `${name}="$OUTRO"`],
+    ])
+
+  it.each(
+    checks.flatMap(([check, line, answers]) =>
+      changes.map(
+        ([name, vars]) => [check, vars, name, line, answers] as const,
+      ),
+    ),
+  )(
+    '%s with %s reads nothing, and asks, critical, naming the variable',
+    async (_, vars, name, line, answers) => {
+      const github = stub(answers)
+      expectAsk(
+        await judge(`${vars} ${line}`, { github, extra: { env: inherited } }),
+        { critical: true, reason: other },
+      )
+      expect(
+        (await judge(`${vars} ${line}`, { github, extra: { env: inherited } }))
+          .reason,
+      ).toContain(name)
+      expect(github.calls).toEqual([])
+    },
+  )
+
+  it.each(checks)(
+    '%s after an account switch on the line reads nothing, and asks, critical',
+    async (_, line, answers) => {
+      const github = stub(answers)
+      expectAsk(
+        await judge(line, {
+          github,
+          extra: { env: inherited, accountSwitched: true },
+        }),
+        {
+          critical: true,
+          reason: /um gh auth login, logout, switch ou refresh/,
+        },
+      )
+      expect(github.calls).toEqual([])
+    },
+  )
+
+  // gh reads its stored logins from GH_CONFIG_DIR, else XDG_CONFIG_HOME/gh,
+  // else HOME/.config/gh: what counts is the dir the command ends up with.
+  // The merge names its repository (-R), so HOME and XDG_CONFIG_HOME, which
+  // also move the git config gh reads its remotes with (seventh round), are
+  // judged here only as the account's.
+  it.each<[string, string, Record<string, string>, boolean]>([
+    ['no override', '', inherited, false],
+    [
+      'GH_TOKEN equal to the inherited one',
+      'GH_TOKEN=token-do-hook',
+      inherited,
+      false,
+    ],
+    [
+      'GH_CONFIG_DIR equal to the inherited one',
+      'GH_CONFIG_DIR=/casa/gh',
+      inherited,
+      false,
+    ],
+    [
+      'GH_CONFIG_DIR relative, the same dir',
+      'GH_CONFIG_DIR=gh',
+      inherited,
+      false,
+    ],
+    [
+      'GH_TOKEN emptied, when none is inherited',
+      `GH_TOKEN=''`,
+      { HOME: '/casa' },
+      false,
+    ],
+    ['HOME, under an inherited GH_CONFIG_DIR', 'HOME=/outra', inherited, false],
+    [
+      'XDG_CONFIG_HOME, under an inherited GH_CONFIG_DIR',
+      'XDG_CONFIG_HOME=/outra',
+      inherited,
+      false,
+    ],
+    [
+      'HOME, under an inherited XDG_CONFIG_HOME',
+      'HOME=/outra',
+      { HOME: '/casa', XDG_CONFIG_HOME: '/casa/.config' },
+      false,
+    ],
+    ['HOME, with nothing over it', 'HOME=/outra', { HOME: '/casa' }, true],
+    [
+      'HOME with an expansion, with nothing over it',
+      'HOME="$OUTRA"',
+      { HOME: '/casa' },
+      true,
+    ],
+    [
+      'XDG_CONFIG_HOME, over HOME',
+      'XDG_CONFIG_HOME=/outra',
+      { HOME: '/casa' },
+      true,
+    ],
+    [
+      'GH_CONFIG_DIR emptied, down to XDG_CONFIG_HOME',
+      `GH_CONFIG_DIR=''`,
+      inherited,
+      true,
+    ],
+    [
+      'GH_CONFIG_DIR relative, another dir',
+      'GH_CONFIG_DIR=outro',
+      inherited,
+      true,
+    ],
+    // A value with an expansion may be another even when its text is the
+    // inherited value's: the shell expands it, and gh never sees that text.
+    [
+      'GH_TOKEN with an expansion, the inherited value’s own text',
+      'GH_TOKEN="$OUTRO"',
+      { ...inherited, GH_TOKEN: '$OUTRO' },
+      true,
+    ],
+    [
+      'GH_CONFIG_DIR with an expansion, the inherited value’s own text',
+      'GH_CONFIG_DIR="$OUTRO"',
+      { ...inherited, GH_CONFIG_DIR: '$OUTRO' },
+      true,
+    ],
+  ])('%s (%s)', async (_, vars, env, changed) => {
+    const github = stub({ prMergeState: mergeAnswer() })
+    const decision = await judge(`${vars} gh pr merge 7 -R ${PROJECT}`, {
+      github,
+      cwd: '/casa',
+      extra: { env },
+    })
+    expectAsk(decision, {
+      critical: true,
+      reason: changed ? other : /confira antes do merge/,
+    })
+    expect(github.calls).toEqual(changed ? [] : [['prMergeState', PROJECT, 7]])
+  })
+
+  // A relative GH_CONFIG_DIR is resolved from the directory gh runs in: one
+  // the hook cannot read (a `cd "$X"`) may put it anywhere. An absolute one,
+  // and a config dir the command does not move, stay the hook's.
+  it.each<[string, string, boolean]>([
+    [
+      'GH_CONFIG_DIR relative, the same dir from /casa',
+      'GH_CONFIG_DIR=gh',
+      true,
+    ],
+    [
+      'GH_CONFIG_DIR relative, back into the same dir',
+      'GH_CONFIG_DIR=../casa/gh',
+      true,
+    ],
+    ['GH_CONFIG_DIR absolute, the same dir', 'GH_CONFIG_DIR=/casa/gh', false],
+    ['HOME, under an inherited GH_CONFIG_DIR', 'HOME=outra', false],
+    ['no override', '', false],
+  ])(
+    'in a directory the hook cannot read: %s (%s)',
+    async (_, vars, changed) => {
+      const github = stub({ prMergeState: mergeAnswer() })
+      const decision = await judge(`${vars} gh pr merge 7 -R ${PROJECT}`, {
+        github,
+        cwd: '/casa',
+        extra: { env: inherited, cwdKnown: false },
+      })
+      expectAsk(decision, {
+        critical: true,
+        reason: changed ? other : /confira antes do merge/,
+      })
+      if (changed) expect(decision.reason).toContain('GH_CONFIG_DIR')
+      expect(github.calls).toEqual(
+        changed ? [] : [['prMergeState', PROJECT, 7]],
+      )
+    },
+  )
+
+  it('names no value of a token in its reason', async () => {
+    const decision = await judge('GH_TOKEN=segredo-do-comando gh pr merge 7', {
+      github: stub(),
+      extra: { env: inherited },
+    })
+    expect(decision.reason).not.toContain('segredo-do-comando')
+    expect(decision.reason).not.toContain('token-do-hook')
+  })
+
+  it('reads nothing for an alias’s merge run with another token', async () => {
+    const github = stub({ prMergeState: mergeAnswer() })
+    const ghAliases = new Map([['mg', { known: true, text: 'pr merge' }]])
+    expectAsk(
+      await judge('GH_TOKEN=outro gh mg 7', {
+        github,
+        extra: { env: inherited, ghAliases },
+      }),
+      { critical: true, reason: other },
+    )
+    expect(github.calls).toEqual([])
+  })
+
+  it('reads nothing for the merge of a shell alias that switches the account first', async () => {
+    const github = stub({ prMergeState: mergeAnswer() })
+    const ghAliases = new Map([
+      [
+        'sm',
+        { known: true, text: '!gh auth switch --user outra && gh pr merge 7' },
+      ],
+    ])
+    expectAsk(
+      await judge('gh sm', { github, extra: { env: inherited, ghAliases } }),
+      { critical: true, reason: /um gh auth login, logout, switch ou refresh/ },
+    )
+    expect(github.calls).toEqual([])
+  })
+
+  it.each<[string, boolean]>([
+    ['gh auth login --with-token', true],
+    ['gh auth logout --hostname github.com', true],
+    ['gh auth switch --user outra', true],
+    ['gh auth refresh -s repo', true],
+    ['gh -R a/b auth switch', true],
+    ['gh config set -h github.com git_protocol ssh', true],
+    ['gh auth "$VERBO"', true],
+    ['gh "$GRUPO" switch', true],
+    ['gh sw', true],
+    ['gh auth status', false],
+    ['gh auth token', false],
+    ['gh auth setup-git', false],
+    ['gh auth', false],
+    ['gh config get git_protocol', false],
+    ['gh help auth switch', false],
+    ['gh pr merge 7', false],
+    ['gh co 7', false],
+    // An alias the hook cannot read may run a gh auth switch: one whose
+    // text is not known (`gh alias set xx "$X"` earlier on the line), and
+    // one in a gh config that cannot be read.
+    ['gh xx', true],
+    ['GH_CONFIG_DIR="$OUTRO" gh yy', true],
+    ['gh yy', false],
+  ])('ghSwitchesAccount: %s is %s', (text, switches) => {
+    const ghAliases = new Map<string, { known: boolean; text: string | null }>([
+      ['sw', { known: true, text: 'auth switch' }],
+      ['co', { known: true, text: 'pr checkout' }],
+      ['xx', { known: false, text: null }],
+    ])
+    const [command] = shell.parseCommand(text).commands
+    expect(gh.ghSwitchesAccount(command, { env: inherited, ghAliases })).toBe(
+      switches,
+    )
   })
 })

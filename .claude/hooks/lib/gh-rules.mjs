@@ -256,7 +256,10 @@ function mergeStateOf(pr) {
  * token is the one gh picks for that host: GH_TOKEN or GITHUB_TOKEN, else
  * the login stored for it, on github.com; GH_ENTERPRISE_TOKEN or
  * GITHUB_ENTERPRISE_TOKEN only on another host. An enterprise token the
- * hook inherits never authenticates a read of github.com.
+ * hook inherits never authenticates a read of github.com. The account is
+ * always the hook's own, from `env`: a token a command sets is never taken
+ * for a read, and a command that runs gh with another account is not read
+ * at all (clientAt; Copilot review of #26, ninth round).
  *   .viewer()                   -> login
  *   .issueState(repo, number)   -> { labels, labelsComplete, lastCommentBody }
  *   .threadLastAuthor(threadId) -> login | null
@@ -480,14 +483,133 @@ const unaligned = noReads(
 )
 
 /**
+ * The variables gh takes a token from: GH_TOKEN, then GITHUB_TOKEN, on
+ * github.com; GH_ENTERPRISE_TOKEN, then GITHUB_ENTERPRISE_TOKEN, on another
+ * host. All four count for every command: which one gh picks for a host is
+ * gh's to decide, and the hook does not decide it for gh.
+ */
+const ghTokenVariables = [
+  'GH_TOKEN',
+  'GITHUB_TOKEN',
+  'GH_ENTERPRISE_TOKEN',
+  'GITHUB_ENTERPRISE_TOKEN',
+]
+
+/** The variables that decide gh's config dir (ghConfigDir), where its stored logins are. */
+const ghConfigVariables = [
+  'GH_CONFIG_DIR',
+  'XDG_CONFIG_HOME',
+  'HOME',
+  'AppData',
+]
+
+const holdsExpansion = (value) => /[$`]/.test(String(value ?? ''))
+
+/**
+ * Why a gh command may run as another account than the one the hook's live
+ * reads authenticate with, or null when it runs as that one (Copilot review
+ * of #26, ninth round). The reads use the hook's inherited environment
+ * (ctx.env, else process.env) and never a token taken from the command; a
+ * verdict read with one account (viewerDidAuthor, the last commenter of a
+ * thread against the viewer, a PR the account can see) says nothing of
+ * another. The account moves when the command sees:
+ *   - a token variable (ghTokenVariables) other than the inherited one:
+ *     set on it, exported or assigned earlier on the line, or taken out by
+ *     `env -u`/`env -i` (command.env holds all of those, shell.mjs);
+ *   - another config dir, where gh keeps its logins: GH_CONFIG_DIR, else
+ *     XDG_CONFIG_HOME/gh, else HOME/.config/gh, relative to the command's
+ *     directory (ctx.cwd). HOME under a GH_CONFIG_DIR or an XDG_CONFIG_HOME
+ *     moves nothing. A relative one in a directory the hook cannot read
+ *     (ctx.cwdKnown false: a `cd "$X"`) may be any, and counts as another;
+ *   - a line with a command that may switch it (ghSwitchesAccount), which
+ *     guard-bash and plan-to-issue hand on as ctx.accountSwitched.
+ * An empty variable is one gh does not read, as an unset one. A value with
+ * an expansion may be another.
+ * @returns {string | null}
+ */
+export function accountChange(command, ctx = {}) {
+  const lead = 'o comando pode rodar o gh com outra conta que a do hook'
+  if (ctx.accountSwitched === true)
+    return `${lead}, pois a linha tem um gh auth login, logout, switch ou refresh, ou um gh config set`
+  const inherited = ctx.env ?? process.env
+  const own = command.env ?? {}
+  const moved = ghTokenVariables.filter(
+    (name) =>
+      name in own &&
+      (holdsExpansion(own[name]) ||
+        String(own[name] ?? '') !== String(inherited[name] ?? '')),
+  )
+  const dirSet = ghConfigVariables.filter((name) => name in own)
+  if (dirSet.length > 0) {
+    const before = ghConfigDir(inherited)
+    const after = ghConfigDir({ ...inherited, ...own })
+    const same =
+      before === null || after === null || holdsExpansion(after)
+        ? before === after && !holdsExpansion(after)
+        : (path.isAbsolute(after) || ctx.cwdKnown !== false) &&
+          path.resolve(ctx.cwd ?? '.', after) === path.resolve(before)
+    if (!same)
+      moved.push(
+        ...dirSet.map((name) => `${name} (o diretório de configuração do gh)`),
+      )
+  }
+  return moved.length === 0 ? null : `${lead}, pois muda ${moved.join(', ')}`
+}
+
+/** The gh subcommands that may switch the account the gh commands after them run as. */
+const accountVerbs = new Map([
+  ['auth', new Set(['login', 'logout', 'switch', 'refresh'])],
+  ['config', new Set(['set'])],
+])
+
+/**
+ * Whether a gh command may switch the account the gh commands after it on
+ * the line run as (Copilot review of #26, ninth round): `gh auth login`,
+ * `logout`, `switch` and `refresh` change the login gh's config holds, and
+ * `gh config set` writes that config. A subcommand that cannot be read, and
+ * an alias that runs one of them or cannot be read, may too. guard-bash and
+ * plan-to-issue read a line with one as ctx.accountSwitched (accountChange).
+ */
+export function ghSwitchesAccount(command, ctx = {}, depth = 0) {
+  const [group, verb] = leadingWords(command)
+  if (group === undefined) return false
+  if (!group.known) return true
+  const verbs = accountVerbs.get(group.value)
+  if (verbs !== undefined)
+    return verb !== undefined && (!verb.known || verbs.has(verb.value))
+  if (ghCommands.has(group.value) || depth >= 5) return false
+  const found = ghAliasOf(group.value, command, ctx)
+  if (!found.ok || found.expansion?.known === false) return true
+  if (found.expansion === null) return false
+  const { text } = aliasText(found.expansion.text, [])
+  return parseCommand(text).commands.some(
+    (inner) =>
+      inner.argv[0] === 'gh' &&
+      ghSwitchesAccount(
+        { ...inner, env: { ...command.env, ...inner.env } },
+        ctx,
+        depth + 1,
+      ),
+  )
+}
+
+/**
  * The client for the host a command's reads go to (Copilot review of #26,
  * fifth round), or `unaligned` for a host that cannot be read (null).
  * ctx.githubFor(host) when given (guard-bash; an alias being defined gets
  * one that reads nothing), else ctx.github as it is (a spec's stub), else a
- * new client for the host.
+ * new client for the host. A command that may run gh with another account
+ * than the hook's (accountChange) gets one that reads nothing, as a host
+ * that cannot be read does: the rule that needed the read asks, critical
+ * (ninth round).
  */
-function clientAt(ctx, host) {
+function clientAt(ctx, host, command) {
   if (host === null) return unaligned
+  const account = accountChange(command, ctx)
+  if (account !== null)
+    return noReads(
+      `${account}; a leitura ao vivo usaria a conta do hook, e nada foi lido`,
+    )
   if (typeof ctx.githubFor === 'function') return ctx.githubFor(host)
   return ctx.github ?? githubClient({ host })
 }
@@ -1660,9 +1782,21 @@ async function judgeAlias(name, expansion, args, command, ctx, { live }) {
     return unread(
       `não consegui ler o alias ${name} do gh ("${expansion.trim()}"): confira o que ele roda`,
     )
+  // A gh inside the alias that may switch the account leaves the others
+  // unread, wherever it is listed (ninth round), as on a line.
+  const switches = parsed.commands.some(
+    (each) =>
+      each.argv[0] === 'gh' &&
+      ghSwitchesAccount(
+        { ...each, env: { ...command.env, ...each.env } },
+        ctx,
+        (ctx.aliasDepth ?? 0) + 1,
+      ),
+  )
   const inner = extend(ctx, {
     aliasDepth: (ctx.aliasDepth ?? 0) + 1,
     ...(live ? {} : { github: offline, githubFor: () => offline }),
+    ...(switches ? { accountSwitched: true } : {}),
   })
   const decisions = []
   for (const each of parsed.commands) {
@@ -2767,7 +2901,7 @@ function apiDecision(command, base, from) {
   // github.com or none is set: a live read goes there too, and nowhere for
   // a host that cannot be read (Copilot review of #26, fifth round).
   const ctx = extend(base, {
-    github: clientAt(base, hostKnown ? projectHost : null),
+    github: clientAt(base, hostKnown ? projectHost : null, command),
   })
   const endpoint = request.endpoint
   if (endpoint === null) return pass()
@@ -2837,7 +2971,9 @@ const handlers = {
  * that would pass on a live read of this project asks instead, naming
  * `targetWhy` when there is one (seventh round). Its `github` reads the
  * host the command goes to (Copilot review of #26, fifth round): github.com
- * for this project, nothing when the target cannot be read.
+ * for this project, nothing when the target cannot be read, nor when the
+ * command may run gh with another account than the hook's (ninth round:
+ * accountChange, with ctx.accountSwitched from guard-bash).
  */
 export async function ghDecision(command, ctx) {
   const [group, verb] = leadingWords(command)
@@ -2885,7 +3021,7 @@ export async function ghDecision(command, ctx) {
       // This project is on github.com: a target that could be read as it is
       // there, whatever GH_HOST the hook inherits; one that could not, read
       // nowhere.
-      github: clientAt(local, target.unknown ? null : projectHost),
+      github: clientAt(local, target.unknown ? null : projectHost, command),
     }),
   )
 }

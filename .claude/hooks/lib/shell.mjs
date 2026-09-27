@@ -2633,14 +2633,20 @@ export function readBody(
 // ---------------------------------------------------------------------------
 // What a command exports for the ones after it
 
-/** Variables the rules read from the environment, carried across `export`. */
-const watchedVariable = /^(?:GH_|GIT_|XDG_CONFIG_HOME$|HOME$)/
+/**
+ * Variables the rules read from the environment, carried across `export`:
+ * GitHub's own token variables among them, which pick the account gh runs
+ * as (gh-rules' accountChange; Copilot review of #26, ninth round).
+ */
+const watchedVariable =
+  /^(?:GH_|GIT_|GITHUB_(?:ENTERPRISE_)?TOKEN$|XDG_CONFIG_HOME$|HOME$)/
 
 /**
  * The variables the rules read that `env -i` takes away from the command:
  * those that decide which git config gh reads (repo.mjs' gitConfigVariable,
- * but the numbered keys, which count only with GIT_CONFIG_COUNT) and those
- * that decide gh's host and repository.
+ * but the numbered keys, which count only with GIT_CONFIG_COUNT), those
+ * that decide gh's host and repository, and those that decide the account
+ * gh runs as (ninth round; HOME and XDG_CONFIG_HOME count there too).
  */
 const clearedByEnv = [
   'HOME',
@@ -2654,6 +2660,11 @@ const clearedByEnv = [
   'GH_HOST',
   'GH_REPO',
   'GIT_DIR',
+  'GH_TOKEN',
+  'GITHUB_TOKEN',
+  'GH_ENTERPRISE_TOKEN',
+  'GITHUB_ENTERPRISE_TOKEN',
+  'GH_CONFIG_DIR',
 ]
 
 /**

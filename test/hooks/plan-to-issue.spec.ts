@@ -2782,3 +2782,250 @@ describe.concurrent(
     })
   },
 )
+
+// ---------------------------------------------------------------------------
+// Ninth round of Copilot's review of #26
+
+describe.concurrent(
+  'plan-to-issue on Monitor and the terminal: the account gh publishes with (Copilot review of #26, ninth round)',
+  () => {
+    const comment = 'gh issue comment 5 --body-file plano.md'
+    type AccountVariable =
+      | 'GH_TOKEN'
+      | 'GITHUB_TOKEN'
+      | 'GH_ENTERPRISE_TOKEN'
+      | 'GITHUB_ENTERPRISE_TOKEN'
+      | 'GH_CONFIG_DIR'
+    // Built per test: later() is relative to the moment the test runs.
+    const posted = () => ({
+      comments: {
+        5: {
+          comments: [
+            { body: planComment, createdAt: later(), viewerDidAuthor: true },
+          ],
+        },
+      },
+    })
+    /** What the hook inherits for a variable: the account its live reads use. */
+    const hookValue = (repo: HookRepo, name: AccountVariable) =>
+      name === 'GH_CONFIG_DIR'
+        ? path.join(repo.root, 'gh-do-hook')
+        : `valor-do-hook-${name}`
+    /** env -i with the clean environment's HOME and git config put back, so only the account changes. */
+    const envI = (env: NodeJS.ProcessEnv) =>
+      `env -i ${[
+        'HOME',
+        'XDG_CONFIG_HOME',
+        'GIT_CONFIG_GLOBAL',
+        'GIT_CONFIG_NOSYSTEM',
+      ]
+        .map((name) => `${name}='${env[name]}'`)
+        .join(' ')}`
+
+    /** Publications whose gh may run with another account than the hook's: [label, line, the variable the hook inherits]. */
+    const otherAccount: [
+      string,
+      (env: NodeJS.ProcessEnv) => string,
+      AccountVariable | null,
+    ][] = [
+      [
+        'GH_TOKEN on the command',
+        () => `GH_TOKEN=outro ${comment}`,
+        'GH_TOKEN',
+      ],
+      [
+        'GITHUB_TOKEN on the command',
+        () => `GITHUB_TOKEN=outro ${comment}`,
+        'GITHUB_TOKEN',
+      ],
+      [
+        'GH_ENTERPRISE_TOKEN on the command',
+        () => `GH_ENTERPRISE_TOKEN=outro ${comment}`,
+        'GH_ENTERPRISE_TOKEN',
+      ],
+      [
+        'GITHUB_ENTERPRISE_TOKEN on the command',
+        () => `GITHUB_ENTERPRISE_TOKEN=outro ${comment}`,
+        'GITHUB_ENTERPRISE_TOKEN',
+      ],
+      [
+        'GH_CONFIG_DIR on the command',
+        () => `GH_CONFIG_DIR=/tmp/outro-gh ${comment}`,
+        'GH_CONFIG_DIR',
+      ],
+      [
+        'GH_TOKEN exported before it',
+        () => `export GH_TOKEN=outro; ${comment}`,
+        'GH_TOKEN',
+      ],
+      [
+        'GITHUB_TOKEN assigned before it',
+        () => `GITHUB_TOKEN=outro; ${comment}`,
+        'GITHUB_TOKEN',
+      ],
+      [
+        'GH_TOKEN taken out by env -u',
+        () => `env -u GH_TOKEN ${comment}`,
+        'GH_TOKEN',
+      ],
+      [
+        'GH_CONFIG_DIR taken out by env -i',
+        (env) => `${envI(env)} ${comment}`,
+        'GH_CONFIG_DIR',
+      ],
+      [
+        'a gh auth switch before it on the line',
+        () => `gh auth switch --user outra && ${comment}`,
+        null,
+      ],
+    ]
+
+    test.for(otherAccount)(
+      'Monitor: %s keeps the marker and reads nothing live',
+      async ([, line, name], { fresh, expect }) => {
+        const repo = await pending(fresh)
+        repo.write({ 'plano.md': planComment })
+        repo.setFixture(posted())
+        const env = repo.env(
+          name === null ? {} : { [name]: hookValue(repo, name) },
+        )
+        const run = await otherTool(
+          repo,
+          'Monitor',
+          line(env),
+          { taskId: 'b1', status: 'running' },
+          { env },
+        )
+        expect(run.status).toBe(0)
+        expect(existsSync(repo.markerPath(SESSION))).toBe(true)
+        expect(cacheExists(repo)).toBe(true)
+        expect(contextOf(run)).toContain(
+          'o comando pode rodar o gh com outra conta que a do hook',
+        )
+        if (name !== null) expect(contextOf(run)).toContain(name)
+        expect(contextOf(run)).toContain('o marcador continua')
+        expect(contextOf(run)).not.toContain('valor-do-hook')
+        expect(repo.calls()).toEqual([])
+      },
+    )
+
+    test('run_in_terminal: GH_TOKEN on the command keeps the marker and reads nothing live', async ({
+      fresh,
+      expect,
+    }) => {
+      const repo = await pending(fresh)
+      repo.write({ 'plano.md': planComment })
+      repo.setFixture(posted())
+      const run = await otherTool(
+        repo,
+        'mcp__terminal__run_in_terminal',
+        `GH_TOKEN=outro ${comment}`,
+        { output: '' },
+        { env: repo.env({ GH_TOKEN: hookValue(repo, 'GH_TOKEN') }) },
+      )
+      expect(run.status).toBe(0)
+      expect(existsSync(repo.markerPath(SESSION))).toBe(true)
+      expect(contextOf(run)).toContain('o marcador continua')
+      expect(repo.calls()).toEqual([])
+    })
+
+    test.for([
+      ['no override', () => comment],
+      [
+        'GH_TOKEN equal to the inherited one',
+        (value: string) => `GH_TOKEN=${value} ${comment}`,
+      ],
+      ['gh auth status before it', () => `gh auth status && ${comment}`],
+    ] as const)(
+      'Monitor: %s confirms live with the hook’s own account, as today',
+      async ([, line], { fresh, expect }) => {
+        const repo = await pending(fresh)
+        repo.write({ 'plano.md': planComment })
+        repo.setFixture(posted())
+        const value = hookValue(repo, 'GH_TOKEN')
+        const run = await otherTool(
+          repo,
+          'Monitor',
+          line(value),
+          { taskId: 'b1', status: 'running' },
+          { env: repo.env({ GH_TOKEN: value }) },
+        )
+        expect(run.status).toBe(0)
+        expect(existsSync(repo.markerPath(SESSION))).toBe(false)
+        expect(contextOf(run)).toContain('plano publicado na issue #5')
+        expect(repo.calls()).toEqual([
+          expect.objectContaining({
+            call: 'issueComments',
+            key: '5',
+            auth: expect.objectContaining({ GH_TOKEN: value }),
+          }),
+        ])
+      },
+    )
+
+    // A relative GH_CONFIG_DIR is gh's from the directory the publication
+    // runs in, after its cd, and not from the hook's own cwd: [label, the
+    // dir from docs, whether it is the hook's own].
+    test.for([
+      ['leads from there to the hook’s own dir', '../../gh-do-hook', true],
+      [
+        'leads to the hook’s own dir only from the hook’s cwd',
+        '../gh-do-hook',
+        false,
+      ],
+    ] as const)(
+      'Monitor: after cd docs, a relative GH_CONFIG_DIR that %s',
+      async ([, dir, own], { fresh, expect }) => {
+        const repo = await pending(fresh)
+        mkdirSync(path.join(repo.dir, 'docs'))
+        repo.write({ 'docs/plano.md': planComment })
+        repo.setFixture(posted())
+        const inherited = hookValue(repo, 'GH_CONFIG_DIR')
+        const run = await otherTool(
+          repo,
+          'Monitor',
+          `cd docs && GH_CONFIG_DIR=${dir} ${comment}`,
+          { taskId: 'b1', status: 'running' },
+          { env: repo.env({ GH_CONFIG_DIR: inherited }) },
+        )
+        expect(run.status).toBe(0)
+        expect(existsSync(repo.markerPath(SESSION))).toBe(!own)
+        if (own) {
+          expect(contextOf(run)).toContain('plano publicado na issue #5')
+          expect(repo.calls()).toEqual([
+            expect.objectContaining({
+              call: 'issueComments',
+              key: '5',
+              auth: expect.objectContaining({ GH_CONFIG_DIR: inherited }),
+            }),
+          ])
+        } else {
+          expect(contextOf(run)).toContain(
+            'o comando pode rodar o gh com outra conta que a do hook',
+          )
+          expect(contextOf(run)).toContain('GH_CONFIG_DIR')
+          expect(contextOf(run)).toContain('o marcador continua')
+          expect(repo.calls()).toEqual([])
+        }
+      },
+    )
+
+    test('Bash: another GH_TOKEN still counts with the issue URL gh printed, with no live read', async ({
+      fresh,
+      expect,
+    }) => {
+      const repo = await pending(fresh)
+      repo.write({ 'plano.md': planComment })
+      const run = await bash(
+        repo,
+        `GH_TOKEN=outro ${comment}`,
+        `${ISSUE_URL}/5#issuecomment-41\n`,
+        { env: repo.env({ GH_TOKEN: hookValue(repo, 'GH_TOKEN') }) },
+      )
+      expect(run.status).toBe(0)
+      expect(existsSync(repo.markerPath(SESSION))).toBe(false)
+      expect(contextOf(run)).toContain(`plano publicado em ${ISSUE_URL}/5`)
+      expect(repo.calls()).toEqual([])
+    })
+  },
+)

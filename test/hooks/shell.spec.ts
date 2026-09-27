@@ -35,7 +35,8 @@ const parse = (text: string): ParsedCommand => shell.parseCommand(text)
 
 /**
  * What `env -i` takes away that the rules read, written empty as `unset` is
- * (Copilot review of #26, seventh round).
+ * (Copilot review of #26, seventh round), and the variables that pick the
+ * account gh runs as (ninth round).
  */
 const clearedByEnvI = Object.fromEntries(
   [
@@ -50,6 +51,11 @@ const clearedByEnvI = Object.fromEntries(
     'GH_HOST',
     'GH_REPO',
     'GIT_DIR',
+    'GH_TOKEN',
+    'GITHUB_TOKEN',
+    'GH_ENTERPRISE_TOKEN',
+    'GITHUB_ENTERPRISE_TOKEN',
+    'GH_CONFIG_DIR',
   ].map((name) => [name, '']),
 )
 const argvs = (text: string): string[][] =>
@@ -1631,5 +1637,62 @@ describe('what env takes out of a command’s environment (Copilot review of #26
         env: { HOME: '' },
       })
     expect(parse('env -u X gh issue view 5').commands[0].env).toEqual({})
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Ninth round of Copilot's review of #26
+
+describe('the variables that pick the account gh runs as (Copilot review of #26, ninth round)', () => {
+  const accountVariables = [
+    'GH_TOKEN',
+    'GITHUB_TOKEN',
+    'GH_ENTERPRISE_TOKEN',
+    'GITHUB_ENTERPRISE_TOKEN',
+    'GH_CONFIG_DIR',
+  ]
+
+  /** What each form leaves in `exported` for the command after it, or in its env. */
+  const forms: [
+    string,
+    (name: string) => string,
+    'exported' | 'env',
+    string,
+  ][] = [
+    ['exported', (name) => `export ${name}=outro`, 'exported', 'outro'],
+    ['declared -x', (name) => `declare -x ${name}=outro`, 'exported', 'outro'],
+    [
+      'assigned',
+      (name) => `${name}=outro; gh pr view`,
+      'exported',
+      '${ATRIBUIDO}',
+    ],
+    ['unset', (name) => `unset ${name}`, 'exported', ''],
+    ['taken out by env -u', (name) => `env -u ${name} gh pr view`, 'env', ''],
+    [
+      'taken out by env --unset=',
+      (name) => `env --unset=${name} gh pr view`,
+      'env',
+      '',
+    ],
+    ['taken out by env -i', () => 'env -i gh pr view', 'env', ''],
+  ]
+
+  it.each(
+    accountVariables.flatMap((name) =>
+      forms.map(
+        ([form, line, where, value]) =>
+          [name, form, line(name), where, value] as const,
+      ),
+    ),
+  )('carries %s %s', (name, _, text, where, value) => {
+    const exported: Record<string, string> = {}
+    const commands = parse(text).commands
+    for (const command of commands) {
+      shell.recordAssignments(command, exported)
+      shell.recordExports(command, exported)
+    }
+    const seen = where === 'env' ? commands.at(-1)?.env : exported
+    expect(seen?.[name]).toBe(value)
   })
 })
