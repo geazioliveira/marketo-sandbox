@@ -36,6 +36,7 @@ Os passos, na ordem em que o gate os imprime:
 | `pr-first-line` | A primeira linha não vazia do corpo da PR é `Closes #N.` | No CI |
 | `copilot-review` | Uma revisão do Copilot (`Bot`, `databaseId` 175728472), `COMMENTED` ou `APPROVED`, que não falhou, cujo `commit.oid` é a cabeça da PR (abaixo). Uma que conta entre as 100 mais recentes basta; sem nenhuma entre elas, com mais revisões que isso, fica `[?]`. Com outra revisão do Copilot pedida e ainda a caminho (`copilotRequested`), fica `[ ]` mesmo com uma revisão na cabeça | No CI, fora de draft |
 | `review-threads` | Nenhuma thread de revisão não resolvida, de qualquer autor, inclusive as desatualizadas. Lista até 10 como `path:line` e link, e o total. Uma página lida pela metade fica `[?]` | No CI, fora de draft |
+| `pr-size` | As linhas alteradas da PR (adições mais remoções) e os arquivos, contra a base. Acima de 1.500 linhas (`prSizeLimit`), fica sem [x], só como aviso | Nunca (só no CI) |
 | `issue-open` | A issue existe e está aberta | Sempre |
 | `kind` | Exatamente uma label de categoria, `bug` ou `enhancement` | Sempre |
 | `state-label` | Exatamente uma label de estado, e ela é `ready-for-agent`. As contradições são listadas | Sempre |

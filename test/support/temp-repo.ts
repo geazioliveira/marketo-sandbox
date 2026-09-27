@@ -31,6 +31,8 @@ export interface GhAnswer {
 
 export interface GhFixture {
   issue?: GhAnswer
+  /** The parent issue a slice of a stack is judged by (#31). */
+  parent?: GhAnswer
   pr?: GhAnswer
 }
 

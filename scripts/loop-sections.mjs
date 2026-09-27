@@ -497,6 +497,92 @@ export function planCitesBranch(planText, branch, kind) {
 }
 
 // ---------------------------------------------------------------------------
+// Stacks (#31)
+//
+// A change too big for one PR is delivered as a stack: small PRs, each one on
+// top of the one below, each with its own review and merge. Each slice is a
+// sub-issue of the parent issue, and each slice's PR closes its own sub-issue,
+// so the link between a PR and an issue, and the audit of main, stay as they
+// are. The parent's current plan declares the stack in a `Stack` section: the
+// slices' branches, bottom first. A sub-issue that carries stackSliceLabel,
+// and no state label, is judged by its parent: the state label, the plan and
+// the Approve are the parent's, and its branch must be in that Stack. Every
+// revocation of the parent's Approve therefore holds for all its slices.
+
+/** The optional section of a parent's plan that declares its stack. */
+export const stackSection = 'Stack'
+
+/** A slice's sub-issue carries it in place of a state label: its state and Approve are the parent's. */
+export const stackSliceLabel = 'stack-slice'
+
+/** Lines a PR may change before the report-only pr-size step says it is past the reference. */
+export const prSizeLimit = 1500
+
+/** A list item's text, after its marker. */
+const stackItem = /^\s*(?:[-*+]|\d{1,9}[.)])\s+(.*)$/
+/** A code span on one line: where a stack item names its branch. */
+const stackCode = /`([^`\n]+)`/g
+
+/**
+ * The stack a plan declares: the branches its `Stack` section names, bottom
+ * first. Each item of a list in that section names at most one branch, in a
+ * code span, in a shape the contract accepts (parseBranch); an item that names
+ * none is prose and is skipped. The section is read as the rendered issue
+ * shows it (shownText), so a branch only inside an HTML comment names nothing.
+ * `problems` lists what makes the declaration unusable: an item naming two
+ * branches, a branch named twice, or a section that names none.
+ * @returns {{ declared: boolean, branches: string[], problems: string[] }}
+ */
+export function stackOf(planText) {
+  const section = findSection(planText, stackSection)
+  if (section === null) return { declared: false, branches: [], problems: [] }
+  const branches = []
+  const problems = []
+  for (const line of shownText(section.content).split(/\r?\n/)) {
+    const item = stackItem.exec(line)
+    if (item === null) continue
+    const named = [...item[1].matchAll(stackCode)]
+      .map((match) => match[1].trim())
+      .filter((text) => parseBranch(text) !== null)
+    if (named.length === 0) continue
+    if (named.length > 1) {
+      problems.push(
+        `um item da seção ${stackSection} cita mais de uma branch: ${named.join(', ')}`,
+      )
+      continue
+    }
+    if (branches.includes(named[0]))
+      problems.push(`a seção ${stackSection} cita ${named[0]} mais de uma vez`)
+    else branches.push(named[0])
+  }
+  if (branches.length === 0 && problems.length === 0)
+    problems.push(`a seção ${stackSection} não cita nenhuma branch`)
+  return { declared: true, branches, problems }
+}
+
+/**
+ * Where a branch sits in a stack's branches (stackOf), bottom first: its
+ * index, whether it is the first slice (the bottom, which carries the intent)
+ * or the last (the top, which carries the Learn), the branch right below it,
+ * and the branches below and above it. null when the stack does not name it.
+ * @returns {{ index: number, count: number, first: boolean, last: boolean, below: string | null, lower: string[], upper: string[] } | null}
+ */
+export function slicePosition(branches, branch) {
+  const list = Array.isArray(branches) ? branches : []
+  const index = list.indexOf(branch)
+  if (index < 0) return null
+  return {
+    index,
+    count: list.length,
+    first: index === 0,
+    last: index === list.length - 1,
+    below: index > 0 ? list[index - 1] : null,
+    lower: list.slice(0, index),
+    upper: list.slice(index + 1),
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Plan, Approve, withdrawal
 
 // Each is matched against the first non-empty line, already trimmed
@@ -1162,6 +1248,7 @@ export const stepIds = [
   'pr-first-line',
   'copilot-review',
   'review-threads',
+  'pr-size',
   'issue-open',
   'kind',
   'state-label',

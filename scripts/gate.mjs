@@ -52,7 +52,12 @@ import {
   parseBranch,
   planCitesBranch,
   readyLabel,
+  prSizeLimit,
   sectionsFor,
+  slicePosition,
+  stackOf,
+  stackSection,
+  stackSliceLabel,
   stateLabels,
   stepIds,
 } from './loop-sections.mjs'
@@ -66,7 +71,7 @@ const changelogPath = 'context/evolution/changelog.md'
 // category label past the first page. 100 is the most one page may ask for.
 const page = 100
 
-const issueQuery = `query($owner: String!, $name: String!, $number: Int!) { repository(owner: $owner, name: $name) { owner { login } issue(number: $number) { number state body lastEditedAt labels(first: ${page}) { totalCount nodes { name } } comments(last: ${page}) { totalCount nodes { body createdAt lastEditedAt author { __typename login } } } timelineItems(last: ${page}, itemTypes: [LABELED_EVENT, REOPENED_EVENT, COMMENT_DELETED_EVENT]) { totalCount nodes { __typename ... on LabeledEvent { createdAt actor { __typename login } label { name } } ... on ReopenedEvent { createdAt } ... on CommentDeletedEvent { createdAt } } } } } }`
+const issueQuery = `query($owner: String!, $name: String!, $number: Int!) { repository(owner: $owner, name: $name) { owner { login } issue(number: $number) { number state body lastEditedAt parent { number } labels(first: ${page}) { totalCount nodes { name } } comments(last: ${page}) { totalCount nodes { body createdAt lastEditedAt author { __typename login } } } timelineItems(last: ${page}, itemTypes: [LABELED_EVENT, REOPENED_EVENT, COMMENT_DELETED_EVENT]) { totalCount nodes { __typename ... on LabeledEvent { createdAt actor { __typename login } label { name } } ... on ReopenedEvent { createdAt } ... on CommentDeletedEvent { createdAt } } } } } }`
 
 // The reviews come newest last, so the last page holds the newest; a Copilot
 // review is told apart by its author's type and database id, which only a Bot
@@ -74,7 +79,7 @@ const issueQuery = `query($owner: String!, $name: String!, $number: Int!) { repo
 // requests say whether a Copilot review is still on its way, its reviewer
 // told apart the same way (copilotRequested). The threads are read first to
 // last, each with its first comment, for the link a message gives.
-const prQuery = `query($owner: String!, $name: String!, $number: Int!) { repository(owner: $owner, name: $name) { pullRequest(number: $number) { baseRefName headRefName headRefOid isDraft body closingIssuesReferences(first: 10) { totalCount nodes { number repository { nameWithOwner } } } reviews(last: ${page}) { totalCount nodes { state submittedAt commit { oid } author { __typename login ... on Bot { databaseId } } body } } reviewRequests(first: ${page}) { totalCount nodes { requestedReviewer { __typename ... on Bot { databaseId } } } } reviewThreads(first: ${page}) { totalCount nodes { isResolved isOutdated path line comments(first: 1) { nodes { url author { login } } } } } } } }`
+const prQuery = `query($owner: String!, $name: String!, $number: Int!) { repository(owner: $owner, name: $name) { pullRequest(number: $number) { baseRefName headRefName headRefOid isDraft body additions deletions changedFiles closingIssuesReferences(first: 10) { totalCount nodes { number repository { nameWithOwner } } } reviews(last: ${page}) { totalCount nodes { state submittedAt commit { oid } author { __typename login ... on Bot { databaseId } } body } } reviewRequests(first: ${page}) { totalCount nodes { requestedReviewer { __typename ... on Bot { databaseId } } } } reviewThreads(first: ${page}) { totalCount nodes { isResolved isOutdated path line comments(first: 1) { nodes { url author { login } } } } } } } }`
 
 /** How many open threads the review-threads step names; the rest are counted. */
 const threadsShown = 10
@@ -632,6 +637,11 @@ function main() {
   ]
   let kind = null
   let labelsRead = false
+  // The parent whose plan and Approve judge this issue, when it is a slice of
+  // a stack (#31), and the slice's place in that stack once the branch is found
+  // in the parent's Stack.
+  let sliceOf = null
+  let slice = null
   const fetched = canQuery
     ? graphql(issueQuery, {
         owner: identity.owner,
@@ -691,23 +701,117 @@ function main() {
     // also leaves labelsRead false for the branch step.
     const labelsTotal = issue.labels?.totalCount
     labelsRead = Number.isInteger(labelsTotal) && labelsTotal <= labels.length
+
+    // A slice of a stack (#31): a sub-issue that carries stackSliceLabel is
+    // judged by its parent. Its own labels give the category and hold no
+    // state label; the state label, the plan and the Approve are the
+    // parent's, read with the same query, and the branch must be in the Stack
+    // of the parent's current plan. So every revocation of the parent's
+    // Approve holds for all its slices, and a slice is never approved on its
+    // own. The parent is read only for a sub-issue that asks for it: every
+    // other issue is judged as before, whatever its parent.
+    const sliceAsked = labelsRead && labels.includes(stackSliceLabel)
+    let judged = {
+      issue,
+      labels,
+      labelsRead,
+      owner: fetched.data.repository.owner?.login,
+    }
+    // Why the parent of a slice could not be judged: refused (no parent, or a
+    // parent that is missing or unverified) or only unread (unreachable).
+    let parentProblem = null
+    if (sliceAsked) {
+      const parentNumber = issue.parent?.number
+      if (!Number.isInteger(parentNumber))
+        parentProblem = {
+          refused: true,
+          detail: `a #${number} tem a label ${stackSliceLabel}, mas não é sub-issue de nenhuma issue: uma fatia é filha da issue mãe da stack`,
+        }
+      else {
+        const parentFetched = graphql(issueQuery, {
+          owner: identity.owner,
+          name: identity.name,
+          number: parentNumber,
+        })
+        const parent = parentFetched.ok
+          ? parentFetched.data?.repository?.issue
+          : null
+        if (parent != null) {
+          const parentLabels = (parent.labels?.nodes ?? []).map(
+            (node) => node.name,
+          )
+          const parentTotal = parent.labels?.totalCount
+          judged = {
+            issue: parent,
+            labels: parentLabels,
+            labelsRead:
+              Number.isInteger(parentTotal) &&
+              parentTotal <= parentLabels.length,
+            owner: parentFetched.data.repository.owner?.login,
+          }
+          sliceOf = parentNumber
+        } else {
+          const failed = parentFetched.ok ? 'missing' : parentFetched.kind
+          parentProblem = {
+            refused: failed === 'missing' || failed === 'unverified',
+            detail:
+              failed === 'missing'
+                ? `a mãe #${parentNumber} da fatia #${number} não existe em ${facts.repo}`
+                : failed === 'unverified'
+                  ? `nada sobre a mãe #${parentNumber} foi verificado: ${parentFetched.reason}`
+                  : `a mãe #${parentNumber} não foi lida (GitHub inacessível: ${parentFetched.reason})`,
+          }
+        }
+      }
+    }
+
+    const shownState = (state) =>
+      state === 'CLOSED' ? 'fechada' : String(state).toLowerCase()
+    const parentClosed = sliceOf !== null && judged.issue.state !== 'OPEN'
     set(
       'issue-open',
-      issue.state === 'OPEN' ? 'ok' : 'no',
-      issue.state === 'OPEN'
-        ? `#${number} está aberta`
-        : `#${number} está ${issue.state === 'CLOSED' ? 'fechada' : String(issue.state).toLowerCase()}`,
+      issue.state === 'OPEN' && !parentClosed ? 'ok' : 'no',
+      issue.state !== 'OPEN'
+        ? `#${number} está ${shownState(issue.state)}`
+        : parentClosed
+          ? `a mãe #${sliceOf} da fatia #${number} está ${shownState(judged.issue.state)}`
+          : sliceOf !== null
+            ? `#${number} e a mãe #${sliceOf} estão abertas`
+            : `#${number} está aberta`,
       { blocks: true },
     )
 
+    // Exactly one state label, and it is the ready one. Checking only for
+    // the ready label let `ready-for-human` + `ready-for-agent` open the
+    // gate (lite-campaign #103), so contradictions are named.
+    const stateVerdict = (states) => ({
+      ok: states.length === 1 && states[0] === readyLabel,
+      detail:
+        states.length === 1 && states[0] === readyLabel
+          ? readyLabel
+          : states.length === 0
+            ? `nenhuma label de estado; o build só começa em ${readyLabel}, que o dono aplica depois do Approve`
+            : states.length > 1
+              ? `labels de estado contraditórias: ${states.join(', ')}; deve haver só ${readyLabel}`
+              : `${states[0]}: o build só começa em ${readyLabel}, que o dono aplica depois do Approve`,
+    })
+    const partial = (what, total, read) =>
+      Number.isInteger(total)
+        ? `a issue tem ${total} labels e o gate leu ${read}: ${total - read} ${total - read === 1 ? 'ficou' : 'ficaram'} sem ler, e o gate não julga ${what} sem ler todas`
+        : `o GitHub não disse quantas labels a issue tem, e o gate não julga ${what} sem saber se leu todas (leu ${read})`
+
     if (!labelsRead) {
-      const unread = labelsTotal - labels.length
-      const partial = (what) =>
-        Number.isInteger(labelsTotal)
-          ? `a issue tem ${labelsTotal} labels e o gate leu ${labels.length}: ${unread} ${unread === 1 ? 'ficou' : 'ficaram'} sem ler, e o gate não julga ${what} sem ler todas`
-          : `o GitHub não disse quantas labels a issue tem, e o gate não julga ${what} sem saber se leu todas (leu ${labels.length})`
-      set('kind', 'no', partial('a categoria'), { blocks: true })
-      set('state-label', 'no', partial('o estado'), { blocks: true })
+      set('kind', 'no', partial('a categoria', labelsTotal, labels.length), {
+        blocks: true,
+      })
+      set(
+        'state-label',
+        'no',
+        partial('o estado', labelsTotal, labels.length),
+        {
+          blocks: true,
+        },
+      )
     } else {
       const category = kindOf(labels)
       kind = category.kind
@@ -722,94 +826,174 @@ function main() {
         { blocks: true },
       )
 
-      // Exactly one state label, and it is the ready one. Checking only for
-      // the ready label let `ready-for-human` + `ready-for-agent` open the
-      // gate (lite-campaign #103), so contradictions are named.
-      const states = stateLabels.filter((name) => labels.includes(name))
-      set(
-        'state-label',
-        states.length === 1 && states[0] === readyLabel ? 'ok' : 'no',
-        states.length === 1 && states[0] === readyLabel
-          ? readyLabel
-          : states.length === 0
-            ? `nenhuma label de estado; o build só começa em ${readyLabel}, que o dono aplica depois do Approve`
-            : states.length > 1
-              ? `labels de estado contraditórias: ${states.join(', ')}; deve haver só ${readyLabel}`
-              : `${states[0]}: o build só começa em ${readyLabel}, que o dono aplica depois do Approve`,
-        { blocks: true },
-      )
+      if (parentProblem !== null)
+        set(
+          'state-label',
+          parentProblem.refused ? 'no' : 'unchecked',
+          parentProblem.detail,
+          { blocks: true },
+        )
+      else if (sliceOf === null) {
+        const verdict = stateVerdict(
+          stateLabels.filter((name) => labels.includes(name)),
+        )
+        set('state-label', verdict.ok ? 'ok' : 'no', verdict.detail, {
+          blocks: true,
+        })
+      } else {
+        const own = stateLabels.filter((name) => labels.includes(name))
+        if (own.length > 0)
+          set(
+            'state-label',
+            'no',
+            `uma fatia não leva label de estado, e a #${number} tem ${own.join(', ')}: o estado é o da mãe #${sliceOf}`,
+            { blocks: true },
+          )
+        else if (!judged.labelsRead)
+          set(
+            'state-label',
+            'no',
+            `na mãe #${sliceOf}, ${partial('o estado', judged.issue.labels?.totalCount, judged.labels.length)}`,
+            { blocks: true },
+          )
+        else {
+          const verdict = stateVerdict(
+            stateLabels.filter((name) => judged.labels.includes(name)),
+          )
+          set(
+            'state-label',
+            verdict.ok ? 'ok' : 'no',
+            `${verdict.detail}, na mãe #${sliceOf} (a #${number} é uma fatia da stack dela)`,
+            { blocks: true },
+          )
+        }
+      }
     }
 
-    const comments = issue.comments?.nodes ?? []
-    const events = issue.timelineItems?.nodes ?? []
-    const plan = currentPlan({ body: issue.body, comments })
-    const planSource =
-      plan.source === 'comment'
-        ? `comentário "# Plano" de ${plan.comment.createdAt}`
-        : 'corpo da issue'
-    const required = sectionsFor(kind)
-    const { missing, empty } = checkSections(plan.text, kind)
-    const whyOf = new Map(required.map(({ heading, why }) => [heading, why]))
-    const sectionProblems = [
-      ...(missing.length > 0 ? [`faltam ${quoted(missing)}`] : []),
-      ...(empty.length > 0 ? [`vazias ${quoted(empty)}`] : []),
-    ]
-    set(
-      'sections',
-      sectionProblems.length === 0 ? 'ok' : 'no',
-      sectionProblems.length === 0
-        ? `as ${required.length} seções de ${kind === 'bug' ? 'bug' : 'feature'} estão no plano (${planSource})`
-        : `${sectionProblems.join('; ')} (${planSource})`,
-      {
-        blocks: true,
-        extra: [...missing, ...empty].map(
-          (heading) => `${heading}: ${whyOf.get(heading)}`,
-        ),
-      },
-    )
-
-    const criteria = countCriteria(criteriaSection(plan.text))
-    set(
-      'criteria',
-      criteria > 0 ? 'ok' : 'no',
-      criteria > 0
-        ? `${criteria} critério(s) de aceite`
-        : 'a seção de critérios de aceite não tem nenhum item de checklist (- [ ] …)',
-      { blocks: true },
-    )
-
-    const commentsTotal = issue.comments?.totalCount ?? 0
-    const eventsTotal = issue.timelineItems?.totalCount ?? 0
-    if (commentsTotal > page || eventsTotal > page) {
-      set(
-        'approve',
-        'no',
-        `a issue tem ${commentsTotal} comentário(s) e ${eventsTotal} evento(s) de label, reabertura ou comentário apagado; o gate lê só os últimos ${page} de cada e não julga o Approve sem ler tudo`,
-        { blocks: true },
-      )
+    if (parentProblem !== null) {
+      for (const id of ['sections', 'criteria', 'approve', 'branch-in-plan'])
+        set(
+          id,
+          parentProblem.refused ? 'no' : 'unchecked',
+          parentProblem.detail,
+          {
+            blocks: true,
+          },
+        )
+      set('size', 'unchecked', parentProblem.detail)
     } else {
-      const approve = approveState({
-        issue: { lastEditedAt: issue.lastEditedAt },
-        comments,
-        events,
-        ownerLogin: fetched.data.repository.owner?.login,
-      })
-      set('approve', approve.ok ? 'ok' : 'no', approve.detail, { blocks: true })
-    }
+      const planIssue = judged.issue
+      const comments = planIssue.comments?.nodes ?? []
+      const events = planIssue.timelineItems?.nodes ?? []
+      const plan = currentPlan({ body: planIssue.body, comments })
+      const planSource =
+        plan.source === 'comment'
+          ? `comentário "# Plano" de ${plan.comment.createdAt}${sliceOf === null ? '' : ` na mãe #${sliceOf}`}`
+          : sliceOf === null
+            ? 'corpo da issue'
+            : `corpo da mãe #${sliceOf}`
+      // A slice's plan is its parent's, of the parent's category.
+      const planKind =
+        sliceOf === null
+          ? kind
+          : judged.labelsRead
+            ? kindOf(judged.labels).kind
+            : null
+      const required = sectionsFor(planKind)
+      const { missing, empty } = checkSections(plan.text, planKind)
+      const whyOf = new Map(required.map(({ heading, why }) => [heading, why]))
+      const sectionProblems = [
+        ...(missing.length > 0 ? [`faltam ${quoted(missing)}`] : []),
+        ...(empty.length > 0 ? [`vazias ${quoted(empty)}`] : []),
+      ]
+      set(
+        'sections',
+        sectionProblems.length === 0 ? 'ok' : 'no',
+        sectionProblems.length === 0
+          ? `as ${required.length} seções de ${planKind === 'bug' ? 'bug' : 'feature'} estão no plano (${planSource})`
+          : `${sectionProblems.join('; ')} (${planSource})`,
+        {
+          blocks: true,
+          extra: [...missing, ...empty].map(
+            (heading) => `${heading}: ${whyOf.get(heading)}`,
+          ),
+        },
+      )
 
-    // The exact name, in the section that carries it (Plano for a feature).
-    const citation = planCitesBranch(plan.text, branch, kind)
-    set(
-      'branch-in-plan',
-      citation.cited ? 'ok' : 'no',
-      citation.cited
-        ? `a seção ${citation.heading} do plano cita ${branch}`
-        : citation.section
-          ? `a seção ${citation.heading} do plano vigente (${planSource}) não cita a branch ${branch}`
-          : `o plano vigente (${planSource}) não tem a seção ${citation.heading}, que cita a branch ${branch}`,
-      { blocks: true },
-    )
-    set('size', 'ok', `${plan.text.length} caracteres (${planSource})`)
+      const criteria = countCriteria(criteriaSection(plan.text))
+      set(
+        'criteria',
+        criteria > 0 ? 'ok' : 'no',
+        criteria > 0
+          ? `${criteria} critério(s) de aceite`
+          : 'a seção de critérios de aceite não tem nenhum item de checklist (- [ ] …)',
+        { blocks: true },
+      )
+
+      const commentsTotal = planIssue.comments?.totalCount ?? 0
+      const eventsTotal = planIssue.timelineItems?.totalCount ?? 0
+      const inParent = sliceOf === null ? '' : ` (na mãe #${sliceOf})`
+      if (commentsTotal > page || eventsTotal > page) {
+        set(
+          'approve',
+          'no',
+          `a issue tem ${commentsTotal} comentário(s) e ${eventsTotal} evento(s) de label, reabertura ou comentário apagado; o gate lê só os últimos ${page} de cada e não julga o Approve sem ler tudo${inParent}`,
+          { blocks: true },
+        )
+      } else {
+        const approve = approveState({
+          issue: { lastEditedAt: planIssue.lastEditedAt },
+          comments,
+          events,
+          ownerLogin: judged.owner,
+        })
+        set(
+          'approve',
+          approve.ok ? 'ok' : 'no',
+          `${approve.detail}${inParent}`,
+          {
+            blocks: true,
+          },
+        )
+      }
+
+      if (sliceOf === null) {
+        // The exact name, in the section that carries it (Plano for a feature).
+        const citation = planCitesBranch(plan.text, branch, kind)
+        set(
+          'branch-in-plan',
+          citation.cited ? 'ok' : 'no',
+          citation.cited
+            ? `a seção ${citation.heading} do plano cita ${branch}`
+            : citation.section
+              ? `a seção ${citation.heading} do plano vigente (${planSource}) não cita a branch ${branch}`
+              : `o plano vigente (${planSource}) não tem a seção ${citation.heading}, que cita a branch ${branch}`,
+          { blocks: true },
+        )
+      } else {
+        // A slice is cited in the parent's Stack, which also gives its place.
+        const stack = stackOf(plan.text)
+        const position =
+          stack.problems.length === 0
+            ? slicePosition(stack.branches, branch)
+            : null
+        if (position !== null)
+          slice = { parent: sliceOf, position, branches: stack.branches }
+        set(
+          'branch-in-plan',
+          position !== null ? 'ok' : 'no',
+          !stack.declared
+            ? `o plano vigente (${planSource}) não tem a seção ${stackSection}, que lista as branches das fatias`
+            : stack.problems.length > 0
+              ? `${stack.problems.join('; ')} (${planSource})`
+              : position === null
+                ? `a seção ${stackSection} do plano vigente (${planSource}) não cita a branch ${branch}`
+                : `a seção ${stackSection} do plano vigente (${planSource}) cita ${branch}: fatia ${position.index + 1} de ${position.count}`,
+          { blocks: true },
+        )
+      }
+      set('size', 'ok', `${plan.text.length} caracteres (${planSource})`)
+    }
   }
 
   // 4. The pull request (CI only).
@@ -846,16 +1030,61 @@ function main() {
             : `PR não lida: ${prFetched.reason}`,
           { blocks: true },
         )
+      set('pr-size', 'unchecked', 'a PR não foi lida')
       pr = null
     } else {
-      set(
-        'pr-base',
-        pr.baseRefName === trunk ? 'ok' : 'no',
-        pr.baseRefName === trunk
-          ? trunk
-          : `a PR aponta para ${pr.baseRefName}, não para ${trunk}`,
-        { blocks: true },
-      )
+      // A slice of a stack (#31) may point at the slice right below it, and
+      // then stays a draft: a draft cannot be merged, so no slice is merged
+      // into another. It leaves draft once the one below is merged and the PR
+      // points at main.
+      const below = slice?.position.below ?? null
+      if (pr.baseRefName === trunk)
+        set('pr-base', 'ok', trunk, { blocks: true })
+      else if (below !== null && pr.baseRefName === below)
+        set(
+          'pr-base',
+          pr.isDraft === true ? 'ok' : 'no',
+          pr.isDraft === true
+            ? `${below}, a fatia logo abaixo na stack da #${slice.parent}, com a PR em draft`
+            : `a PR aponta para a fatia de baixo (${below}) e não está em draft: com a base na fatia de baixo, a PR fica em draft até ela mergear e esta passar a apontar para ${trunk}`,
+          { blocks: true },
+        )
+      else
+        set(
+          'pr-base',
+          'no',
+          `a PR aponta para ${pr.baseRefName}, não para ${trunk}${
+            slice === null
+              ? ''
+              : below === null
+                ? ` (a #${number} é a primeira fatia da stack da #${slice.parent})`
+                : ` nem para a fatia de baixo, ${below}`
+          }`,
+          { blocks: true },
+        )
+
+      // Only a report: the size of a PR is a signal for splitting a change
+      // into a stack, not a rule.
+      const additions = pr.additions
+      const deletions = pr.deletions
+      if (!Number.isInteger(additions) || !Number.isInteger(deletions))
+        set(
+          'pr-size',
+          'unchecked',
+          'o GitHub não disse quantas linhas a PR muda',
+        )
+      else {
+        const changed = additions + deletions
+        set(
+          'pr-size',
+          changed <= prSizeLimit ? 'ok' : 'no',
+          `${changed} linha(s) alterada(s) (+${additions} −${deletions}) em ${pr.changedFiles ?? '?'} arquivo(s), contra ${pr.baseRefName}${
+            changed <= prSizeLimit
+              ? ''
+              : `; acima da referência de ${prSizeLimit}: considere quebrar a mudança numa stack`
+          }`,
+        )
+      }
       const refs = pr.closingIssuesReferences ?? { totalCount: 0, nodes: [] }
       const sameRepo = (node) =>
         String(node.repository?.nameWithOwner ?? '').toLowerCase() ===
@@ -1022,6 +1251,7 @@ function main() {
       'pr-first-line',
       'copilot-review',
       'review-threads',
+      'pr-size',
     ])
       set(id, 'skip', 'só no modo CI')
 
@@ -1063,6 +1293,12 @@ function main() {
 
   // 6. The history: read from git only, so it works on a PR checkout.
   const learnBlocks = ci && !(pr?.isDraft === true)
+  // In a stack (#31) the intent goes with the first slice and the Learn with
+  // the last, citing the parent; in the other slices both only report.
+  const intentBlocks = learnBlocks && (slice === null || slice.position.first)
+  const learnHere = learnBlocks && (slice === null || slice.position.last)
+  const blocksOf = (id) =>
+    id === 'intent-first' ? intentBlocks : id === 'learn' ? learnHere : false
   if (facts.headSha === null) {
     set('stacked', 'no', 'HEAD não tem commit', { blocks: true })
     for (const id of [
@@ -1071,9 +1307,7 @@ function main() {
       'learn',
       'commits-cite-issue',
     ])
-      set(id, 'unchecked', 'HEAD não tem commit', {
-        blocks: (id === 'intent-first' || id === 'learn') && learnBlocks,
-      })
+      set(id, 'unchecked', 'HEAD não tem commit', { blocks: blocksOf(id) })
   } else if (originMain === null) {
     set('stacked', 'no', `sem origin/${trunk} local; rode git fetch origin`, {
       blocks: true,
@@ -1085,7 +1319,7 @@ function main() {
       'commits-cite-issue',
     ])
       set(id, 'unchecked', `sem origin/${trunk} local; rode git fetch origin`, {
-        blocks: (id === 'intent-first' || id === 'learn') && learnBlocks,
+        blocks: blocksOf(id),
       })
   } else {
     // Stacked (lite-campaign #122): a foreign ref shares this branch's history
@@ -1144,6 +1378,15 @@ function main() {
     ])
     const sharing = []
     const shaOf = new Map()
+    // A slice of a stack (#31) shares history with the slices below it, by
+    // design: their refs are not foreign, and their commits are not this
+    // slice's own. The slices above it hold all of HEAD, so they are not
+    // foreign either, and they take nothing from the own commits. Only this
+    // repository's refs count, local or on origin; a copy under another
+    // remote is judged like any other ref.
+    const stackLower = new Set(slice?.position.lower ?? [])
+    const stackUpper = new Set(slice?.position.upper ?? [])
+    const lowerRefs = []
     const candidates = (
       gitOut(
         'for-each-ref',
@@ -1163,6 +1406,13 @@ function main() {
     for (const { sha, ref } of candidates) {
       if (ref.endsWith('/HEAD') || ref === originTrunk || ownRefs.has(ref))
         continue
+      if (/^refs\/(?:heads|remotes\/origin)\//.test(ref)) {
+        if (stackLower.has(refName(ref))) {
+          lowerRefs.push(ref)
+          continue
+        }
+        if (stackUpper.has(refName(ref))) continue
+      }
       const other = parseBranch(refName(ref))
       const sameIssue = other?.issue === number
       if (
@@ -1191,15 +1441,28 @@ function main() {
     // its own first commit and not the one of the branch below (#122).
     const walked =
       commitsIn(
-        ['HEAD', `^${originMain}`, ...sharing.map((ref) => `^${ref}`)],
+        [
+          'HEAD',
+          `^${originMain}`,
+          ...sharing.map((ref) => `^${ref}`),
+          ...lowerRefs.map((ref) => `^${ref}`),
+        ],
         { firstParent: true },
       ) ?? []
     // Hidden stacking: a merge anywhere on that line whose other parent is
     // not in origin/main brought in work from outside it, and its ref may be
     // gone (`git merge --no-ff side`, then `git branch -D side`), so no ref
     // above shows it. Merging origin/main in stays allowed.
+    // In a stack, merging a slice below in (to bring its fixes up) is how a
+    // slice is updated, and is not foreign.
+    const fromBelow = (parent) =>
+      lowerRefs.some((ref) => isAncestor(parent, ref))
     const foreignMerges = walked.filter((commit) =>
-      commit.parents.slice(1).some((parent) => !isAncestor(parent, originMain)),
+      commit.parents
+        .slice(1)
+        .some(
+          (parent) => !isAncestor(parent, originMain) && !fromBelow(parent),
+        ),
     )
     // A merge of this branch's own published copy (a `git pull` that made a
     // merge commit) lands above too; the remedy then is a rebase, not a recut.
@@ -1284,7 +1547,9 @@ function main() {
       'stacked',
       stackProblems.length === 0 ? 'ok' : 'no',
       stackProblems.length === 0
-        ? `nenhuma outra ref compartilha commits que origin/${trunk} não tem, e nenhum merge traz commits de fora dele`
+        ? slice === null
+          ? `nenhuma outra ref compartilha commits que origin/${trunk} não tem, e nenhum merge traz commits de fora dele`
+          : `nenhuma ref de fora da stack da #${slice.parent} compartilha commits que origin/${trunk} não tem, e nenhum merge traz commits de fora dele e das fatias de baixo${lowerRefs.length > 0 ? `; as fatias de baixo (${lowerRefs.map(shortRef).join(', ')}) ficam fora dos commits próprios` : ''}`
         : [...stackProblems, ...(remedy === null ? [] : [remedy])].join('; '),
       { blocks: true },
     )
@@ -1334,16 +1599,14 @@ function main() {
         'intent-first',
         'no',
         `merge com conteúdo próprio antes do intent (${short(unclean.sha)} ${firstLine(unclean.message)}); antes do intent, só um merge limpo de origin/${trunk}`,
-        { blocks: learnBlocks },
+        { blocks: intentBlocks },
       )
     else if (own.length === 0)
       set(
         'intent-first',
         'no',
         `nenhum commit próprio ainda; o primeiro deve tocar só ${intentDir}`,
-        {
-          blocks: learnBlocks,
-        },
+        { blocks: intentBlocks },
       )
     else {
       const first = own[0]
@@ -1369,14 +1632,15 @@ function main() {
           : outside.length === 0
             ? `o primeiro commit próprio (${short(first.sha)}) toca só ${intentDir}`
             : `o primeiro commit próprio (${short(first.sha)}) toca ${outside.slice(0, 3).join(', ')}${outside.length > 3 ? ', …' : ''}`,
-        { blocks: learnBlocks },
+        { blocks: intentBlocks },
       )
     }
 
     // Learn (lite-campaign #124): a changelog entry heading for this issue that
     // this branch added. A mention of #N in prose, or a heading main already
-    // had, does not count.
-    const heading = changelogHeadingFor(number)
+    // had, does not count. A stack's Learn cites its parent (#31).
+    const learnIssue = slice === null ? number : slice.parent
+    const heading = changelogHeadingFor(learnIssue)
     const headingsIn = (text) =>
       String(text)
         .split(/\r?\n/)
@@ -1385,7 +1649,7 @@ function main() {
     const atHead = git('show', `HEAD:${changelogPath}`)
     if (!atHead.ok)
       set('learn', 'no', `${changelogPath} não existe em HEAD`, {
-        blocks: learnBlocks,
+        blocks: learnHere,
       })
     else {
       const now = headingsIn(atHead.out)
@@ -1401,10 +1665,24 @@ function main() {
         added.length > 0
           ? `entrada nova no changelog: ${added[0]}`
           : now.length > 0
-            ? `o heading da #${number} já existia no merge-base com origin/${trunk}; esta branch não acrescentou entrada`
-            : `nenhum heading "## AAAA-MM-DD: … (#${number})" em ${changelogPath}`,
-        { blocks: learnBlocks },
+            ? `o heading da #${learnIssue} já existia no merge-base com origin/${trunk}; esta branch não acrescentou entrada`
+            : `nenhum heading "## AAAA-MM-DD: … (#${learnIssue})" em ${changelogPath}`,
+        { blocks: learnHere },
       )
+    }
+
+    // In a stack, say why a slice only reports what another slice carries.
+    if (slice !== null) {
+      const first = slice.branches[0]
+      const last = slice.branches[slice.branches.length - 1]
+      if (!slice.position.first)
+        notes.set('intent-first', [
+          `só relata: na stack da #${slice.parent}, o intent vai na primeira fatia (${first})`,
+        ])
+      if (!slice.position.last)
+        notes.set('learn', [
+          `só relata: na stack da #${slice.parent}, o Learn vai na última fatia (${last}), citando a #${slice.parent}`,
+        ])
     }
 
     const silent = own.filter((commit) => !cites.test(commit.message))

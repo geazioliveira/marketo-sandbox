@@ -149,6 +149,10 @@ const defaultEvents = () => [
 ]
 
 interface IssueOptions {
+  /** The issue's number; ISSUE unless a case names another (a stack's parent or slice). */
+  number?: number
+  /** The parent's number, when the issue is a sub-issue; null says it has none. */
+  parent?: number | null
   state?: 'OPEN' | 'CLOSED'
   body?: string
   lastEditedAt?: string | null
@@ -167,14 +171,21 @@ function issueAnswer(options: IssueOptions = {}): GhAnswer {
   const labels = options.labels ?? ['enhancement', 'ready-for-agent']
   const labelsTotal =
     options.labelsTotal === undefined ? labels.length : options.labelsTotal
+  const number = options.number ?? ISSUE
   return {
-    number: ISSUE,
+    number,
     mode: 'ok',
     data: {
       repository: {
         owner: { login: OWNER },
         issue: {
-          number: ISSUE,
+          number,
+          ...(options.parent === undefined
+            ? {}
+            : {
+                parent:
+                  options.parent === null ? null : { number: options.parent },
+              }),
           state: options.state ?? 'OPEN',
           body: options.body ?? featureBody(),
           lastEditedAt: options.lastEditedAt ?? null,
@@ -294,6 +305,9 @@ function prAnswer(
           headRefOid,
           isDraft: false,
           body: `Closes #${ISSUE}.\n\n## Risco\n\nNORMAL.`,
+          additions: 40,
+          deletions: 10,
+          changedFiles: 3,
           closingIssuesReferences: { totalCount: 1, nodes: [closing(ISSUE)] },
           reviews: connection([review(headRefOid)]),
           reviewRequests: connection([]),
@@ -467,6 +481,7 @@ const ciOnly = new Set([
   'pr-first-line',
   'copilot-review',
   'review-threads',
+  'pr-size',
 ])
 
 const localPass = Object.fromEntries(
@@ -3539,6 +3554,545 @@ describe.concurrent('scripts/gate.mjs', () => {
     expect(readFileSync(repo.log, 'utf8')).toContain('argv inesperado')
   })
 
+  describe.concurrent(
+    'a stack of PRs, each slice a sub-issue of its parent (#31)',
+    () => {
+      const PARENT = 40
+      const SLICES = [
+        'feature/43-fatia-base',
+        'feature/44-fatia-meio',
+        'feature/45-fatia-topo',
+      ] as const
+      const [BOTTOM, MIDDLE, TOP] = SLICES
+      const numberOf = (branch: string) => parseBranch(branch)?.issue ?? 0
+      const STACK_INTENT = 'context/intent/feature-a-stack.md'
+      const STACK_ENTRY = `## 2026-09-20: A stack inteira (#${PARENT})`
+
+      /** A parent's plan: a feature plan whose Stack section lists the slices, bottom first. */
+      const parentBody = (branches: readonly string[] = SLICES) =>
+        `${featureBody({ Plano: 'As fatias estão na seção Stack.' })}\n## Stack\n\nDe baixo para cima:\n\n${branches
+          .map((branch, i) => `${i + 1}. \`${branch}\``)
+          .join('\n')}\n`
+
+      const parentAnswer = (options: IssueOptions = {}) =>
+        issueAnswer({ number: PARENT, body: parentBody(), ...options })
+
+      /** A slice's sub-issue: its category and the slice label, no state label, no plan of its own. */
+      const sliceAnswer = (branch: string, options: IssueOptions = {}) =>
+        issueAnswer({
+          number: numberOf(branch),
+          parent: PARENT,
+          body: `Fatia da stack da #${PARENT}.`,
+          labels: ['enhancement', 'stack-slice'],
+          comments: [],
+          events: [
+            labeled('enhancement', at('10:00')),
+            labeled('stack-slice', at('10:00')),
+          ],
+          ...options,
+        })
+
+      /** A slice's PR: it closes the slice's sub-issue. */
+      const slicePr = (
+        head: string,
+        branch: string,
+        overrides: Record<string, unknown> = {},
+      ) =>
+        prAnswer(head, {
+          headRefName: branch,
+          body: `Closes #${numberOf(branch)}.\n\n## Risco\n\nHIGH.`,
+          closingIssuesReferences: {
+            totalCount: 1,
+            nodes: [closing(numberOf(branch))],
+          },
+          ...overrides,
+        })
+
+      /** A slice cut from `from`, two commits citing its sub-issue, published. */
+      const slice = async (
+        repo: TempRepo,
+        branch: string,
+        from: string,
+        first: Record<string, string>,
+        second: Record<string, string>,
+      ) => {
+        await repo.git('switch', '-q', '-c', branch, from)
+        await repo.commit(
+          first,
+          `Primeiro commit da fatia (Refs #${numberOf(branch)})`,
+        )
+        await repo.commit(
+          second,
+          `Segundo commit da fatia (Refs #${numberOf(branch)})`,
+        )
+        await repo.publish(branch)
+      }
+
+      /**
+       * The three slices, each cut from the one below: the first starts with
+       * the intent, the last carries the Learn citing the parent.
+       */
+      const stack = async (
+        fresh: Fresh,
+        learn = `# Changelog\n\n${STACK_ENTRY}\n\nO que mudou.\n`,
+      ) => {
+        const repo = await fresh()
+        await slice(
+          repo,
+          BOTTOM,
+          'main',
+          { [STACK_INTENT]: '# Intent\n' },
+          {
+            'src/base.ts': 'export const base = 1\n',
+          },
+        )
+        await slice(
+          repo,
+          MIDDLE,
+          BOTTOM,
+          { 'src/meio.ts': 'export const meio = 1\n' },
+          {
+            'src/meio-2.ts': 'export const meio2 = 1\n',
+          },
+        )
+        await slice(
+          repo,
+          TOP,
+          MIDDLE,
+          { 'src/topo.ts': 'export const topo = 1\n' },
+          {
+            [CHANGELOG]: learn,
+          },
+        )
+        return repo
+      }
+
+      /** The local gate on `branch`, a slice, with its sub-issue and parent as given. */
+      const onSlice = async (
+        repo: TempRepo,
+        branch: string,
+        issue = sliceAnswer(branch),
+        parent: GhAnswer | undefined = parentAnswer(),
+      ) => {
+        await repo.git('switch', '-q', branch)
+        return repo.gateJson([], {
+          fixture: parent === undefined ? { issue } : { issue, parent },
+        })
+      }
+
+      /** CI mode on `branch`, with only the published refs, the way the checkout leaves them. */
+      const ciOnSlice = async (
+        repo: TempRepo,
+        branch: string,
+        pr: (head: string) => GhAnswer,
+        parent: GhAnswer = parentAnswer(),
+      ) => {
+        await repo.git('switch', '-q', branch)
+        for (const other of SLICES)
+          if (other !== branch) await repo.git('branch', '-q', '-D', other)
+        return ciOver(
+          repo,
+          (head) => ({ issue: sliceAnswer(branch), parent, pr: pr(head) }),
+          { branch },
+        )
+      }
+
+      test('judges a slice by its parent: the state label, the plan, the Approve and the Stack', async ({
+        expect,
+        fresh,
+      }) => {
+        const repo = await stack(fresh)
+        const { result } = await onSlice(repo, MIDDLE)
+        expect(result.open).toBe(true)
+        expect(step(result, 'issue-open').detail).toBe(
+          `#44 e a mãe #${PARENT} estão abertas`,
+        )
+        expect(step(result, 'state-label')).toMatchObject({
+          status: 'ok',
+          detail: `ready-for-agent, na mãe #${PARENT} (a #44 é uma fatia da stack dela)`,
+        })
+        expect(step(result, 'sections').detail).toContain(
+          `corpo da mãe #${PARENT}`,
+        )
+        expect(step(result, 'approve')).toMatchObject({ status: 'ok' })
+        expect(step(result, 'approve').detail).toContain(`(na mãe #${PARENT})`)
+        expect(step(result, 'branch-in-plan')).toMatchObject({ status: 'ok' })
+        expect(step(result, 'branch-in-plan').detail).toContain(
+          `cita ${MIDDLE}: fatia 2 de 3`,
+        )
+        // The slice below shares its history by design, and the one above holds
+        // all of it; neither is foreign, and only this slice's commits are its own.
+        expect(step(result, 'stacked')).toMatchObject({ status: 'ok' })
+        expect(step(result, 'stacked').detail).toContain(BOTTOM)
+        expect(step(result, 'commits-cite-issue').detail).toBe(
+          '2 commit(s) próprio(s), todos citam #44',
+        )
+      })
+
+      test('reads the parent only for a sub-issue that carries the slice label', async ({
+        expect,
+        fresh,
+      }) => {
+        // A plain sub-issue of #1 is judged by its own plan, as before: the fake
+        // gh has no answer for #1, and would refuse the query.
+        const { result } = await local(fresh, { parent: 1 })
+        expect(result.open).toBe(true)
+        expect(step(result, 'issue-open').detail).toBe(`#${ISSUE} está aberta`)
+      })
+
+      test('lets a slice PR point at the slice below while it is a draft', async ({
+        expect,
+        fresh,
+      }) => {
+        const repo = await stack(fresh)
+        const { result } = await ciOnSlice(repo, MIDDLE, (head) =>
+          slicePr(head, MIDDLE, { baseRefName: BOTTOM, isDraft: true }),
+        )
+        expect(step(result, 'pr-base')).toMatchObject({
+          status: 'ok',
+          detail: `${BOTTOM}, a fatia logo abaixo na stack da #${PARENT}, com a PR em draft`,
+        })
+        expect(result.blocked).toEqual([])
+      })
+
+      test('refuses a slice PR that points at the slice below out of draft', async ({
+        expect,
+        fresh,
+      }) => {
+        const repo = await stack(fresh)
+        const { result } = await ciOnSlice(repo, MIDDLE, (head) =>
+          slicePr(head, MIDDLE, { baseRefName: BOTTOM }),
+        )
+        expect(step(result, 'pr-base')).toMatchObject({
+          status: 'no',
+          blocks: true,
+        })
+        expect(step(result, 'pr-base').detail).toContain('não está em draft')
+        expect(result.blocked).toContain('pr-base')
+      })
+
+      test('refuses a slice PR that points at a slice other than the one below', async ({
+        expect,
+        fresh,
+      }) => {
+        const repo = await stack(fresh)
+        const { result } = await ciOnSlice(repo, TOP, (head) =>
+          slicePr(head, TOP, { baseRefName: BOTTOM, isDraft: true }),
+        )
+        expect(step(result, 'pr-base')).toMatchObject({
+          status: 'no',
+          blocks: true,
+        })
+        expect(step(result, 'pr-base').detail).toBe(
+          `a PR aponta para ${BOTTOM}, não para main nem para a fatia de baixo, ${MIDDLE}`,
+        )
+      })
+
+      test('holds the intent to the first slice only', async ({
+        expect,
+        fresh,
+      }) => {
+        const repo = await stack(fresh)
+        const first = await ciOnSlice(repo, BOTTOM, (head) =>
+          slicePr(head, BOTTOM),
+        )
+        expect(step(first.result, 'intent-first')).toMatchObject({
+          status: 'ok',
+          blocks: true,
+        })
+        // The Learn goes with the last slice: the first one opens without it.
+        expect(step(first.result, 'learn').blocks).toBe(false)
+        expect(first.result.blocked).toEqual([])
+      })
+
+      test('lets a middle slice open without its own intent or Learn, and says why', async ({
+        expect,
+        fresh,
+      }) => {
+        const repo = await stack(fresh)
+        const { result, out } = await ciOnSlice(repo, MIDDLE, (head) =>
+          slicePr(head, MIDDLE),
+        )
+        expect(step(result, 'intent-first')).toMatchObject({
+          status: 'no',
+          blocks: false,
+        })
+        expect(step(result, 'learn').blocks).toBe(false)
+        expect(result.blocked).toEqual([])
+        expect(out).toContain(
+          `só relata: na stack da #${PARENT}, o intent vai na primeira fatia (${BOTTOM})`,
+        )
+        expect(out).toContain(
+          `só relata: na stack da #${PARENT}, o Learn vai na última fatia (${TOP}), citando a #${PARENT}`,
+        )
+      })
+
+      test('holds the Learn to the last slice, citing the parent', async ({
+        expect,
+        fresh,
+      }) => {
+        const repo = await stack(fresh)
+        const { result } = await ciOnSlice(repo, TOP, (head) =>
+          slicePr(head, TOP),
+        )
+        expect(step(result, 'learn')).toMatchObject({
+          status: 'ok',
+          blocks: true,
+        })
+        expect(step(result, 'learn').detail).toContain(STACK_ENTRY)
+        expect(step(result, 'intent-first').blocks).toBe(false)
+        expect(result.blocked).toEqual([])
+      })
+
+      test('refuses a last slice whose Learn cites the slice instead of the parent', async ({
+        expect,
+        fresh,
+      }) => {
+        const repo = await stack(
+          fresh,
+          '# Changelog\n\n## 2026-09-20: Só a fatia (#45)\n\nO que mudou.\n',
+        )
+        const { result } = await ciOnSlice(repo, TOP, (head) =>
+          slicePr(head, TOP),
+        )
+        expect(step(result, 'learn')).toMatchObject({
+          status: 'no',
+          blocks: true,
+        })
+        expect(step(result, 'learn').detail).toContain(`(#${PARENT})`)
+      })
+
+      test('refuses a branch the parent’s Stack does not name', async ({
+        expect,
+        fresh,
+      }) => {
+        const repo = await stack(fresh)
+        const outside = 'feature/46-fora-da-stack'
+        await slice(
+          repo,
+          outside,
+          MIDDLE,
+          { 'src/fora.ts': 'x\n' },
+          { 'src/fora-2.ts': 'y\n' },
+        )
+        const { result } = await onSlice(repo, outside)
+        expect(step(result, 'branch-in-plan')).toMatchObject({ status: 'no' })
+        expect(step(result, 'branch-in-plan').detail).toContain(
+          `não cita a branch ${outside}`,
+        )
+        expect(result.open).toBe(false)
+      })
+
+      test('refuses a slice whose parent has no Approve, or had its plan revised after it', async ({
+        expect,
+        fresh,
+      }) => {
+        const repo = await stack(fresh)
+        const none = await onSlice(
+          repo,
+          MIDDLE,
+          sliceAnswer(MIDDLE),
+          parentAnswer({ comments: [] }),
+        )
+        expect(step(none.result, 'approve')).toMatchObject({ status: 'no' })
+        expect(step(none.result, 'approve').detail).toContain(
+          `(na mãe #${PARENT})`,
+        )
+        const revised = await onSlice(
+          repo,
+          MIDDLE,
+          sliceAnswer(MIDDLE),
+          parentAnswer({
+            comments: [
+              approve(),
+              comment(`# Plano\n\n${parentBody()}`, at('13:00')),
+            ],
+          }),
+        )
+        expect(step(revised.result, 'approve')).toMatchObject({ status: 'no' })
+        expect(revised.result.open).toBe(false)
+      })
+
+      test('refuses a slice with no parent, one with a state label of its own, and one whose parent is closed', async ({
+        expect,
+        fresh,
+      }) => {
+        const repo = await stack(fresh)
+        const orphan = await onSlice(
+          repo,
+          MIDDLE,
+          sliceAnswer(MIDDLE, { parent: null }),
+          undefined,
+        )
+        for (const id of [
+          'state-label',
+          'sections',
+          'approve',
+          'branch-in-plan',
+        ])
+          expect(step(orphan.result, id)).toMatchObject({ status: 'no' })
+        expect(step(orphan.result, 'state-label').detail).toContain(
+          'mas não é sub-issue de nenhuma issue',
+        )
+        const labeled = await onSlice(
+          repo,
+          MIDDLE,
+          sliceAnswer(MIDDLE, {
+            labels: ['enhancement', 'stack-slice', 'ready-for-agent'],
+          }),
+        )
+        expect(step(labeled.result, 'state-label')).toMatchObject({
+          status: 'no',
+        })
+        expect(step(labeled.result, 'state-label').detail).toContain(
+          'uma fatia não leva label de estado',
+        )
+        const closed = await onSlice(
+          repo,
+          MIDDLE,
+          sliceAnswer(MIDDLE),
+          parentAnswer({ state: 'CLOSED' }),
+        )
+        expect(step(closed.result, 'issue-open')).toMatchObject({
+          status: 'no',
+          detail: `a mãe #${PARENT} da fatia #44 está fechada`,
+        })
+      })
+
+      test('refuses a slice when the parent’s plan has no Stack, or names other branches', async ({
+        expect,
+        fresh,
+      }) => {
+        const repo = await stack(fresh)
+        const noStack = await onSlice(
+          repo,
+          MIDDLE,
+          sliceAnswer(MIDDLE),
+          parentAnswer({ body: featureBody() }),
+        )
+        expect(step(noStack.result, 'branch-in-plan').detail).toContain(
+          'não tem a seção Stack',
+        )
+        const other = await onSlice(
+          repo,
+          MIDDLE,
+          sliceAnswer(MIDDLE),
+          parentAnswer({
+            body: parentBody(['feature/47-outra', 'feature/48-mais']),
+          }),
+        )
+        expect(step(other.result, 'branch-in-plan')).toMatchObject({
+          status: 'no',
+        })
+      })
+
+      test('still refuses a branch outside the stack that shares a slice’s history', async ({
+        expect,
+        fresh,
+      }) => {
+        const repo = await stack(fresh)
+        await slice(
+          repo,
+          'feature/60-outra',
+          BOTTOM,
+          { 'src/outra.ts': 'x\n' },
+          {
+            'src/outra-2.ts': 'y\n',
+          },
+        )
+        const { result } = await onSlice(repo, MIDDLE)
+        expect(step(result, 'stacked')).toMatchObject({ status: 'no' })
+        expect(step(result, 'stacked').detail).toContain('feature/60-outra')
+      })
+
+      test('takes a merge of the slice below as an update, and a merge of any other branch as foreign', async ({
+        expect,
+        fresh,
+      }) => {
+        const repo = await stack(fresh)
+        await repo.git('switch', '-q', BOTTOM)
+        await repo.commit(
+          { 'src/base.ts': 'export const base = 2\n' },
+          'Corrige a base (Refs #43)',
+        )
+        await repo.publish(BOTTOM)
+        await repo.git('switch', '-q', MIDDLE)
+        await repo.git(
+          'merge',
+          '-q',
+          '--no-ff',
+          '-m',
+          'Traz a fatia de baixo (Refs #44)',
+          BOTTOM,
+        )
+        await repo.publish(MIDDLE)
+        const updated = await onSlice(repo, MIDDLE)
+        expect(step(updated.result, 'stacked')).toMatchObject({ status: 'ok' })
+        expect(step(updated.result, 'commits-cite-issue').detail).toBe(
+          '2 commit(s) próprio(s), todos citam #44',
+        )
+        await slice(
+          repo,
+          'feature/61-lado',
+          'main',
+          { 'src/lado.ts': 'x\n' },
+          {
+            'src/lado-2.ts': 'y\n',
+          },
+        )
+        await repo.git('switch', '-q', MIDDLE)
+        await repo.git(
+          'merge',
+          '-q',
+          '--no-ff',
+          '-m',
+          'Traz outra branch (Refs #44)',
+          'feature/61-lado',
+        )
+        await repo.git('branch', '-q', '-D', 'feature/61-lado')
+        await repo.git(
+          'update-ref',
+          '-d',
+          'refs/remotes/origin/feature/61-lado',
+        )
+        const foreign = await onSlice(repo, MIDDLE)
+        expect(step(foreign.result, 'stacked')).toMatchObject({ status: 'no' })
+        expect(step(foreign.result, 'stacked').detail).toContain(
+          'um merge traz commits de fora de origin/main',
+        )
+      })
+
+      test('reports the size of a PR against its base, and never blocks on it', async ({
+        expect,
+        fresh,
+      }) => {
+        const small = await ci(fresh, passingCi)
+        expect(step(small.result, 'pr-size')).toMatchObject({
+          status: 'ok',
+          blocks: false,
+          detail:
+            '50 linha(s) alterada(s) (+40 −10) em 3 arquivo(s), contra main',
+        })
+        const big = await ci(fresh, (head) => ({
+          issue: issueAnswer(),
+          pr: prAnswer(head, {
+            additions: 1900,
+            deletions: 200,
+            changedFiles: 40,
+          }),
+        }))
+        expect(step(big.result, 'pr-size')).toMatchObject({
+          status: 'no',
+          blocks: false,
+        })
+        expect(step(big.result, 'pr-size').detail).toContain(
+          'acima da referência de 1500: considere quebrar a mudança numa stack',
+        )
+        expect(big.result.blocked).toEqual([])
+      })
+    },
+  )
+
   describe.concurrent('the fake gh reads the GraphQL', () => {
     /** The shim, called directly with the gate's argv shape and a query. */
     const callFake = async (
@@ -3578,7 +4132,7 @@ describe.concurrent('scripts/gate.mjs', () => {
     const selection = (issueFields: string) =>
       `${header} { repository(owner: $owner, name: $name) { owner { login } issue(number: $number) { ${issueFields} } } }`
     const complete =
-      'state body lastEditedAt labels(first: 100) { totalCount nodes { name } } comments(last: 100) { totalCount nodes { body createdAt lastEditedAt author { __typename login } } } timelineItems(last: 100, itemTypes: [LABELED_EVENT, REOPENED_EVENT, COMMENT_DELETED_EVENT]) { totalCount nodes { __typename ... on LabeledEvent { createdAt actor { __typename login } label { name } } ... on ReopenedEvent { createdAt } ... on CommentDeletedEvent { createdAt } } }'
+      'state body lastEditedAt parent { number } labels(first: 100) { totalCount nodes { name } } comments(last: 100) { totalCount nodes { body createdAt lastEditedAt author { __typename login } } } timelineItems(last: 100, itemTypes: [LABELED_EVENT, REOPENED_EVENT, COMMENT_DELETED_EVENT]) { totalCount nodes { __typename ... on LabeledEvent { createdAt actor { __typename login } label { name } } ... on ReopenedEvent { createdAt } ... on CommentDeletedEvent { createdAt } } }'
 
     test('refuses a query that does not select lastEditedAt', async ({
       expect,
@@ -3684,9 +4238,15 @@ describe.concurrent('scripts/gate.mjs', () => {
     test.for([
       [
         'the issue’s lastEditedAt',
-        'body lastEditedAt labels',
-        'body labels',
+        'body lastEditedAt parent',
+        'body parent',
         'repository.issue.lastEditedAt',
+      ],
+      [
+        'the parent a slice is judged by',
+        'lastEditedAt parent { number } labels',
+        'lastEditedAt labels',
+        'repository.issue.parent',
       ],
       [
         'the comments’ lastEditedAt',
@@ -3764,6 +4324,12 @@ describe.concurrent('scripts/gate.mjs', () => {
         'headRefName headRefOid isDraft',
         'headRefName isDraft',
         'repository.pullRequest.headRefOid',
+      ],
+      [
+        'the size of the PR',
+        'body additions deletions changedFiles closingIssuesReferences',
+        'body closingIssuesReferences',
+        'repository.pullRequest.additions',
       ],
       [
         'the count of closed issues',

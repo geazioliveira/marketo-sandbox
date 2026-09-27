@@ -44,11 +44,16 @@ import {
   parseBranch,
   parseSections,
   planCitesBranch,
+  prSizeLimit,
   readyLabel,
   refreshPrCommand,
   reviewRuleSince,
   shellWord,
   sectionsFor,
+  slicePosition,
+  stackOf,
+  stackSection,
+  stackSliceLabel,
   stepIds,
   stateLabels,
   type GateCache,
@@ -2022,6 +2027,111 @@ describe('openThreads', () => {
   })
 })
 
+describe('a stack declared in a parent plan (#31)', () => {
+  const plan = (stack: string) =>
+    `# Plano\n\n## Plano\n\nFatias abaixo.\n\n## ${stackSection}\n\n${stack}\n\n## Riscos\n\nHIGH.`
+
+  it('reads the branches of the Stack section, bottom first', () => {
+    expect(
+      stackOf(
+        plan(
+          'De baixo para cima:\n\n1. `feature/32-hooks-base`, a base\n2. `feature/33-hooks-shell`\n3. `fix/34-um-bug` (bug)',
+        ),
+      ),
+    ).toEqual({
+      declared: true,
+      branches: [
+        'feature/32-hooks-base',
+        'feature/33-hooks-shell',
+        'fix/34-um-bug',
+      ],
+      problems: [],
+    })
+  })
+
+  it('reads bulleted items as well as numbered ones', () => {
+    expect(
+      stackOf(plan('- `feature/32-a`\n* `feature/33-b`\n+ `feature/34-c`'))
+        .branches,
+    ).toEqual(['feature/32-a', 'feature/33-b', 'feature/34-c'])
+  })
+
+  it('skips prose, code spans that are no branch, and a branch only in an HTML comment', () => {
+    expect(
+      stackOf(
+        plan(
+          'Texto com `feature/31-nao-e-item`.\n\n1. `npm run gate` antes\n2. `feature/32-a`\n3. <!-- `feature/99-escondida` --> nada',
+        ),
+      ),
+    ).toEqual({ declared: true, branches: ['feature/32-a'], problems: [] })
+  })
+
+  it('refuses an item that names two branches, a branch named twice, and a section with none', () => {
+    expect(
+      stackOf(plan('1. `feature/32-a` e `feature/33-b`')).problems,
+    ).toEqual([
+      'um item da seção Stack cita mais de uma branch: feature/32-a, feature/33-b',
+    ])
+    expect(
+      stackOf(plan('1. `feature/32-a`\n2. `feature/33-b`\n3. `feature/32-a`'))
+        .problems,
+    ).toEqual(['a seção Stack cita feature/32-a mais de uma vez'])
+    expect(stackOf(plan('Só texto.')).problems).toEqual([
+      'a seção Stack não cita nenhuma branch',
+    ])
+  })
+
+  it('declares no stack in a plan without the section', () => {
+    expect(stackOf('# Plano\n\n## Plano\n\n`feature/32-a`')).toEqual({
+      declared: false,
+      branches: [],
+      problems: [],
+    })
+    for (const text of [null, undefined, ''])
+      expect(stackOf(text).declared).toBe(false)
+  })
+
+  it('places a branch in its stack', () => {
+    const branches = ['feature/32-a', 'feature/33-b', 'feature/34-c']
+    expect(slicePosition(branches, 'feature/32-a')).toEqual({
+      index: 0,
+      count: 3,
+      first: true,
+      last: false,
+      below: null,
+      lower: [],
+      upper: ['feature/33-b', 'feature/34-c'],
+    })
+    expect(slicePosition(branches, 'feature/33-b')).toEqual({
+      index: 1,
+      count: 3,
+      first: false,
+      last: false,
+      below: 'feature/32-a',
+      lower: ['feature/32-a'],
+      upper: ['feature/34-c'],
+    })
+    expect(slicePosition(branches, 'feature/34-c')).toMatchObject({
+      first: false,
+      last: true,
+      below: 'feature/33-b',
+      upper: [],
+    })
+    expect(slicePosition(['feature/32-a'], 'feature/32-a')).toMatchObject({
+      first: true,
+      last: true,
+    })
+    expect(slicePosition(branches, 'feature/35-d')).toBeNull()
+    expect(slicePosition(null, 'feature/32-a')).toBeNull()
+  })
+
+  it('names the slice label and the size reference', () => {
+    expect(stackSliceLabel).toBe('stack-slice')
+    expect(stateLabels).not.toContain(stackSliceLabel)
+    expect(prSizeLimit).toBe(1500)
+  })
+})
+
 describe('the step ids and the declarations', () => {
   it('pins the gate’s step ids and their order', () => {
     // A step removed or renamed here is a change to every hook and CI reader.
@@ -2033,6 +2143,7 @@ describe('the step ids and the declarations', () => {
       'pr-first-line',
       'copilot-review',
       'review-threads',
+      'pr-size',
       'issue-open',
       'kind',
       'state-label',
