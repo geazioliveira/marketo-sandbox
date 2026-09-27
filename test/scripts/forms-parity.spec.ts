@@ -660,7 +660,7 @@ describe(workflows.check, () => {
     expect(text).not.toContain('OBSERVE_')
   })
 
-  it('relies on a `npm run check` that chains lint, format:check, typecheck, test, check:context and build', () => {
+  it('relies on a `npm run check` that chains lint, format:check, typecheck, test, check:context, build and check:all', () => {
     const { scripts } = JSON.parse(read('package.json')) as {
       scripts: Record<string, string>
     }
@@ -671,9 +671,28 @@ describe(workflows.check, () => {
       'npm test',
       'npm run check:context',
       'npm run build',
+      'npm run check:all',
     ])
     expect(scripts.typecheck).toBe('tsc --noEmit')
     expect(scripts['check:context']).toBe('node scripts/check-context.mjs')
+    // check:all runs every generator in --check mode: the committed output is
+    // what the generators emit (#7).
+    expect(scripts['check:all']).toBe(
+      'npm run check:definitions && npm run check:resources && npm run check:factories',
+    )
+    // The generated header tells the reader to run `npm run generate:<g>`, so
+    // those scripts are pinned too.
+    expect(scripts['generate:all']).toBe(
+      'npm run generate:definitions && npm run generate:resources && npm run generate:factories',
+    )
+    for (const generator of ['definitions', 'resources', 'factories']) {
+      expect(scripts[`check:${generator}`]).toBe(
+        `python3 scripts/generate-marketo-${generator}.py --check`,
+      )
+      expect(scripts[`generate:${generator}`]).toBe(
+        `python3 scripts/generate-marketo-${generator}.py`,
+      )
+    }
     // format:check refuses exactly what `npm run format` would rewrite (#9).
     expect(scripts['format:check']).toBe(
       'prettier --check "src/**/*.ts" "test/**/*.ts" "scripts/**/*.{mjs,mts}"',

@@ -4,6 +4,48 @@ Uma entrada por mudança mergeada, da mais nova para a mais antiga, escrita no p
 
 ---
 
+## 2026-09-26: Os geradores falham sem Prettier, se declaram gerados e rodam no CI (#7)
+
+**Fase**: Learn
+**Tipo**: Bug Fix
+
+### O que foi construído / corrigido
+
+- **Os geradores falham alto.** Sem o Prettier ou sem node, eles param antes de tocar a saída e saem com 2, com uma mensagem que diz o que falta. Antes, o binário ausente era pulado em silêncio, e o node ausente virava traceback depois do `rmtree`.
+- **Nenhum arquivo de ignore alcança a saída gerada.** O Prettier roda com `--ignore-path=`, e o gerador confere que cada caminho passado aparece no relatório por arquivo. A regra da #6, "o Prettier dos geradores lê só o `.prettierignore`", foi substituída pela [ADR 0011](../decisions/0011-generators-format-without-ignore-files.md).
+- **Todo arquivo gerado se declara gerado.** Os 1.083 abrem com duas linhas `//` que dizem o gerador e o comando de regenerar; os 1.080 das áreas dizem também o documento de origem, e os 3 de `src/mocks`, só o gerador, e o `--check` confere o cabeçalho como o resto do arquivo.
+- **O `check:all` roda no CI.** Ele fecha a cadeia do `npm run check`, e o `forms-parity.spec.ts` pina a cadeia e os scripts `check:*`.
+- **A revisão adversarial.** O cabeçalho de uma área avulsa passou a dar as flags que a regeneram; o node entra no `PATH` do Prettier em caminho absoluto; o `PRETTIER_EXPERIMENTAL_CLI` sai do ambiente dele; o range do arquivo inteiro protege a conferência junto com o `--no-require-pragma`; e dois limites do `--check`, a config do Prettier que depende do caminho e a saída sem formatação depois de uma falha no modo de gerar, foram para a #29. As revisões do Copilot somaram um Prettier sem permissão de execução e um `NODE_BIN` cujo `node` não executa, que também saem com 2, e as aspas no caminho do documento no comando do cabeçalho de uma área avulsa.
+- **O merge de `main` depois da #8.** Os 10 conflitos, todos de documentação, foram resolvidos por regra, a saída foi regenerada com o gerador mesclado, e as citações foram remapeadas pelo lado de origem de cada linha. Uma segunda rodada adversarial verificou as correções e o merge, e o spec passou a cobrir o documento atrás de um link, o node relativo, as variáveis `PRETTIER_*` e a mensagem de restauração.
+- **Um teste novo**, `test/scripts/codegen.spec.ts`, roda os três geradores numa árvore temporária, com o alvo `identity`: sem Prettier, com `NODE_BIN` sem node, sob `.prettierignore`, com um Prettier que pula arquivos e com o cabeçalho.
+
+### Números medidos
+
+- **O spec**: 20 dos 31 casos falhavam em `3ddceb4`, e os 31 passam depois. As revisões o levaram a 55 casos, que passam em cerca de 7 s, e cada correção foi conferida por mutação. Os casos de factories no `identity` passam antes e depois, porque essa saída já nasce formatada, e ficam como controle.
+- **A saída**: 1.083 arquivos com 3 linhas a mais cada, e nenhuma outra mudança (`git diff -U0 | grep '^@@'` dá só `@@ -0,0 +1,3 @@`). Um segundo `generate:all` não muda nada, e o `format:check` passa.
+- **Os checks**, na cabeça `217042d`, depois do merge da #8: `npm run check` com 1.395 testes em 9 arquivos e as 16 linhas "are current"; o e2e com 33, os 19 da #8 inclusive; e a run 36279581085 do `Qualidade / check`, success. Antes da #7, a run 36270989088 levou 93 s de vitest e 114 s no passo `npm run check`.
+- **Sem node**, numa máquina sem `/usr/local/bin/node` nem `/opt/homebrew/bin/node`: saída 2 e a mensagem, sem traceback e sem mudar a saída.
+- **O Prettier 3.9.6**: um arquivo ignorado e passado pelo nome sai com 0 no `--write` e no `-l` sem mensagem, e no `--check` com "All matched files use Prettier code style!".
+
+### Decisões tomadas
+
+- [0011: Os geradores formatam sem arquivo de ignore e falham quando não formatam](../decisions/0011-generators-format-without-ignore-files.md), nova, da pergunta 1 do plano revisado depois do merge da #6.
+- A ADR 0004 ganhou o cabeçalho de gerado, e a 0008, o Python 3.9 como mínimo e o python3 da imagem do runner no CI, sem `setup-python`. A 0002 ganhou o `check:all` na cadeia, e as 0005, 0006, 0007 e 0009, as citações deslocadas.
+
+### Patterns aplicados ou criados
+
+- [Confiar que a ferramenta processou o arquivo passado pelo nome](../knowledge/anti-patterns/trusting-a-tool-to-process-a-named-file.md), novo.
+- [Gerar e conferir](../knowledge/patterns/generate-and-check.md): o commit dos geradores e o da saída separados, e a saída provada pela contagem de hunks.
+- [A fronteira do código gerado](../knowledge/patterns/generated-code-boundary.md): um arquivo gerado se reconhece pelo cabeçalho.
+
+### Aprendizados / surpresas
+
+- **O plano previa uma #6 diferente da que entrou.** A #6 manteve o `.codegen-tmp` e registrou uma decisão sobre o `.prettierignore` depois do Approve da #7. O passo 0 do plano pegou a divergência, e um `# Plano` revisado a levou ao dono antes do corte da branch.
+- **Uma citação só se confere pelo conteúdo.** O cabeçalho de 3 linhas e as mudanças nos geradores deslocaram centenas de citações `arquivo:linha`, que o `check:context` não confere. Um script as remapeou por diff, mas a revisão adversarial achou três grupos que ele não pegou: uma citação presa a um commit pela prosa ("naquele commit"), continuações `:N` sem o nome do arquivo e uma tabela com as linhas entre parênteses. Eles foram conferidos pelo conteúdo da linha e corrigidos.
+- **O runner tem outro node.** A imagem do `ubuntu-latest` traz o Node 22 em `/usr/local/bin`, que o gerador punha na frente do Node do `.nvmrc` (inferido dos scripts da imagem, não medido num runner). O `PATH` passou a vir antes dos candidatos fixos, e o caso "sem node" do spec usa um `NODE_BIN` sem node, que se reproduz em qualquer máquina.
+
+---
+
 ## 2026-09-26: Cada requisição chega ao próprio handler, e o gerador ordena as rotas (#8)
 
 **Fase**: Learn

@@ -15,6 +15,7 @@ As regras vivem no Context Mesh. Esta página só aponta para elas.
 
 ## Anti-patterns
 
+- [Confiar que a ferramenta processou o arquivo passado pelo nome](context/knowledge/anti-patterns/trusting-a-tool-to-process-a-named-file.md)
 - [Dublê de teste estrito na camada errada](context/knowledge/anti-patterns/test-double-strict-on-the-wrong-layer.md)
 - [Editar código gerado à mão](context/knowledge/anti-patterns/hand-editing-generated-code.md)
 - [Limite da auditoria tirado do evento](context/knowledge/anti-patterns/audit-bound-from-the-event.md)

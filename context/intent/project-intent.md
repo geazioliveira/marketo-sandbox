@@ -26,14 +26,14 @@ As decisões por trás de cada item estão registradas, de forma retroativa, nas
 Um critério só é marcado quando um teste ou um check o prova.
 
 - [ ] Cada operação do Swagger de assets (220 operações, 186 caminhos, 23 tags) tem uma rota que chega ao próprio handler e responde um envelope bem formado. Desde a #6, as cinco áreas têm uma rota por operação, 388 ao todo, conferidas pelo `test/marketo-api.e2e-spec.ts`. Desde a #8, cada requisição chega ao próprio handler: o gerador põe uma rota antes da primeira que a capturaria, e o `test/route-order.e2e-spec.ts` prova isso no app montado ([ADR 0005](../decisions/0005-nestjs-express-one-module-per-tag.md)). Falta um teste que confira o envelope de cada operação.
-- [x] O código gerado é exatamente o que os geradores emitem: `npm run check:all` passa num clone limpo. Medido na #6; o CI passa a rodá-lo com a #7.
+- [x] O código gerado é exatamente o que os geradores emitem: `npm run check:all` passa num clone limpo. Medido na #6, e desde a #7 o `npm run check`, e com ele o CI, o roda.
 - [ ] Com `MARKETO_MOCK_SEED`, a mesma requisição devolve o mesmo payload entre reinícios. Hoje só vale para a mesma sequência de requisições desde o boot, porque o faker recebe o seed uma vez ([ADR 0007](../decisions/0007-faker-factories-with-overrides-and-seed.md)), e não há teste.
 - [x] Por padrão, nenhuma requisição sai da máquina e o servidor escuta em 127.0.0.1. Desde a #9, o `@nestjs/observe` saiu e o servidor escuta em `HOST`, com `127.0.0.1` por padrão. `test/runtime-defaults.spec.ts` prova os dois ([ADR 0010](../decisions/0010-loopback-only-by-default.md)).
 - [ ] Um consumidor fixa uma release com tag e a sobe com um comando documentado.
 - [ ] Espaços isolados, autenticação, modelo com estado, log de requisições, falhas roteirizadas e validação estrita, como pede a Track A do lite-campaign (R1–R8).
 - [ ] O mock registra qual cópia do Swagger o gerou (sha256).
 - [ ] Toda mudança nasce numa issue, com plano e Approve do dono, e entra por uma PR que fecha essa issue (#1).
-- [ ] O CI roda lint, typecheck, testes, build e `check:all` em toda PR (#3 e #7).
+- [x] O CI roda lint, typecheck, testes, build e `check:all` em toda PR (#3 e #7). O `npm run check` termina com o `check:all`, e o `test/scripts/forms-parity.spec.ts` pina a cadeia e o passo do `check.yml` que a roda. A run 36279581085 do `Qualidade / check`, na cabeça `217042d` da PR #27, mostra as 16 linhas "are current".
 
 ## Fora de escopo
 
@@ -55,4 +55,4 @@ Um critério só é marcado quando um teste ou um check o prova.
 
 - **Criado**: 2026-09-24 (Fase: Intent), a partir do código em `fb4a804` e do plano do consumidor lite-campaign (#2)
 - **Status**: In Progress
-- **Atualizado**: 2026-09-26 (Fase: Learn), o critério das rotas passou a dizer que cada requisição chega ao próprio handler desde a #8, e que falta o teste do envelope de cada operação (#8)
+- **Atualizado**: 2026-09-26 (Fase: Learn), o critério do CI com o `check:all` foi marcado, com o `check:all` no fim do `npm run check` (#7)

@@ -15,13 +15,13 @@
 - **A pasta sai do sufixo do nome.** `*Request` vai para `requests/`, `*Response` para `responses/` e o resto para `models/` (`category()`, `610e101:scripts/generate-marketo-definitions.py:27-32`). Os geradores de resources e de factories montam os imports com uma cópia da mesma regra, `definition_category()` (`610e101:scripts/marketo_codegen.py:41-46`).
 - **Como o gerador emite**, em `render()` (`610e101:scripts/generate-marketo-definitions.py:101-152`):
   - um `allOf` com `$ref` vira `extends` (`:108-115`, `:142`);
-  - um enum de propriedade vira um alias de tipo exportado, `export type <Nome><Propriedade>` (`:130-135`), como `ProgramResponseStatus` e `ProgramResponseType` (`src/asset/asset-definitions/responses/program-response.ts:5-6`);
+  - um enum de propriedade vira um alias de tipo exportado, `export type <Nome><Propriedade>` (`:130-135`), como `ProgramResponseStatus` e `ProgramResponseType` (`src/asset/asset-definitions/responses/program-response.ts:8-9`);
   - uma propriedade fora de `required` ganha `?` (`:139`);
   - a `description` do Swagger vira JSDoc (`:137-138`);
   - as dependências entram com `import type` (`:123`).
 
-  Dois exemplos: `src/asset/asset-definitions/responses/program-response.ts:1-12` e `src/asset/asset-definitions/models/folder.ts:1-12`.
-- **Desde a #6, 459 interfaces nas cinco áreas**, em `src/<área>/<área>-definitions/`. A regra da pasta é uma só, `definition_category()`, que os três geradores usam, e um nome que começa com `ResponseOf` também vai para `responses/` (`scripts/marketo_codegen.py:177-183`). Por isso 13 definições de assets passaram de `models/` para `responses/`, e ficaram 79 em `models/`, 72 em `requests/` e 104 em `responses/`. O OpenAPI 3 passa pelo mesmo `render()`: os schemas vêm de `components.schemas` (`scripts/marketo_codegen.py:55-58`).
+  Dois exemplos: `src/asset/asset-definitions/responses/program-response.ts:4-15` e `src/asset/asset-definitions/models/folder.ts:4-15`.
+- **Desde a #6, 459 interfaces nas cinco áreas**, em `src/<área>/<área>-definitions/`. A regra da pasta é uma só, `definition_category()`, que os três geradores usam, e um nome que começa com `ResponseOf` também vai para `responses/` (`scripts/marketo_codegen.py:179-185`). Por isso 13 definições de assets passaram de `models/` para `responses/`, e ficaram 79 em `models/`, 72 em `requests/` e 104 em `responses/`. O OpenAPI 3 passa pelo mesmo `render()`: os schemas vêm de `components.schemas` (`scripts/marketo_codegen.py:57-60`).
 - **Sem biblioteca de validação.** class-validator e class-transformer não aparecem em `src` nem em `test`, e não estão instalados. No `package-lock.json`, são só peers opcionais de `@nestjs/common` (`:702-703`), de `@nestjs/mapped-types` (`:765-766`) e de `@nestjs/swagger` (`:846-847`).
 
 ## Racional
@@ -49,11 +49,11 @@ O histórico não registra alternativas. As linhas abaixo são as óbvias, e cad
   - `Partial<X>` sobre a interface é o tipo dos overrides das factories ([ADR 0007](0007-faker-factories-with-overrides-and-seed.md));
   - o JSDoc leva a descrição do Swagger para o editor.
 - **Mais difícil**:
-  - **Nenhuma validação em runtime.** Um corpo ou um parâmetro fora do contrato chega ao service como veio. Não há pipe nos parâmetros (`src/asset/resources/snippets/snippets.controller.ts:27`), nem `ValidationPipe`, nem class-validator em `src`.
+  - **Nenhuma validação em runtime.** Um corpo ou um parâmetro fora do contrato chega ao service como veio. Não há pipe nos parâmetros (`src/asset/resources/snippets/snippets.controller.ts:30`), nem `ValidationPipe`, nem class-validator em `src`.
   - **A validação estrita da Track A vai precisar de outra coisa.** O project intent a lista entre os [critérios de aceite](../intent/project-intent.md#critérios-de-aceite). Uma interface não existe em runtime, então a validação precisa de código de runtime. A [ADR 0009](0009-behaviour-beside-generated-code.md), ainda `Proposed`, o põe ao lado do código gerado, nunca dentro dele. A forma da validação ainda não foi decidida.
   - **A UI do Swagger sai sem schemas.** O `@nestjs/swagger` monta o documento de `/api` e `/api-json` a partir das rotas e dos decorators do app (`src/main.ts:17-18`, `README.md:39-42`), não de `docs/marketo-swagger-asset.json`. Não há nenhum `@Api*` em `src`, e o `nest-cli.json` não liga o plugin do `@nestjs/swagger`. Medido na #4 numa cópia de `origin/main` compilada com `tsc`: o `SwaggerModule.createDocument` sobre o `AssetResourcesModule` devolve 186 caminhos e 0 schemas.
   - **Desde a #6, um schema de topo sem `properties` vira interface vazia.** `Person` e `CustomObject`, do Data Ingestion, só têm `additionalProperties`, e `LeadAttribute2SearchableFields`, de Lead Database, é um array de strings. Os três saem como `export interface X {}`, o tipo aceita qualquer objeto, e a factory devolve `{}` (medido na #6; #24).
-  - **O tipo não garante o envelope.** Todo campo do envelope é opcional (`src/asset/asset-definitions/responses/response-of-snippet-response.ts:4-10`), então o tipo aceita um envelope sem `success`. Só a factory garante que ele vem preenchido ([ADR 0007](0007-faker-factories-with-overrides-and-seed.md)).
+  - **O tipo não garante o envelope.** Todo campo do envelope é opcional (`src/asset/asset-definitions/responses/response-of-snippet-response.ts:7-13`), então o tipo aceita um envelope sem `success`. Só a factory garante que ele vem preenchido ([ADR 0007](0007-faker-factories-with-overrides-and-seed.md)).
 
 ## Relacionados
 
@@ -71,3 +71,4 @@ O histórico não registra alternativas. As linhas abaixo são as óbvias, e cad
 - **Status**: Accepted
 - **Atualizado**: 2026-09-26 (Fase: Learn), as citações do `src/main.ts`, do `README.md` e do `package-lock.json` seguiram as linhas novas depois da #9 (#9)
 - **Atualizado**: 2026-09-26 (Fase: Learn), 459 interfaces nas cinco áreas, uma regra só de pasta, com `ResponseOf*` em `responses/`, e os schemas do OpenAPI 3; as citações da regra de pasta e do `render()` de antes da #6 passaram a levar o commit `610e101` (#6)
+- **Atualizado**: 2026-09-26 (Fase: Build), as citações dos arquivos gerados e dos geradores seguiram as linhas novas, depois do cabeçalho de gerado (#7)
