@@ -52,12 +52,13 @@ Uma entrada por mudança mergeada, da mais nova para a mais antiga, escrita no p
   - o `git update-ref refs/heads/main` passava, e com ele os outros jeitos de mover a ref de `main` fora de commit e push;
   - o `plan-to-issue` ignorava o `GIT_DIR` do comando.
 - **A sétima revisão achou duas:** a configuração que o comando dá ao `git` (`GIT_CONFIG_*`, `HOME` e as demais) podia trocar o `origin` que o `gh` usa sem o hook ver, e o `session-context` não tinha prazo. Agora os remotes são lidos com o ambiente do comando, ou o alvo fica desconhecido, e o `session-context` tem 15 s. Veio junto uma brecha antiga: `env - gh issue reopen 5` era lido como um programa chamado `-` e passava por todas as regras.
+- **A oitava revisão achou uma:** uma escrita pelo shell por um link simbólico era julgada pelo diretório do link, e não pelo destino. Com um link para `.claude/settings.local.json` ou para `loop-gate.json`, a escrita passava. Agora o `guard-bash` segue os links do disco e os criados antes na mesma linha, inclusive em `bash -c` e `$(…)`, com o mesmo `placeOf` do `build-guard`. O exemplo do Copilot, que escrevia no `README.md`, continua passando, porque é o limite registrado.
 - **Os testes da quarta rodada acharam duas brechas a mais,** já fechadas: um glob seguido de `..` que contava como `context/intent/`, e as leituras do próprio hook no git, que rodavam um programa definido em `GIT_CONFIG_*` no ambiente.
 
 ### Números medidos
 
-- `npm run check`: 3.279 testes, com os da #7, dos quais 1.871 são dos hooks, em 11 arquivos de `test/hooks/`. Os dos hooks eram 1.022 antes das revisões do Copilot, e 1.111, 1.213, 1.425, 1.602, 1.645 e 1.813 depois de cada uma das seis primeiras.
-- O código dos hooks tem 13,7 mil linhas; os testes e o suporte deles, 17,6 mil.
+- `npm run check`: 3.372 testes, com os da #7, dos quais 1.964 são dos hooks, em 11 arquivos de `test/hooks/`. Os dos hooks eram 1.022 antes das revisões do Copilot, e 1.111, 1.213, 1.425, 1.602, 1.645, 1.813 e 1.871 depois de cada uma das sete primeiras.
+- O código dos hooks tem 14,3 mil linhas; os testes e o suporte deles, 18,3 mil.
 - Corpus de 902 comandos Bash reais das sessões deste projeto: 816, 75 e 11 (passa, confirma, nega) na primeira rodada; 847, 44 e 11 depois das correções, com as mesmas 11 recusas certas. Mediana de 93 ms e máximo de 1,5 s.
 - As duas sondas do plano foram negadas com os hooks ativos, em modo `auto`.
 - As correções da primeira revisão: 19 mutações, cada uma revertendo uma parte de uma correção, e todas pegas por um teste. O corpus deu de novo 847, 44 e 11, sem nenhuma decisão mudada.
@@ -67,6 +68,7 @@ Uma entrada por mudança mergeada, da mais nova para a mais antiga, escrita no p
 - As da quinta: 43 mutações na verificação, e as 5 que apontavam falta de teste ganharam teste. O corpus não mudou nenhuma decisão, nos dois modos.
 - As da sexta: 59 mutações na verificação, e as 14 que sobreviveram ganharam teste. A verificação achou um excesso de bloqueio, o `git push origin HEAD:MAIN`, corrigido. O corpus não mudou nenhuma decisão, nos dois modos.
 - As da sétima: 52 mutações na verificação, e as 2 que sobreviveram ganharam teste. O corpus não mudou nenhuma decisão, nos dois modos.
+- As da oitava: 46 mutações na verificação e 38 na rodada final, todas pegas no fim. A verificação achou três furos a mais, fechados: um link criado dentro de `bash -c`, a própria entrada de um link e nomes que só diferem na caixa. O corpus não mudou nenhuma decisão, e a maior latência caiu de 3,4 s para 1,3 s.
 
 ### Decisões tomadas
 
@@ -89,6 +91,7 @@ Uma entrada por mudança mergeada, da mais nova para a mais antiga, escrita no p
 - **Cada rodada de revisão achou brechas de outro tipo.** A primeira, o que muda antes do comando julgado; a segunda, o que o hook não consegue ler (um programa numa variável, um corpo escrito depois, uma mensagem que vem de outro commit, o tempo que ele leva). A resposta foi a mesma nas duas: julgar o que não se lê pelo lado que restringe, e medir no corpus o custo disso.
 - **Uma regra geral fecha o que o caso a caso deixa aberto.** Duas rodadas corrigiram, ponto a ponto, valores ilegíveis que o Copilot apontou, e a terceira achou mais nove do mesmo tipo. A varredura com uma regra só ("dúvida sobre uma negação é confirmação crítica") fechou os nove e mais os que ninguém tinha apontado. O custo ficou medido no corpus nos dois modos.
 - **Um dado de teste com horário relativo envelhece na coleta.** Três testes da quinta rodada passavam sozinhos e falhavam na suíte inteira: o comentário do GitHub falso tinha `createdAt` de agora mais 60 s, calculado quando o arquivo era coletado, e a suíte inteira chegava a eles minutos depois. O hook estava certo ao manter o marcador. Os dados passaram a ser montados na hora do teste, inclusive em dois casos que passariam pelo motivo errado.
+- **Uma PR grande multiplica as rodadas.** Oito revisões do Copilot, com 6, 6, 11, 4, 5, 3, 2 e 1 achados, cada uma segurando o merge de tudo. O dono pediu para quebrar mudanças assim em PRs menores e empilhadas, o que o loop hoje proíbe: é a #31.
 - **Para mexer nos hooks, eles precisam estar desligados.** Com os hooks ativos em modo `auto`, a edição de um arquivo do harness vira negação, como devia. As correções da revisão foram feitas com a saída de emergência do dono ligada, e uma sonda confere, depois, que os hooks voltaram a valer.
 - **A verificação adversarial parou no meio duas vezes,** porque um filtro de segurança barrou a escrita dos comandos de evasão. As brechas provadas antes disso foram fechadas, e o que não dá para ver pelo texto do comando foi para os limites da ADR 0002.
 
