@@ -2594,3 +2594,47 @@ export function readBody(
   if (all.length === 0) return { known: true, text: null, source: 'none', all }
   return { ...all.at(-1), all }
 }
+
+// ---------------------------------------------------------------------------
+// What a command exports for the ones after it
+
+/** Variables the rules read from the environment, carried across `export`. */
+const watchedVariable = /^(?:GH_|GIT_|XDG_CONFIG_HOME$|HOME$)/
+
+/**
+ * Records in `exported` what a command leaves in the environment of the
+ * commands after it on the line: `export`, `declare -x`/`typeset -x` and
+ * `unset` of a variable the rules read (GH_HOST, GH_REPO, GIT_DIR…). A value
+ * the parser could not read, and a name exported with no value, are kept
+ * as an expansion (`${EXPORTADO}`), which every rule takes as unknown; an
+ * unset leaves it empty, as unset. guard-bash carries it across the line,
+ * and plan-to-issue reads the host and the repository a publication goes
+ * to through it (Copilot review of #26, fourth round).
+ * @param {{ argv: string[], known?: boolean[] }} command
+ * @param {Record<string, string>} exported
+ */
+export function recordExports(command, exported) {
+  const argv = command.argv.map(String)
+  const program = path.basename(argv[0] ?? '').replace(/\.exe$/i, '')
+  const exporting =
+    program === 'export' ||
+    (['declare', 'typeset'].includes(program) &&
+      argv.some((a) => /^-[a-z]*x/.test(a)))
+  if (program === 'unset') {
+    for (const name of argv.slice(1))
+      if (watchedVariable.test(name)) exported[name] = ''
+    return
+  }
+  if (!exporting) return
+  for (const [index, arg] of argv.entries()) {
+    if (index === 0 || arg.startsWith('-')) continue
+    const eq = arg.indexOf('=')
+    const name = eq < 0 ? arg : arg.slice(0, eq)
+    if (!watchedVariable.test(name)) continue
+    if (eq < 0) {
+      if (!(name in exported)) exported[name] = '${EXPORTADO}'
+    } else
+      exported[name] =
+        command.known?.[index] === false ? '${EXPORTADO}' : arg.slice(eq + 1)
+  }
+}

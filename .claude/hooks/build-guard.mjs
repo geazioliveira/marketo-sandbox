@@ -16,35 +16,17 @@
 // session opened in the main checkout edits files in worktrees, and each
 // worktree has its own branch and its own gate cache.
 //
+// What the gate says once the file is placed is lib/edit-gate.mjs's, which
+// git-rules also asks for the files a git command writes (`git checkout --
+// file`, `git merge`): an edit and a git write get one decision.
+//
 // The libraries are imported inside the try, not at the top: a module that
 // fails to load would end the process with exit 1, which Claude Code reads
 // as a non-blocking error and lets the edit through. When io.mjs itself
 // cannot load, there is no JSON to print, so the hook exits 2, which blocks.
-import { spawnSync } from 'node:child_process'
 import { lstatSync, readlinkSync } from 'node:fs'
 import { homedir } from 'node:os'
 import path from 'node:path'
-
-const gitDirReason = 'o diretório do git não se edita à mão'
-const pendingPlanReason =
-  'há um plano aceito nesta sessão e ainda não publicado numa issue: publique-o antes de construir'
-const rerunGate = 'rode npm run gate na branch antes de editar'
-const closedReason =
-  'o gate está fechado: rode npm run gate e resolva o que ele aponta'
-
-/** The owner's emergency exit (disableAllHooks lives there), at any depth. */
-const settingsLocal = '.claude/settings.local.json'
-
-/** Where the intent is written, before the gate can open. */
-const intentDir = 'context/intent/'
-
-// repo.mjs keeps its git runner to itself, so the one git call made here
-// repeats its hygiene: no variable a git hook leaves in Claude Code's
-// environment may point git at another repository, the messages are in
-// English, and reading takes no optional lock.
-const discoveryVariable =
-  /^GIT_(DIR|WORK_TREE|COMMON_DIR|INDEX_FILE|OBJECT_DIRECTORY|ALTERNATE_OBJECT_DIRECTORIES|CEILING_DIRECTORIES|DISCOVERY_ACROSS_FILESYSTEM|NAMESPACE|PREFIX)$/
-const gitTimeoutMs = 10_000
 
 // Claude Code kills a hook past its timeout (90 s in settings.json), and a
 // killed hook is a non-blocking error: the edit goes through. Each git call
@@ -55,92 +37,6 @@ const gitTimeoutMs = 10_000
 
 /** Links followed while placing one path, as Linux's MAXSYMLINKS. */
 const maxLinks = 40
-
-function gitEnv() {
-  const env = {}
-  for (const [name, value] of Object.entries(process.env))
-    if (!discoveryVariable.test(name)) env[name] = value
-  return { ...env, LC_ALL: 'C', GIT_OPTIONAL_LOCKS: '0' }
-}
-
-/**
- * Folds a name the way macOS's default file system compares names, and a
- * little further: case-insensitive with Unicode's full folding, so
- * `.claude/ſettings.local.json` (a long s) is the owner's file there, and
- * compatibility forms (the Kelvin sign) are their letters. Folding too much
- * only refuses more.
- */
-function fold(text) {
-  return text.normalize('NFKC').toUpperCase().toLowerCase()
-}
-
-/**
- * Whether one of the repository's own .gitignore files ignores the path.
- *
- * Only a clean match (exit 0) of a pattern that is not a negation, read from
- * a `.gitignore` inside the worktree, counts. The other sources git reads
- * are writable without touching a tracked file: the global excludes file
- * lives outside any repository, where this guard lets everything through,
- * and info/exclude is one shell command away. A tracked `.gitignore` changes
- * only through an edit the gate judges. core.excludesFile is also pointed
- * at nothing, so a relative one named like a .gitignore cannot pose as one.
- *
- * A failure, a timeout or a path git refuses is read as not ignored, so the
- * file falls through to the gate. check-ignore reads the index, so a tracked
- * file is never ignored, even when a pattern matches it.
- */
-function isIgnored(top, relative, budget) {
-  if (relative === '') return false
-  const step = 'conferir o .gitignore'
-  const timeout = budget.spawnTimeout(gitTimeoutMs, step)
-  const run = spawnSync(
-    'git',
-    [
-      '-C',
-      top,
-      '-c',
-      'core.excludesFile=/dev/null',
-      'check-ignore',
-      '--verbose',
-      '-z',
-      '--stdin',
-    ],
-    {
-      encoding: 'utf8',
-      env: gitEnv(),
-      input: `${relative}\0`,
-      timeout,
-      stdio: ['pipe', 'pipe', 'ignore'],
-    },
-  )
-  budget.afterSpawn(run, gitTimeoutMs, timeout, step)
-  if (run.error !== undefined || run.status !== 0) return false
-  // --verbose -z prints source, line, pattern and path, each ended by NUL.
-  const [source = '', , pattern = ''] = String(run.stdout ?? '').split('\0')
-  if (pattern === '' || pattern.startsWith('!')) return false
-  if (source === '' || path.isAbsolute(source)) return false
-  const parts = source.split('/')
-  return (
-    parts.at(-1) === '.gitignore' &&
-    !parts.some((part) => part === '..' || fold(part) === '.git')
-  )
-}
-
-/**
- * A path relative to a directory, with `/` separators, or null when it lies
- * outside. '' is the directory itself. Both sides are real paths already.
- */
-function within(dir, target) {
-  const relative = path.relative(dir, target)
-  if (relative === '') return ''
-  if (
-    relative === '..' ||
-    relative.startsWith(`..${path.sep}`) ||
-    path.isAbsolute(relative)
-  )
-    return null
-  return relative.split(path.sep).join('/')
-}
 
 /**
  * The paths the tool call names. Edit and Write take file_path, NotebookEdit
@@ -261,153 +157,28 @@ function targetsOf(named, cwd, realPathOf) {
   return [...targets.values()]
 }
 
-/**
- * Whether this session has a plan it accepted and has not published.
- * plan-to-issue writes the marker into the common git dir of the session's
- * repository, one place per repository whatever worktree the session is in,
- * named for the session. So the target's common git dir counts, and so does
- * the common git dir of a session cwd in another clone of this project.
- * null when it cannot be told: an input with no absolute cwd names no
- * session repository to look in (Copilot review of #26, third round).
- * @returns {boolean | null}
- */
-function hasPendingPlan(found, input, { repo, repoAt, realPathOf }) {
-  const marked = (dir) => repo.pendingPlanExists(dir, input.session_id)
-  if (marked(found.commonDir)) return true
-
-  // The session's own repository. git runs only when the cwd may lie in
-  // another one: a cwd inside the target's worktree with no `.git` between
-  // them is that worktree, whose common git dir was just read.
-  const cwd = typeof input.cwd === 'string' ? input.cwd : ''
-  if (!path.isAbsolute(cwd)) return null
-  if (insideWorktree(realPathOf(found.top), realPathOf(cwd), repo)) return false
-  const here = repoAt(cwd)
-  return here !== null && repo.isProject(here) && marked(here.commonDir)
-}
-
-/**
- * Whether git, started in `dir`, finds the worktree whose top is `top`: dir
- * lies under top and no directory from dir up to top (top excluded) holds a
- * `.git`, which is where git's discovery would stop instead.
- */
-function insideWorktree(top, dir, repo) {
-  if (within(top, dir) === null) return false
-  let current = repo.existingDirOf(dir)
-  while (current !== top) {
-    try {
-      lstatSync(path.join(current, '.git'))
-      return false
-    } catch {
-      // No .git here: git keeps climbing.
-    }
-    const parent = path.dirname(current)
-    if (parent === current) return false
-    current = parent
-  }
-  return true
-}
-
 /** The decision for one real target path. */
 function judge(target, input, libs) {
-  const { io, repo, loop, repoAt, budget } = libs
+  const { io, repo, gate, repoAt } = libs
   const found = repoAt(repo.existingDirOf(target))
   if (found === null || !repo.isProject(found)) return io.pass()
 
   if (
-    within(repo.realPathOf(found.gitDir), target) !== null ||
-    within(repo.realPathOf(found.commonDir), target) !== null
+    gate.within(repo.realPathOf(found.gitDir), target) !== null ||
+    gate.within(repo.realPathOf(found.commonDir), target) !== null
   )
-    return io.deny(gitDirReason)
+    return io.deny(gate.gitDirReason)
 
-  const relative = within(repo.realPathOf(found.top), target)
+  const relative = gate.within(repo.realPathOf(found.top), target)
   // repoAt found this worktree from the target's own directory, so a target
   // outside it is not expected; it is refused rather than guessed.
   if (relative === null)
     return io.deny(`não consegui situar ${target} no worktree ${found.top}`)
 
-  // Compared folded: macOS's default file system takes
-  // `.Claude/Settings.local.json` for the real one. A linked worktree's `.git`
-  // is a file pointing at its git dir, outside the git dir itself.
-  const folded = fold(relative)
-  if (folded === '.git' || folded.startsWith('.git/'))
-    return io.deny(gitDirReason)
-  if (folded === settingsLocal || folded.endsWith(`/${settingsLocal}`))
-    return io.deny('a saída de emergência é do dono')
-
-  if (found.branch === null)
-    return io.deny('HEAD destacado: trabalhe numa branch da issue')
-  // main before the intent: nothing is edited there, not even the intent.
-  if (found.branch === repo.trunk)
-    return io.deny(`em ${repo.trunk}, nada se edita: corte uma branch da issue`)
-
-  // Compared as written, not folded: `Context/Intent/` is not the intent.
-  if (relative.startsWith(intentDir)) return io.pass()
-
-  const harness = repo.isHarnessPath(folded)
-  const pending = hasPendingPlan(found, input, libs)
-  const status = loop.gateStatus(repo.readGateCache(found.gitDir), {
-    branch: found.branch,
-    pendingPlan: pending !== false,
-  })
-  // A plan accepted and not yet posted asks before any shortcut: an ignored
-  // file (a build output, a generated file) is still building before the
-  // plan is on an issue (Copilot review of #26, third round). Only the
-  // intent, written before the plan, and the refusals above come first. A
-  // marker it cannot look for counts as one.
-  if (status.state === 'pending-plan')
-    return io.ask(
-      pending === null
-        ? 'não consegui saber se esta sessão tem um plano aceito e ainda não publicado: a entrada não traz o cwd da sessão'
-        : pendingPlanReason,
-      { critical: true },
-    )
-  // An open gate lets an ordinary file through, ignored or not, so git is
-  // asked about the ignore rules only when the answer changes the decision.
-  if (status.state === 'open' && !harness) return io.pass()
-  // A harness path is never let through for being ignored: .claude/ is where
-  // Claude Code reads its own settings, local and ignored ones included, and
-  // the rest of the harness asks even with the gate open. The spec names
-  // only .claude/ here; the rest of the harness is the side that restricts.
-  if (!harness && isIgnored(found.top, relative, budget)) return io.pass()
-
-  switch (status.state) {
-    case 'open':
-      return harness
-        ? io.ask(`caminho do harness (${relative}): confira`, {
-            critical: true,
-          })
-        : io.pass()
-    case 'unverified':
-      // gateStatus reports unverified before it looks at `open`. A gate that
-      // closed without reading the issue (gh absent, credential refused) is
-      // still closed: the ask is only for a gate that opened without it.
-      return status.cache?.open === true
-        ? io.ask(
-            'o gate abriu sem ler a issue (não verificado): confira antes de editar, ou rode npm run gate com acesso ao GitHub',
-            { critical: true },
-          )
-        : io.deny(closedReason)
-    case 'missing':
-      return io.deny(`o gate ainda não rodou neste worktree: ${rerunGate}`)
-    case 'stale':
-      return io.deny(
-        `o cache do gate venceu (vale ${loop.gateTtlHours} h): ${rerunGate}`,
-      )
-    case 'mismatch':
-      return io.deny(
-        `o cache do gate não é da branch ${found.branch}: ${rerunGate}`,
-      )
-    case 'closed':
-      return io.deny(closedReason)
-    default:
-      // A state added to the contract and not handled here refuses.
-      return io.deny(
-        `estado do gate desconhecido (${status.state}): ${rerunGate}`,
-      )
-  }
+  return gate.editDecision(found, relative, input, { repoAt })
 }
 
-function decide(input, { io, repo, loop, budget }) {
+function decide(input, { io, repo, gate, budget }) {
   const named = namedPaths(input)
   if (named.length === 0)
     return io.deny('a entrada do hook não traz o caminho do arquivo a editar')
@@ -429,7 +200,7 @@ function decide(input, { io, repo, loop, budget }) {
     }
     return known.get(start)
   }
-  const libs = { io, repo, loop, repoAt, realPathOf: repo.realPathOf, budget }
+  const libs = { io, repo, gate, repoAt }
   // A budget spent halfway keeps what the places judged so far decided: a
   // deny among them still wins over the budget's ask.
   const decisions = []
@@ -450,9 +221,9 @@ function decide(input, { io, repo, loop, budget }) {
 let io = null
 try {
   io = await import('./lib/io.mjs')
-  const [repo, loop, budget] = await Promise.all([
+  const [repo, gate, budget] = await Promise.all([
     import('./lib/repo.mjs'),
-    import('../../scripts/loop-sections.mjs'),
+    import('./lib/edit-gate.mjs'),
     import('./lib/budget.mjs'),
   ])
   const input = await io.readInput()
@@ -460,7 +231,7 @@ try {
     input === null
       ? io.deny('a entrada do hook não pôde ser lida')
       : io.resolve(
-          decide(input, { io, repo, loop, budget }),
+          decide(input, { io, repo, gate, budget }),
           input.permission_mode,
         )
   process.stdout.write(io.preToolUseOutput(decision))

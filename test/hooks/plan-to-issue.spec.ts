@@ -1,7 +1,10 @@
 import {
+  appendFileSync,
+  cpSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   realpathSync,
   rmSync,
@@ -15,15 +18,20 @@ import {
   bugSections,
   featureSections,
   gateCacheFile,
+  planPendingFile,
+  planPendingPrefix,
 } from '../../scripts/loop-sections.mjs'
 import {
   type HookRepo,
   hookRepo,
   type HookRepoOptions,
   type HookRun,
+  hooksDir,
   runHook,
   processTimeout,
+  spawnWith,
 } from '../support/hooks'
+import { projectRoot } from '../support/temp-repo'
 import { cleanEnv } from '../support/clean-env'
 
 /**
@@ -774,7 +782,7 @@ describe.concurrent('plan-to-issue on Bash: what keeps the marker', () => {
       expect(run.status).toBe(0)
       expect(existsSync(repo.markerPath(SESSION))).toBe(true)
       expect(contextOf(run)).toContain(
-        'não consegui ler em que issue ou repositório',
+        'não consegui ler em que issue, repositório ou host',
       )
     }
   })
@@ -1039,7 +1047,7 @@ describe.concurrent('plan-to-issue on Bash: the issue the branch names', () => {
       expect(run.status).toBe(0)
       expect(existsSync(repo.markerPath(SESSION))).toBe(true)
       expect(contextOf(run)).toContain(
-        'não consegui ler em que issue ou repositório',
+        'não consegui ler em que issue, repositório ou host',
       )
     }
   })
@@ -1667,3 +1675,263 @@ describe.concurrent('plan-to-issue with the other hooks', () => {
     )
   })
 })
+
+// ---------------------------------------------------------------------------
+// Fourth round of Copilot's review of #26
+
+describe.concurrent(
+  'plan-to-issue on Bash: the host gh publishes to (Copilot review of #26, fourth round)',
+  () => {
+    const url = `${ISSUE_URL}/5#issuecomment-40`
+    const anotherGithub = /ghe\.example\.com, outro GitHub/
+
+    test.for([
+      [
+        'GH_HOST on the command',
+        'GH_HOST=ghe.example.com gh issue comment 5 --body-file plano.md',
+      ],
+      [
+        'GH_HOST exported earlier on the line',
+        'export GH_HOST=ghe.example.com; gh issue comment 5 --body-file plano.md',
+      ],
+      [
+        '-R HOST/OWNER/REPO',
+        'gh issue comment 5 -R ghe.example.com/geazioliveira/marketo-sandbox --body-file plano.md',
+      ],
+      [
+        'GH_REPO HOST/OWNER/REPO',
+        'GH_REPO=ghe.example.com/geazioliveira/marketo-sandbox gh issue comment 5 --body-file plano.md',
+      ],
+    ])(
+      'keeps the marker for %s, another GitHub, keeps the caches, and says why',
+      async ([, command], { fresh, expect }) => {
+        const repo = await pending(fresh)
+        repo.write({ 'plano.md': planComment })
+        const run = await bash(repo, command, `${url}\n`)
+        expect(run.status).toBe(0)
+        expect(existsSync(repo.markerPath(SESSION))).toBe(true)
+        expect(cacheExists(repo)).toBe(true)
+        expect(contextOf(run)).toMatch(anotherGithub)
+        expect(contextOf(run)).toContain('o marcador continua')
+      },
+    )
+
+    test('keeps the marker for GH_HOST the hook inherits', async ({
+      fresh,
+      expect,
+    }) => {
+      const repo = await pending(fresh)
+      repo.write({ 'plano.md': planComment })
+      const run = await bash(
+        repo,
+        'gh issue comment 5 --body-file plano.md',
+        `${url}\n`,
+        { env: repo.env({ GH_HOST: 'ghe.example.com' }) },
+      )
+      expect(existsSync(repo.markerPath(SESSION))).toBe(true)
+      expect(cacheExists(repo)).toBe(true)
+      expect(contextOf(run)).toMatch(anotherGithub)
+    })
+
+    test.for([
+      [
+        'on the command',
+        'GH_HOST=$HOST gh issue comment 5 --body-file plano.md',
+      ],
+      [
+        'exported earlier on the line',
+        'export GH_HOST="$HOST"; gh issue comment 5 --body-file plano.md',
+      ],
+    ])(
+      'keeps the marker for a GH_HOST it cannot read %s, and says so',
+      async ([, command], { fresh, expect }) => {
+        const repo = await pending(fresh)
+        repo.write({ 'plano.md': planComment })
+        const run = await bash(repo, command, `${url}\n`)
+        expect(existsSync(repo.markerPath(SESSION))).toBe(true)
+        expect(contextOf(run)).toContain(
+          'não consegui ler em que issue, repositório ou host',
+        )
+      },
+    )
+
+    test('keeps the marker when a Monitor publication goes to another host, without asking github.com', async ({
+      fresh,
+      expect,
+    }) => {
+      const repo = await pending(fresh)
+      repo.write({ 'plano.md': planComment })
+      // github.com shows a # Plano comment of the account: it is not the one
+      // this command posted, which went to the other host.
+      repo.setFixture({
+        comments: {
+          5: {
+            comments: [
+              { body: planComment, createdAt: later(), viewerDidAuthor: true },
+            ],
+          },
+        },
+      })
+      const run = await otherTool(
+        repo,
+        'Monitor',
+        'export GH_HOST=ghe.example.com; gh issue comment 5 --body-file plano.md',
+        { taskId: 'b1', status: 'running' },
+      )
+      expect(existsSync(repo.markerPath(SESSION))).toBe(true)
+      expect(contextOf(run)).toMatch(anotherGithub)
+      expect(repo.calls()).toEqual([])
+    })
+
+    test.for([
+      [
+        'GH_HOST=github.com',
+        'GH_HOST=github.com gh issue comment 5 --body-file plano.md',
+      ],
+      [
+        '-R github.com/OWNER/REPO over another GH_HOST',
+        'GH_HOST=ghe.example.com gh issue comment 5 -R github.com/geazioliveira/marketo-sandbox --body-file plano.md',
+      ],
+    ])(
+      'still counts %s: github.com is this project’s host',
+      async ([, command], { fresh, expect }) => {
+        const repo = await pending(fresh)
+        repo.write({ 'plano.md': planComment })
+        const run = await bash(repo, command, `${url}\n`)
+        expect(existsSync(repo.markerPath(SESSION))).toBe(false)
+        expect(contextOf(run)).toContain('o marcador foi removido')
+      },
+    )
+  },
+)
+
+describe.concurrent(
+  'plan-to-issue when a library does not load (Copilot review of #26, fourth round)',
+  () => {
+    /**
+     * A copy of the hooks whose contract module does not parse: the import
+     * of the libraries fails, as a broken edit or a bad merge would make it.
+     */
+    const brokenTree = (root: string): string => {
+      const hooks = path.join(root, '.claude', 'hooks')
+      cpSync(hooksDir, hooks, { recursive: true })
+      mkdirSync(path.join(root, 'scripts'))
+      const contract = path.join(root, 'scripts', 'loop-sections.mjs')
+      cpSync(path.join(projectRoot, 'scripts', 'loop-sections.mjs'), contract)
+      appendFileSync(contract, '\nexport const quebrado = (\n')
+      return path.join(hooks, 'plan-to-issue.mjs')
+    }
+
+    const runBroken = (
+      script: string,
+      repo: HookRepo,
+      input: Record<string, unknown>,
+      cwd = repo.dir,
+    ) =>
+      spawnWith(process.execPath, [script], {
+        input: JSON.stringify({
+          transcript_path: path.join(repo.root, 'transcript.jsonl'),
+          cwd,
+          hook_event_name: 'PostToolUse',
+          ...input,
+        }),
+        env: repo.env(),
+        cwd,
+      })
+
+    test('writes the marker on ExitPlanMode anyway, in the common git dir, and tells Claude through exit 2', async ({
+      fresh,
+      scratch,
+      expect,
+    }) => {
+      const script = brokenTree(scratch())
+      const repo = await fresh()
+      const worktree = await repo.addWorktree('wt-5', BRANCH)
+      const run = await runBroken(
+        script,
+        repo,
+        {
+          session_id: SESSION,
+          tool_name: 'ExitPlanMode',
+          tool_input: { plan: planComment },
+        },
+        worktree.dir,
+      )
+      // PostToolUse: exit 2 shows stderr to Claude; exit 1 would only show
+      // a notice to the person.
+      expect(run.status).toBe(2)
+      expect(run.stderr).toContain(
+        'o plan-to-issue não carregou suas bibliotecas',
+      )
+      expect(run.stderr).toContain('publique-o numa issue antes de construir')
+      // The common git dir, which every worktree shares, as the hook writes it.
+      const marker = JSON.parse(
+        readFileSync(repo.markerPath(SESSION), 'utf8'),
+      ) as Record<string, unknown>
+      expect(marker).toMatchObject({ schema: 1, sessionId: SESSION })
+      expect(Number.isNaN(Date.parse(String(marker.acceptedAt)))).toBe(false)
+      expect(
+        existsSync(path.join(worktree.gitDir, planPendingFile(SESSION))),
+      ).toBe(false)
+    })
+
+    test('names the marker as planPendingFile does, for any session id', async ({
+      fresh,
+      scratch,
+      expect,
+    }) => {
+      const script = brokenTree(scratch())
+      const repo = await fresh({ branch: BRANCH })
+      for (const id of [
+        'abc-123',
+        '0f5e1c9a-9d2b-4a61-8c3e-7a1b2c3d4e5f',
+        'sessão com/../barra',
+        '',
+        undefined,
+      ]) {
+        const before = new Set(readdirSync(repo.gitDir))
+        const run = await runBroken(script, repo, {
+          ...(id === undefined ? {} : { session_id: id }),
+          tool_name: 'ExitPlanMode',
+          tool_input: { plan: '# Plano' },
+        })
+        expect(run.status).toBe(2)
+        const added = readdirSync(repo.gitDir).filter(
+          (name) => !before.has(name),
+        )
+        const expected = planPendingFile(id ?? null)
+        expect(added).toEqual(before.has(expected) ? [] : [expected])
+        expect(existsSync(path.join(repo.gitDir, expected))).toBe(true)
+        expect(expected.startsWith(planPendingPrefix)).toBe(true)
+      }
+    })
+
+    test('never removes the marker on a publication, and tells Claude through exit 2', async ({
+      fresh,
+      scratch,
+      expect,
+    }) => {
+      const script = brokenTree(scratch())
+      const repo = await pending(fresh)
+      repo.write({ 'plano.md': planComment })
+      const run = await runBroken(script, repo, {
+        session_id: SESSION,
+        tool_name: 'Bash',
+        tool_input: { command: 'gh issue comment 5 --body-file plano.md' },
+        tool_response: {
+          stdout: `${ISSUE_URL}/5#issuecomment-50\n`,
+          stderr: '',
+          interrupted: false,
+          isImage: false,
+        },
+      })
+      expect(run.status).toBe(2)
+      expect(run.stderr).toContain(
+        'o plan-to-issue não carregou suas bibliotecas',
+      )
+      expect(run.stderr).toContain('continua como estava')
+      expect(existsSync(repo.markerPath(SESSION))).toBe(true)
+      expect(cacheExists(repo)).toBe(true)
+    })
+  },
+)

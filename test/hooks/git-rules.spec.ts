@@ -49,6 +49,8 @@ interface GitCtx {
   lineConfig?: { pair: string; known: boolean }[]
   files?: (file: string) => FileText | undefined
   cache?: Map<string, unknown>
+  /** The hook's input: the session whose plan marker counts, and its cwd. */
+  input?: { session_id?: string; cwd?: string }
 }
 
 interface HeadChange {
@@ -111,20 +113,23 @@ beforeAll(async () => {
     loadHookLib<IoLib>('io'),
     loadHookLib<RepoLib>('repo'),
   ])
+  // The branch of the issue has its gate open: the rules for messages and
+  // pushes are judged here, and a merge or a cherry-pick also writes the
+  // worktree, which the gate lets through only when open.
   ;[onMain, onFeature, elsewhere, aliased, fork] = await Promise.all([
     hookRepo(),
-    hookRepo({ branch: FEATURE }),
+    hookRepo({ branch: FEATURE, cache: true }),
     hookRepo({ origin: 'https://github.com/alguem/outro.git' }),
     hookRepo(),
     hookRepo({ branch: FEATURE, origin: 'https://github.com/alguem/fork.git' }),
   ])
-  await Promise.all([
-    aliased.git('config', 'alias.ci', 'commit'),
-    aliased.git('config', 'alias.chain', 'ci -q'),
-    aliased.git('config', 'alias.sh', '!git push origin HEAD:main'),
-    aliased.git('config', 'alias.loop', 'loop'),
-    fork.git('remote', 'add', 'upstream', PROJECT_URL),
-  ])
+  // One after the other: two `git config` at once in the same repository
+  // race for the lock on .git/config, and the loser fails.
+  await aliased.git('config', 'alias.ci', 'commit')
+  await aliased.git('config', 'alias.chain', 'ci -q')
+  await aliased.git('config', 'alias.sh', '!git push origin HEAD:main')
+  await aliased.git('config', 'alias.loop', 'loop')
+  await fork.git('remote', 'add', 'upstream', PROJECT_URL)
   outside = realpathSync.native(mkdtempSync(path.join(tmpdir(), 'git-rules-')))
   // Untracked files: the rules only read them.
   onFeature.write({ 'msg-skip.txt': 'Hooks\n\n[skip ci]\n' })
@@ -151,6 +156,8 @@ interface JudgeOptions {
   lineConfig?: GitCtx['lineConfig']
   files?: GitCtx['files']
   env?: Record<string, string>
+  /** The hook's input; a session with no plan marker, in `cwd`, when absent. */
+  input?: GitCtx['input']
 }
 
 /**
@@ -161,7 +168,7 @@ interface JudgeOptions {
 function judge(
   text: string,
   cwd: string,
-  { seen, lineConfig, files, env = {} }: JudgeOptions = {},
+  { seen, lineConfig, files, env = {}, input }: JudgeOptions = {},
 ): { decision: Decision; asked: string[] } {
   const asked: string[] = []
   const repoAt = (dir: string) => {
@@ -181,6 +188,7 @@ function judge(
         env: onMain.env(env),
         lineConfig,
         files,
+        input: input ?? { session_id: 'spec-git-rules', cwd },
       }),
     )
   return { decision: io.combine(decisions), asked }
@@ -213,9 +221,11 @@ describe('commits on main', () => {
     'git revert HEAD',
     'git am 0001.patch',
   ])('denies %s with main checked out', (text) => {
-    expect(verdict(text, onMain.dir)).toEqual({
+    // A merge, a cherry-pick, a revert and an am also write the worktree,
+    // which main refuses too (fourth round): both reasons are given.
+    expect(verdict(text, onMain.dir)).toMatchObject({
       decision: 'deny',
-      reason: onTrunk,
+      reason: expect.stringContaining(onTrunk) as string,
     })
   })
 
@@ -407,7 +417,7 @@ describe('messages a commit brings from elsewhere (Copilot review of #26)', () =
   const patch = { clean: '', subject: '', body: '' }
 
   beforeAll(async () => {
-    sourced = await hookRepo({ branch: FEATURE })
+    sourced = await hookRepo({ branch: FEATURE, cache: true })
     await sourced.commit({ 'a.txt': 'a\n' }, 'Limpo')
     await sourced.commit({ 'b.txt': 'b\n' }, 'Pular [skip ci]')
     await sourced.commit(
@@ -559,6 +569,24 @@ describe('messages a commit brings from elsewhere (Copilot review of #26)', () =
     const text = `git -c remote.lazy.promisor=true -c remote.lazy.url='ext::touch ${marker}' -c protocol.ext.allow=always cherry-pick ${'1'.repeat(40)}`
     expect(at(text)).toMatchObject({ decision: 'ask', critical: true })
     expect(existsSync(marker)).toBe(false)
+  })
+
+  it('runs nothing the environment’s config names either (fourth round)', () => {
+    // The same config in GIT_CONFIG_COUNT, which the read keeps: git
+    // fetches nothing, and core.fsmonitor, run when git reads the index
+    // (`:a.txt`), is off.
+    const fetched = path.join(sourced.root, 'buscou-pelo-ambiente')
+    const fetch = `GIT_CONFIG_COUNT=3 GIT_CONFIG_KEY_0=remote.lazy.promisor GIT_CONFIG_VALUE_0=true GIT_CONFIG_KEY_1=remote.lazy.url GIT_CONFIG_VALUE_1='ext::touch ${fetched}' GIT_CONFIG_KEY_2=protocol.ext.allow GIT_CONFIG_VALUE_2=always git cherry-pick ${'1'.repeat(40)}`
+    expect(at(fetch)).toMatchObject({ decision: 'ask', critical: true })
+    expect(existsSync(fetched)).toBe(false)
+    const monitored = path.join(sourced.root, 'monitorou')
+    for (const text of [
+      `git -c 'core.fsmonitor=touch ${monitored}' cherry-pick :a.txt`,
+      `GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.fsmonitor GIT_CONFIG_VALUE_0='touch ${monitored}' git revert :a.txt`,
+    ]) {
+      at(text)
+      expect(existsSync(monitored)).toBe(false)
+    }
   })
 
   it('follows the -c that decides which commit a name points at', async () => {
@@ -1451,5 +1479,503 @@ describe('a word git does not know in the subcommand’s place (Copilot review o
       reason: /não reconheci "valor" como subcomando nem alias do git/,
     })
     expect(verdict('git valor status', onFeature.dir).decision).toBe('pass')
+  })
+
+  it('asks, critical, when the command names a write to the worktree after it (fourth round)', () => {
+    expect(verdict('git valor restore README.md', onFeature.dir)).toMatchObject(
+      {
+        decision: 'ask',
+        critical: true,
+        reason: /não reconheci "valor" .* e o comando cita restore/,
+      },
+    )
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Fourth round of Copilot's review of #26
+
+describe('git writes to the worktree go through the gate (Copilot review of #26, fourth round)', () => {
+  /**
+   * Branches of the issue whose gate is closed, open, never run, open but
+   * unverified, open with a plan of this session not yet posted; and a
+   * detached HEAD. The commands are judged, not run: only the reads the rule
+   * makes (is this word a branch or a file?) touch the repositories.
+   */
+  const SESSION = 'sessao-das-escritas'
+  let closed: HookRepo
+  let open: HookRepo
+  let missing: HookRepo
+  let unverified: HookRepo
+  let pending: HookRepo
+  let detached: HookRepo
+
+  beforeAll(async () => {
+    ;[closed, open, missing, unverified, pending, detached] = await Promise.all(
+      [
+        hookRepo({ branch: FEATURE, cache: { open: false } }),
+        hookRepo({ branch: FEATURE, cache: true }),
+        hookRepo({ branch: FEATURE }),
+        hookRepo({ branch: FEATURE, cache: { verified: false } }),
+        hookRepo({ branch: FEATURE, cache: true, marker: SESSION }),
+        hookRepo({ detached: true }),
+      ],
+    )
+    // A tracked file deleted from the disk, which `git checkout <file>`
+    // brings back; a remote branch `git checkout <name>` would create a
+    // branch from; the lists --pathspec-from-file reads.
+    await closed.commit({ 'apagado.md': 'x\n' }, 'Apagado')
+    rmSync(path.join(closed.dir, 'apagado.md'))
+    // Logs are ignored, but for one the .gitignore keeps; an ignored file
+    // in a folder whose name holds a wildcard.
+    closed.write({
+      '.gitignore': '*.log\n!importante.log\n',
+      'importante.log': 'x\n',
+      'logs[1]/a.log': 'x\n',
+    })
+    await closed.git(
+      'update-ref',
+      'refs/remotes/origin/feature/9-remota',
+      'HEAD',
+    )
+    closed.write({
+      'context/intent/feature-x.md': '# Intent\n',
+      'lista-intent.txt': 'context/intent/feature-x.md\n',
+      'lista-readme.txt': 'README.md\n',
+    })
+  }, setupTimeout)
+
+  afterAll(() => {
+    for (const repo of [closed, open, missing, unverified, pending, detached])
+      repo?.remove()
+  }, setupTimeout)
+
+  /** The decision in a mode, as guard-bash resolves it, for this session. */
+  const write = (text: string, repo: HookRepo, mode = 'default') =>
+    io.resolve(
+      verdict(text, repo.dir, {
+        input: { session_id: SESSION, cwd: repo.dir },
+      }),
+      mode,
+    )
+
+  const closedGate = /o gate está fechado: rode npm run gate/
+  const autoDeny = /Em auto, a confirmação vira negação/
+
+  it('refuses the probe Copilot ran: git checkout -- README.md on a branch of the issue with the gate closed', () => {
+    for (const mode of ['default', 'auto']) {
+      const decision = write('git checkout -- README.md', closed, mode)
+      expect(decision.decision).toBe('deny')
+      expect(decision.reason).toMatch(/o git checkout escreve no worktree/)
+      expect(decision.reason).toMatch(closedGate)
+    }
+  })
+
+  const families: [string, string][] = [
+    ['checkout of a path from the index', 'git checkout -- README.md'],
+    ['checkout of a path from a commit', 'git checkout main -- README.md'],
+    ['checkout of a path from a commit, no --', 'git checkout main README.md'],
+    ['checkout of a file, no --', 'git checkout README.md'],
+    ['checkout of a deleted file, no --', 'git checkout apagado.md'],
+    ['checkout --ours of a path', 'git checkout --ours -- README.md'],
+    ['checkout -p', 'git checkout -p'],
+    ['checkout -f with no branch', 'git checkout -f'],
+    ['restore', 'git restore README.md'],
+    ['restore --staged', 'git restore --staged README.md'],
+    ['restore --source', 'git restore -s main -- README.md'],
+    ['restore of the whole tree', 'git restore .'],
+    ['reset --hard', 'git reset --hard'],
+    ['reset --merge', 'git reset --merge HEAD'],
+    ['reset --keep', 'git reset --keep main'],
+    ['reset of a path', 'git reset -- README.md'],
+    ['reset of a path from a commit', 'git reset main README.md'],
+    ['apply', 'git apply correcao.patch'],
+    ['apply --cached', 'git apply --cached correcao.patch'],
+    ['apply --index -3', 'git apply --index -3 correcao.patch'],
+    ['apply --check --apply', 'git apply --check --apply correcao.patch'],
+    ['am', 'git am --continue'],
+    ['cherry-pick', 'git cherry-pick main'],
+    ['cherry-pick -n', 'git cherry-pick -n main'],
+    ['revert', 'git revert --no-edit HEAD'],
+    ['merge', 'git merge main'],
+    ['merge --squash', 'git merge --squash main'],
+    [
+      'merge --ff-only of a branch other than main',
+      'git merge --ff-only feature/9-x',
+    ],
+    [
+      'merge --ff-only undone by --no-ff',
+      'git merge --ff-only --no-ff origin/main',
+    ],
+    ['pull', 'git pull'],
+    ['pull --rebase', 'git pull --rebase origin main'],
+    ['rebase', 'git rebase main'],
+    ['rebase --continue', 'git rebase --continue'],
+    ['stash apply', 'git stash apply'],
+    ['stash pop', 'git stash pop stash@{0}'],
+    ['stash branch', 'git stash branch feature/9-x'],
+    ['rm', 'git rm README.md'],
+    ['rm --cached', 'git rm --cached README.md'],
+    ['mv', 'git mv README.md LEIA.md'],
+    ['clean -f', 'git clean -fd'],
+    ['clean -x', 'git clean -f -x -- src'],
+    ['read-tree -u', 'git read-tree -u -m HEAD'],
+    ['checkout-index -a', 'git checkout-index -a -f'],
+    ['checkout-index of a path', 'git checkout-index -f -- README.md'],
+    ['update-index', 'git update-index --chmod=+x README.md'],
+    ['sparse-checkout set', 'git sparse-checkout set src'],
+    ['mergetool', 'git mergetool README.md'],
+    ['merge-file', 'git merge-file README.md base.md outro.md'],
+    ['lfs pull', 'git lfs pull'],
+    ['filter-branch', 'git filter-branch --tree-filter true HEAD'],
+    ['a write behind -C', `git -C ${'.'} restore README.md`],
+    ['a write after cd', 'cd . && git restore README.md'],
+  ]
+
+  it.each(families)(
+    'denies %s with the gate closed, in default and in auto',
+    (_, text) => {
+      for (const mode of ['default', 'auto']) {
+        const decision = write(text, closed, mode)
+        expect(decision.decision).toBe('deny')
+        expect(decision.reason).toMatch(closedGate)
+      }
+    },
+  )
+
+  it.each([
+    'git checkout -- README.md',
+    'git restore .',
+    'git merge main',
+    'git stash pop',
+    'git rm README.md',
+    'git clean -fd',
+  ])(
+    'asks, critical, for %s with a plan of this session not yet posted: an ask in default, a deny in auto',
+    (text) => {
+      expect(write(text, pending)).toMatchObject({
+        decision: 'ask',
+        critical: true,
+        reason: expect.stringMatching(/plano aceito nesta sessão/) as string,
+      })
+      const auto = write(text, pending, 'auto')
+      expect(auto.decision).toBe('deny')
+      expect(auto.reason).toMatch(autoDeny)
+    },
+  )
+
+  it('gives the other states of the gate the decision build-guard gives an edit', () => {
+    expect(write('git restore README.md', missing).reason).toMatch(
+      /o gate ainda não rodou neste worktree/,
+    )
+    expect(write('git restore README.md', unverified)).toMatchObject({
+      decision: 'ask',
+      critical: true,
+      reason: expect.stringMatching(/o gate abriu sem ler a issue/) as string,
+    })
+    expect(write('git restore README.md', unverified, 'auto').decision).toBe(
+      'deny',
+    )
+    for (const mode of ['default', 'auto']) {
+      expect(write('git checkout -- README.md', onMain, mode)).toMatchObject({
+        decision: 'deny',
+        reason: expect.stringMatching(/em main, nada se edita/) as string,
+      })
+      expect(write('git merge main', detached, mode)).toMatchObject({
+        decision: 'deny',
+        reason: expect.stringMatching(/HEAD destacado/) as string,
+      })
+    }
+  })
+
+  it.each([
+    'git checkout -- README.md',
+    'git restore .',
+    'git reset --hard',
+    'git merge main',
+    'git pull',
+    'git stash pop',
+    'git rm README.md',
+  ])('passes %s with the gate open', (text) => {
+    for (const mode of ['default', 'auto'])
+      expect(write(text, open, mode)).toEqual({ decision: 'pass' })
+  })
+
+  it('asks, critical, for a path of the harness even with the gate open, and refuses the owner’s exit', () => {
+    expect(
+      write('git checkout main -- .claude/settings.json', open),
+    ).toMatchObject({
+      decision: 'ask',
+      critical: true,
+      reason: expect.stringMatching(
+        /caminho do harness \(\.claude\/settings\.json\)/,
+      ) as string,
+    })
+    expect(
+      write('git checkout main -- .claude/settings.json', open, 'auto')
+        .decision,
+    ).toBe('deny')
+    expect(
+      write('git checkout main -- .claude/settings.local.json', open),
+    ).toMatchObject({
+      decision: 'deny',
+      reason: expect.stringMatching(
+        /a saída de emergência é do dono/,
+      ) as string,
+    })
+  })
+
+  it.each([
+    'git checkout -- context/intent/feature-x.md',
+    'git checkout main -- context/intent',
+    'git restore context/intent/',
+    "git restore -- 'context/intent/*.md'",
+    'git rm -r context/intent/velho.md',
+    'git reset -- context/intent/feature-x.md',
+    'cd context/intent && git restore feature-x.md',
+    'git restore --pathspec-from-file=lista-intent.txt',
+    // `:/` and `:(top)` read the path from the worktree's top, not from the
+    // directory git runs in.
+    "cd context && git restore ':/context/intent/feature-x.md'",
+    "cd context && git restore ':(top)context/intent/feature-x.md'",
+    // An exclude takes a path away from the intent, and adds none.
+    "git restore -- context/intent ':!context/intent/feature-x.md'",
+    // git drops the folder `..` climbs out of before it matches the glob.
+    "git restore -- 'context/intent/*/../feature-x.md'",
+  ])('passes %s, which writes only the intent', (text) => {
+    for (const mode of ['default', 'auto'])
+      expect(write(text, closed, mode)).toEqual({ decision: 'pass' })
+  })
+
+  it.each([
+    'git checkout -- context/intent/feature-x.md README.md',
+    "git restore -- 'context/int*'",
+    'git restore --pathspec-from-file=lista-readme.txt',
+    'git restore Context/Intent/feature-x.md',
+    // Only exclusions: git reads them as everything but those paths.
+    "git checkout main -- ':!context/intent/feature-x.md'",
+    "git restore -- ':(exclude)context/intent/feature-x.md'",
+    // `:/` from inside the intent is the worktree's top.
+    "cd context/intent && git restore ':/README.md'",
+    "cd context/intent && git restore ':(top)README.md'",
+    // git normalizes the `..` first: this is README.md, not the intent.
+    "git checkout main -- 'context/intent/*/../../../README.md'",
+    "git restore -- 'context/intent/*/../../README.md'",
+    // A glob is the folder it may reach, whatever a .gitignore pattern says
+    // of its text: `*portante.log` reads as ignored, and git clean would
+    // delete importante.log, which the .gitignore keeps.
+    "git clean -f -- '*portante.log'",
+  ])('denies %s, which writes outside the intent', (text) => {
+    expect(write(text, closed).decision).toBe('deny')
+  })
+
+  it('reads the directory git runs in as it is written, wildcards and all', () => {
+    // git takes the directory it runs in literally, so logs[1]/a.log is one
+    // file, which the .gitignore ignores; were the `[` read as a glob, the
+    // write would reach the worktree whole.
+    for (const mode of ['default', 'auto'])
+      expect(write("cd 'logs[1]' && git restore a.log", closed, mode)).toEqual({
+        decision: 'pass',
+      })
+  })
+
+  it.each([
+    'git switch -c feature/9-x origin/main',
+    'git switch main',
+    `git switch ${FEATURE}`,
+    'git switch -',
+    'git checkout -b feature/9-x',
+    'git checkout -b feature/9-x origin/main',
+    'git checkout main',
+    `git checkout ${FEATURE}`,
+    'git checkout feature/9-remota',
+    // The branch checked out before, whatever a file named `-` would be.
+    'git checkout -',
+    'git checkout --detach main',
+    'git checkout main --',
+    'git fetch origin',
+    'git status',
+    'git log --oneline',
+    'git diff',
+    'git show HEAD:README.md',
+    'git stash',
+    'git stash -u',
+    'git stash push -m wip -- README.md',
+    'git stash list',
+    'git stash show -p',
+    'git stash drop',
+    'git worktree add ../novo -b feature/9-x origin/main',
+    'git clean -n',
+    'git clean --dry-run -d',
+    'git rm -n README.md',
+    'git mv --dry-run README.md LEIA.md',
+    'git apply --check correcao.patch',
+    'git apply --stat correcao.patch',
+    'git pull --dry-run',
+    'git read-tree -n HEAD',
+    'git merge --abort',
+    // Where `git switch -C <branch> origin/main` would leave the worktree.
+    'git merge --ff-only origin/main -q',
+    'git merge --ff-only main',
+    'git rebase --abort',
+    'git cherry-pick --quit',
+    'git am --abort',
+    'git add README.md',
+    'git commit -m x',
+    'git reset --soft HEAD~1',
+    'git reset HEAD~1',
+    'git update-index -q --refresh',
+    'git sparse-checkout list',
+  ])(
+    'passes %s with the gate closed: the loop needs it before the gate opens',
+    (text) => {
+      for (const mode of ['default', 'auto'])
+        expect(write(text, closed, mode)).toEqual({ decision: 'pass' })
+    },
+  )
+
+  it('passes a write in another repository or outside any', () => {
+    for (const mode of ['default', 'auto']) {
+      expect(write('git checkout -- README.md', elsewhere, mode)).toEqual({
+        decision: 'pass',
+      })
+      expect(
+        io.resolve(
+          verdict(`git -C ${elsewhere.dir} reset --hard`, closed.dir, {
+            input: { session_id: SESSION, cwd: closed.dir },
+          }),
+          mode,
+        ),
+      ).toEqual({ decision: 'pass' })
+      expect(
+        io.resolve(verdict('git restore README.md', outside), mode),
+      ).toEqual({ decision: 'pass' })
+    }
+  })
+
+  it.each([
+    ['a path behind an expansion', 'git checkout -- "$F"'],
+    ['a word that may be a branch or a file', 'git checkout "$ALVO"'],
+    ['a directory behind an expansion', 'git -C "$WT" restore README.md'],
+    [
+      'a list of paths it cannot read',
+      'git restore --pathspec-from-file=nao-existe.txt',
+    ],
+    ['a list read from a pipe', 'ls | git restore --pathspec-from-file=-'],
+    [
+      'a work tree named elsewhere',
+      'git --work-tree=../outro checkout -- README.md',
+    ],
+  ])(
+    'asks, critical, for %s where the gate is closed: an ask in default, a deny in auto',
+    (_, text) => {
+      expect(write(text, closed)).toMatchObject({
+        decision: 'ask',
+        critical: true,
+      })
+      expect(write(text, closed, 'auto').decision).toBe('deny')
+    },
+  )
+
+  it('passes a path it cannot read where the gate is open', () => {
+    expect(write('git checkout -- "$F"', open)).toEqual({ decision: 'pass' })
+  })
+
+  it('asks, critical, when an earlier command of the line moved HEAD', () => {
+    const decision = io.resolve(
+      verdict('git restore README.md', open.dir, {
+        seen: (repo) => ({ ...repo, branchKnown: false }),
+        input: { session_id: SESSION, cwd: open.dir },
+      }),
+      'default',
+    )
+    expect(decision).toMatchObject({
+      decision: 'ask',
+      critical: true,
+      reason: expect.stringMatching(
+        /um comando anterior da linha muda o HEAD/,
+      ) as string,
+    })
+  })
+
+  it('reads a write an alias expands to', () => {
+    expect(
+      write('git -c alias.desfaz="checkout --" desfaz README.md', closed)
+        .decision,
+    ).toBe('deny')
+  })
+
+  describe('the reads that tell a branch from a file run nothing the command names', () => {
+    // Whether the word of `git checkout <word>` or `git reset <word>` is a
+    // commit is asked of git. The command's config must not make that read
+    // run a program: a promisor remote it names makes git fetch the commit
+    // it lacks, through any transport (ext:: runs a program), and
+    // core.fsmonitor runs one when git reads the index (`:README.md`). The
+    // config comes as -c, or in the environment (GIT_CONFIG_COUNT).
+    const missing = '1'.repeat(40)
+    const promisor = (marker: string) => [
+      'remote.lazy.promisor=true',
+      `remote.lazy.url=ext::touch ${marker}`,
+      'protocol.ext.allow=always',
+    ]
+    const asDashC = (pairs: string[]) =>
+      pairs.map((pair) => `-c '${pair}'`).join(' ')
+    const asEnv = (pairs: string[]) =>
+      [
+        `GIT_CONFIG_COUNT=${pairs.length}`,
+        ...pairs.flatMap((pair, index) => {
+          const eq = pair.indexOf('=')
+          return [
+            `GIT_CONFIG_KEY_${index}=${pair.slice(0, eq)}`,
+            `GIT_CONFIG_VALUE_${index}='${pair.slice(eq + 1)}'`,
+          ]
+        }),
+      ].join(' ')
+    const fsmonitor = (marker: string) => [`core.fsmonitor=touch ${marker}`]
+
+    const cases: [string, (marker: string) => string][] = [
+      [
+        'a promisor remote in -c, for checkout',
+        (m) => `git ${asDashC(promisor(m))} checkout ${missing}`,
+      ],
+      [
+        'a promisor remote in -c, for reset',
+        (m) => `git ${asDashC(promisor(m))} reset ${missing}`,
+      ],
+      [
+        'a promisor remote in the environment, for checkout',
+        (m) => `${asEnv(promisor(m))} git checkout ${missing}`,
+      ],
+      [
+        'a promisor remote in the environment, for reset',
+        (m) => `${asEnv(promisor(m))} git reset ${missing}`,
+      ],
+      [
+        'core.fsmonitor in -c, for checkout',
+        (m) => `git ${asDashC(fsmonitor(m))} checkout :README.md`,
+      ],
+      [
+        'core.fsmonitor in -c, for reset',
+        (m) => `git ${asDashC(fsmonitor(m))} reset :README.md`,
+      ],
+      [
+        'core.fsmonitor in the environment, for checkout',
+        (m) => `${asEnv(fsmonitor(m))} git checkout :README.md`,
+      ],
+      [
+        'core.fsmonitor in the environment, for reset',
+        (m) => `${asEnv(fsmonitor(m))} git reset :README.md`,
+      ],
+    ]
+
+    it.each(cases)('runs nothing for %s', (name, line) => {
+      const marker = path.join(
+        closed.root,
+        `rodou-${name.replace(/\W+/g, '-')}`,
+      )
+      const decision = write(line(marker), closed)
+      expect(decision.decision).not.toBe('pass')
+      expect(existsSync(marker)).toBe(false)
+    })
   })
 })

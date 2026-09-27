@@ -1,5 +1,6 @@
 // The rules for `git` (#5): nothing lands on main but through a pull
-// request, and no commit message turns the checks off.
+// request, no commit message turns the checks off, and no git command
+// writes the worktree where an edit could not (fourth round, below).
 //
 // The gate and the audit of main see a commit on main, or a push that skipped
 // its checks, only after it happened. These rules stop the two before git
@@ -27,8 +28,9 @@ import {
   skipCiTokens,
 } from '../../../scripts/loop-sections.mjs'
 import { afterSpawn, spawnTimeout } from './budget.mjs'
+import { editDecision, intentDir, within } from './edit-gate.mjs'
 import { ask, combine, deny, pass } from './io.mjs'
-import { isProject, repoFromRemote, trunk } from './repo.mjs'
+import { isProject, realPathOf, repoFromRemote, trunk } from './repo.mjs'
 import { parseCommand, readBody } from './shell.mjs'
 
 const escapeRegExp = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
@@ -293,6 +295,7 @@ function globalsOf(command, cwd, env, lineConfig = []) {
     dirKnown: true,
     gitDir: null,
     gitDirKnown: true,
+    workTree: false,
     config: [],
     configArgs: [],
     configKnown: true,
@@ -346,7 +349,7 @@ function globalsOf(command, cwd, env, lineConfig = []) {
     } else if (name === '--git-dir') {
       gitDirRaw = value
       g.gitDirKnown = known
-    }
+    } else if (name === '--work-tree') g.workTree = true
   }
   g.at = k
   if (gitDirRaw === null && typeof env.GIT_DIR === 'string' && env.GIT_DIR) {
@@ -666,6 +669,18 @@ function commitMessage(command, argv, dir, from, files, { spec, what }) {
 // Messages a commit brings from elsewhere
 
 /**
+ * What a read of the hook's own adds so that it runs nothing, whatever the
+ * command's config: no lazy fetch from a promisor remote (git fetches an
+ * object it lacks through any transport, and ext:: runs a program), and
+ * core.fsmonitor off (git runs it when it reads the index, as `:path` does).
+ * The variable set here, and a `-c` given after the others, override every
+ * other source: the command's own -c, GIT_CONFIG_COUNT or
+ * GIT_CONFIG_PARAMETERS in its environment, a config file it points at.
+ */
+const inertConfig = ['-c', 'core.fsmonitor=false']
+const inertEnv = (env) => ({ ...env, GIT_NO_LAZY_FETCH: '1' })
+
+/**
  * The messages of revisions in the command's repository, each as `format`
  * gives it (`%B` the whole message, `%s` the subject), selected the way
  * cherry-pick and revert select them: each revision alone, a range walked
@@ -678,7 +693,8 @@ function commitMessage(command, argv, dir, from, files, { spec, what }) {
  * the messages unknown. The rest is left out: this read must not run what a
  * `-c` asks for, such as a promisor remote it names, from which git fetches a
  * commit it lacks through any transport (`ext::` runs a program), or a
- * gpg.program (`--no-show-signature` too).
+ * gpg.program (`--no-show-signature` too). The environment's config is kept,
+ * so what it could run is turned off (inertEnv, inertConfig).
  */
 function revMessages(g, revs, format, env) {
   const configArgs = []
@@ -699,8 +715,8 @@ function revMessages(g, revs, format, env) {
       ...revs,
       '--',
     ],
-    env,
-    { configArgs },
+    inertEnv(env),
+    { configArgs: [...configArgs, ...inertConfig] },
   )
   if (run.status !== 0) return null
   return run.out
@@ -1357,6 +1373,604 @@ function pushReading(
 }
 
 // ---------------------------------------------------------------------------
+// Writes to the worktree (Copilot review of #26, fourth round)
+//
+// build-guard judges every file an Edit or a Write touches, and git writes
+// files too: `git checkout -- README.md` puts back a file, `git merge` brings
+// a branch's files, `git apply` a patch's. So a git command that writes
+// tracked files in the worktree, or the index they are committed from, gets
+// the decision an edit of the same files gets (edit-gate.mjs): on main it is
+// refused, with a plan of this session not yet posted it asks, and with the
+// gate not open for the branch it is refused, unless every path it names is
+// in context/intent/.
+//
+// What the loop needs before the gate opens stays out: cutting or switching
+// a branch with no path (`git switch -c X origin/main`, `git checkout X`),
+// fetching, reading, `git stash` (push, list, show, drop), `git worktree
+// add`, the dry runs, a `git merge --ff-only` to main (it lands where a
+// switch to main would), and the `--abort`/`--quit` that put a stopped
+// merge, rebase, cherry-pick, revert or am back where it started. So do `git add`
+// and `git commit`, which record what the worktree already holds, and `git
+// reset --soft`/`--mixed` with no path, which move the branch and the index
+// but write no file.
+//
+// A write that names no path (a merge, a pull, a stash pop) is judged as the
+// worktree whole, not file by file: the files a commit or a patch brings are
+// not read, so the harness paths among them do not ask on their own. A path
+// or a directory the hook cannot read makes the decision uncertain: what
+// would be refused asks, critical, instead (third round).
+
+/**
+ * Options that take a value, per subcommand that may write, as readGitArgs
+ * reads them; any other option is a flag, or takes its value after `=`.
+ */
+const writeSpecs = {
+  checkout: {
+    short: 'bB',
+    long: ['--orphan', '--conflict', '--pathspec-from-file'],
+  },
+  restore: {
+    short: 's',
+    long: ['--source', '--conflict', '--pathspec-from-file'],
+  },
+  reset: { long: ['--pathspec-from-file'] },
+  rm: { long: ['--pathspec-from-file'] },
+  mv: {},
+  clean: { short: 'e', long: ['--exclude'] },
+  apply: {
+    short: 'pC',
+    long: [
+      '--exclude',
+      '--include',
+      '--whitespace',
+      '--directory',
+      '--build-fake-ancestor',
+    ],
+  },
+  'checkout-index': { long: ['--prefix', '--stage'] },
+  mergetool: { short: 'tO', long: ['--tool'] },
+  'merge-file': { short: 'L', long: ['--diff-algorithm', '--marker-size'] },
+}
+
+/** Subcommands that write the worktree or the index whole, but for the options that leave. */
+const wholeWrites = {
+  am: ['--abort', '--quit', '--show-current-patch'],
+  'cherry-pick': ['--abort', '--quit'],
+  revert: ['--abort', '--quit'],
+  merge: ['--abort', '--quit'],
+  pull: ['--dry-run'],
+  rebase: ['--abort', '--quit', '--edit-todo', '--show-current-patch'],
+  'read-tree': ['-n', '--dry-run'],
+  'filter-branch': [],
+}
+
+/** Every subcommand this section judges, for a word read after one git does not know. */
+const writers = new Set([
+  ...Object.keys(writeSpecs),
+  ...Object.keys(wholeWrites),
+  'stash',
+  'update-index',
+  'sparse-checkout',
+  'lfs',
+])
+
+/** main as a merge names it: the branch, or origin's copy of it. */
+const trunkNames = new Set([
+  ...trunkRefs,
+  `origin/${trunk}`,
+  `remotes/origin/${trunk}`,
+  `refs/remotes/origin/${trunk}`,
+])
+
+/**
+ * `git merge --ff-only <main>`: the branch moves to main's commit, or git
+ * refuses, so the worktree ends as main has it, with nothing of any other
+ * branch. That is where `git switch -C <branch> origin/main`, which the loop
+ * needs before the gate opens, would leave it too, so it is no build; a
+ * branch being brought up to date for its plan does it (Copilot review of
+ * #26, fourth round, measured on the corpus of real commands).
+ */
+function fastForwardToTrunk(command, g) {
+  const { options, operands } = readGitArgs(g.argv, g.at + 1, mergeSpec)
+  return (
+    options.some((entry) => entry.name === '--ff-only') &&
+    !options.some((entry) => ['--no-ff', '--ff'].includes(entry.name)) &&
+    operands.length === 1 &&
+    wordKnown(command, operands[0].index) &&
+    trunkNames.has(operands[0].value)
+  )
+}
+
+/** The options with which git apply only reads the patch, unless --apply is also given. */
+const applyReads = new Set(['--check', '--stat', '--numstat', '--summary'])
+
+/** The update-index options that only refresh what the index knows of the disk. */
+const refreshOnly = new Set([
+  '-q',
+  '--refresh',
+  '--really-refresh',
+  '--ignore-missing',
+  '--unmerged',
+  '--ignore-submodules',
+  '--verbose',
+])
+
+/**
+ * A path a write names: { value, known }. `null` in place of the list is
+ * the worktree whole.
+ * @typedef {{ value: string, known: boolean }} Pathspec
+ * @typedef {{ paths: Pathspec[] | null, unsure: string[] }} Write
+ */
+
+const wholeTree = () => ({ paths: null, unsure: [] })
+
+const pathsOf = (command, operands) =>
+  operands.map((operand) => ({
+    value: operand.value,
+    known: wordKnown(command, operand.index),
+  }))
+
+/**
+ * The paths `--pathspec-from-file` lists: one per line, or NUL-separated
+ * with --pathspec-file-nul, `-` being stdin. A list the hook cannot read,
+ * or a C-quoted line it would have to unquote, is unsure.
+ * @returns {{ paths: Pathspec[], unsure: string | null } | null}
+ */
+function pathspecFile(command, dir, options, files) {
+  const option = options
+    .filter((entry) => entry.name === '--pathspec-from-file')
+    .at(-1)
+  if (option === undefined || option.value === null) return null
+  const where = `a lista de caminhos de --pathspec-from-file (${option.value})`
+  const read = readSource(
+    command,
+    dir,
+    option.value,
+    wordKnown(command, option.index),
+    files,
+  )
+  if (!read.known) return { paths: [], unsure: where }
+  const nul = options.some((entry) => entry.name === '--pathspec-file-nul')
+  const lines = read.text
+    .split(nul ? '\0' : /\r?\n/)
+    .filter((line) => line !== '')
+  if (!nul && lines.some((line) => line.startsWith('"')))
+    return { paths: [], unsure: where }
+  return {
+    paths: lines.map((value) => ({ value, known: true })),
+    unsure: null,
+  }
+}
+
+/**
+ * Whether `word` names an object of `kind` (commit, tree) in the command's
+ * repository: true, false, or null when git cannot say. None of the
+ * command's `-c` is kept, and what its environment's config could run is
+ * turned off: a promisor remote it names would make the read fetch, and the
+ * ext:: transport runs a program; `:path` reads the index, which runs
+ * core.fsmonitor.
+ */
+function namesObject(g, word, kind, env) {
+  const run = gitRead(
+    g,
+    [
+      'rev-parse',
+      '--verify',
+      '--quiet',
+      '--end-of-options',
+      `${word}^{${kind}}`,
+    ],
+    inertEnv(env),
+    { configArgs: inertConfig },
+  )
+  if (run.status === 0) return true
+  if (run.status === 1) return false
+  return null
+}
+
+/**
+ * Whether `git checkout <word>` would create a branch from a remote one
+ * of that name (git's guess): refs/remotes/<remote>/<word> exists for a
+ * remote the repository has. null when git cannot say.
+ */
+function guessedBranch(g, word, env) {
+  const remotes = gitRead(g, ['remote'], env, { configArgs: [] })
+  const refs = gitRead(
+    g,
+    ['for-each-ref', '--format=%(refname)', 'refs/remotes/'],
+    env,
+    { configArgs: [] },
+  )
+  if (remotes.status !== 0 || refs.status !== 0) return null
+  const names = new Set(refs.out.split('\n').filter(Boolean))
+  return remotes.out
+    .split('\n')
+    .filter(Boolean)
+    .some((remote) => names.has(`refs/remotes/${remote}/${word}`))
+}
+
+/**
+ * The operands of a command that takes `[<tree-ish>] [--] <pathspec>…`
+ * (checkout, reset), split as git splits them: after `--`, every word is a
+ * path and the one before is the tree-ish; with no `--`, the first word is
+ * the tree-ish when it names one (`kind`), and a path otherwise. A first
+ * word git cannot place is taken as both: its paths are unsure.
+ * @returns {{ treeish: object | null, paths: Pathspec[], unsure: string[] }}
+ */
+function splitTreeish(command, g, operands, env, kind, read) {
+  const after = operands.filter((operand) => operand.afterDashes)
+  const before = operands.filter((operand) => !operand.afterDashes)
+  if (operands.length > before.length)
+    return {
+      treeish: before[0] ?? null,
+      paths: pathsOf(command, [...before.slice(1), ...after]),
+      unsure: [],
+    }
+  if (before.length === 0) return { treeish: null, paths: [], unsure: [] }
+  const [first, ...rest] = before
+  const known = wordKnown(command, first.index)
+  const named = known && read ? namesObject(g, first.value, kind, env) : null
+  if (named === true)
+    return { treeish: first, paths: pathsOf(command, rest), unsure: [] }
+  if (named === false)
+    return { treeish: null, paths: pathsOf(command, before), unsure: [] }
+  return {
+    treeish: first,
+    paths: pathsOf(command, before),
+    unsure: [`se "${first.value}" é uma revisão ou um caminho`],
+  }
+}
+
+/**
+ * git checkout: a write when it names paths (after `--`, after a tree-ish,
+ * or a word that is no branch nor commit), with -p, or with -f or -m and no
+ * branch (they put back every file); a branch switch otherwise.
+ */
+function checkoutWrite(command, g, env, files, read) {
+  const { options, operands } = readGitArgs(
+    g.argv,
+    g.at + 1,
+    writeSpecs.checkout,
+  )
+  const has = (...names) => options.some((entry) => names.includes(entry.name))
+  if (has('-b', '-B', '--orphan', '-d', '--detach')) return null
+  const patch = has('-p', '--patch')
+  const listed = pathspecFile(command, g.dir, options, files)
+  if (listed !== null)
+    return { paths: listed.paths, unsure: listed.unsure ? [listed.unsure] : [] }
+  const dashed = operands.some((operand) => operand.afterDashes)
+  const before = operands.filter((operand) => !operand.afterDashes)
+  if (before.length === 0 && !dashed)
+    return patch || has('-f', '--force', '-m', '--merge') ? wholeTree() : null
+  if (!dashed && before.length === 1 && !patch) {
+    // `git checkout <word>`: a branch or a commit switches (`-` is the
+    // previous one); a remote branch of that name makes one; anything else
+    // is a path.
+    const [word] = before
+    if (word.value === '-' && wordKnown(command, word.index)) return null
+    if (!wordKnown(command, word.index) || !read)
+      return {
+        paths: pathsOf(command, before),
+        unsure: [`se "${word.value}" é uma branch ou um caminho`],
+      }
+    const commit = namesObject(g, word.value, 'commit', env)
+    if (commit === true) return null
+    const guessed =
+      commit === false && !has('--no-guess')
+        ? guessedBranch(g, word.value, env)
+        : false
+    if (guessed === true) return null
+    if (commit === null || guessed === null)
+      return {
+        paths: pathsOf(command, before),
+        unsure: [`se "${word.value}" é uma branch ou um caminho`],
+      }
+    return { paths: pathsOf(command, before), unsure: [] }
+  }
+  const split = splitTreeish(command, g, operands, env, 'tree', read)
+  if (split.paths.length === 0)
+    return patch ? { paths: null, unsure: split.unsure } : null
+  return { paths: split.paths, unsure: split.unsure }
+}
+
+/** git reset: --hard, --merge and --keep write the worktree; paths or -p write the index. */
+function resetWrite(command, g, env, files, read) {
+  const { options, operands } = readGitArgs(g.argv, g.at + 1, writeSpecs.reset)
+  const has = (...names) => options.some((entry) => names.includes(entry.name))
+  if (has('--hard', '--merge', '--keep')) return wholeTree()
+  const listed = pathspecFile(command, g.dir, options, files)
+  if (listed !== null)
+    return { paths: listed.paths, unsure: listed.unsure ? [listed.unsure] : [] }
+  const dashed = operands.some((operand) => operand.afterDashes)
+  if (!dashed && operands.length === 1 && !has('-p', '--patch')) {
+    // `git reset <word>`: a commit moves the branch and the index, and
+    // writes no file; anything else is a path.
+    const [word] = operands
+    const commit =
+      wordKnown(command, word.index) && read
+        ? namesObject(g, word.value, 'commit', env)
+        : null
+    if (commit === true) return null
+    return {
+      paths: pathsOf(command, operands),
+      unsure:
+        commit === null
+          ? [`se "${word.value}" é uma revisão ou um caminho`]
+          : [],
+    }
+  }
+  const split = splitTreeish(command, g, operands, env, 'tree', read)
+  if (split.paths.length === 0)
+    return has('-p', '--patch') ? { paths: null, unsure: split.unsure } : null
+  return { paths: split.paths, unsure: split.unsure }
+}
+
+/**
+ * The write a git command makes to the worktree or the index, or null for
+ * none: { paths, unsure }, paths null for the worktree whole. `read` false
+ * judges without asking git which words are branches (the directory may not
+ * be read), so what a read would settle is unsure.
+ * @returns {Write | null}
+ */
+function writeOf(command, g, sub, env, files, read) {
+  const spec = writeSpecs[sub]
+  const args = (own = spec ?? {}) => readGitArgs(g.argv, g.at + 1, own)
+  if (sub === 'merge' && fastForwardToTrunk(command, g)) return null
+  if (Object.hasOwn(wholeWrites, sub)) {
+    const { options } = args({})
+    const leaves = wholeWrites[sub]
+    return options.some((entry) => leaves.includes(entry.name))
+      ? null
+      : wholeTree()
+  }
+  switch (sub) {
+    case 'checkout':
+      return checkoutWrite(command, g, env, files, read)
+    case 'reset':
+      return resetWrite(command, g, env, files, read)
+    case 'restore':
+    case 'rm':
+    case 'mv':
+    case 'clean': {
+      const { options, operands } = args()
+      const names = options.map((entry) => entry.name)
+      if (
+        sub !== 'restore' &&
+        names.some((name) => name === '-n' || name === '--dry-run')
+      )
+        return null
+      const listed = pathspecFile(command, g.dir, options, files)
+      const paths = [...pathsOf(command, operands), ...(listed?.paths ?? [])]
+      const unsure = listed?.unsure ? [listed.unsure] : []
+      if (paths.length > 0 || unsure.length > 0) return { paths, unsure }
+      // With no path, restore and clean take the worktree whole; rm and mv
+      // refuse to run.
+      return sub === 'restore' || sub === 'clean' ? wholeTree() : null
+    }
+    case 'apply': {
+      const { options } = args()
+      const names = options.map((entry) => entry.name)
+      return names.some((name) => applyReads.has(name)) &&
+        !names.includes('--apply')
+        ? null
+        : wholeTree()
+    }
+    case 'checkout-index': {
+      const { options, operands } = args()
+      const names = options.map((entry) => entry.name)
+      if (names.includes('--temp')) return null
+      if (names.includes('--stdin'))
+        return { paths: null, unsure: ['os caminhos que chegam pelo stdin'] }
+      const all = names.includes('-a') || names.includes('--all')
+      if (!all && operands.length === 0) return null
+      const write = all
+        ? wholeTree()
+        : { paths: pathsOf(command, operands), unsure: [] }
+      // With --prefix, the files land under it, not in place.
+      const prefix = options.filter((entry) => entry.name === '--prefix').at(-1)
+      if (prefix !== undefined && prefix.value !== null)
+        write.landsIn = {
+          value: prefix.value,
+          known: wordKnown(command, prefix.index),
+        }
+      return write
+    }
+    case 'update-index': {
+      const { options, operands } = args({})
+      if (
+        operands.length === 0 &&
+        options.every((entry) => refreshOnly.has(entry.name))
+      )
+        return null
+      return wholeTree()
+    }
+    case 'stash': {
+      // `git stash` with no verb, or an option first, is a push.
+      const verb = g.argv[g.at + 1]
+      if (verb === undefined || verb.startsWith('-')) return null
+      if (!wordKnown(command, g.at + 1))
+        return { paths: null, unsure: [`o verbo "${verb}" do git stash`] }
+      return ['apply', 'pop', 'branch'].includes(verb) ? wholeTree() : null
+    }
+    case 'sparse-checkout': {
+      const verb = g.argv[g.at + 1]
+      return ['set', 'add', 'reapply', 'disable', 'init'].includes(verb)
+        ? wholeTree()
+        : null
+    }
+    case 'lfs': {
+      const verb = g.argv[g.at + 1]
+      return ['pull', 'checkout'].includes(verb) ? wholeTree() : null
+    }
+    case 'mergetool': {
+      const { options, operands } = args()
+      if (options.some((entry) => entry.name === '--tool-help')) return null
+      return operands.length > 0
+        ? { paths: pathsOf(command, operands), unsure: [] }
+        : wholeTree()
+    }
+    case 'merge-file': {
+      const { options, operands } = args()
+      const names = options.map((entry) => entry.name)
+      if (
+        ['-p', '--stdout', '--object-id'].some((name) => names.includes(name))
+      )
+        return null
+      return operands.length > 0
+        ? { paths: pathsOf(command, operands.slice(0, 1)), unsure: [] }
+        : null
+    }
+    default:
+      return null
+  }
+}
+
+/** Pathspec magic the hook reads; any other makes the path unsure. */
+const pathspecMagic = new Set(['top', 'literal', 'glob', 'exclude'])
+
+/**
+ * Where each path of a write lands, relative to the worktree's top (''
+ * for the worktree whole), as git reads a pathspec: relative to the
+ * directory git runs in, or to the top with `:/` or `:(top)`; a glob
+ * stands for the directory before its first wildcard, once `..` is
+ * resolved as git resolves it; `:!`, `:^` and
+ * `:(exclude)` take paths away and add none. What cannot be placed (an
+ * expansion, `:(icase)`, a work tree named elsewhere, a path outside the
+ * worktree) is the worktree whole, and unsure.
+ * @returns {{ relatives: string[], unsure: string[] }}
+ */
+function placeWrite(write, g, found, env) {
+  const unsure = [...write.unsure]
+  const whole = () => ({ relatives: [''], unsure })
+  if (g.workTree || g.gitDir !== null || env.GIT_WORK_TREE) {
+    unsure.push('a árvore de trabalho que o comando nomeia')
+    return whole()
+  }
+  const top = realPathOf(found.top)
+  const here = realPathOf(g.dir)
+  if (within(top, here) === null) {
+    unsure.push(`onde ${g.dir} fica no worktree`)
+    return whole()
+  }
+  if (write.landsIn !== undefined) {
+    // checkout-index --prefix: a string put before each path, so the
+    // directory it names, or the one it ends in, is where files land.
+    if (!write.landsIn.known) {
+      unsure.push(`o prefixo "${write.landsIn.value}"`)
+      return whole()
+    }
+    const spot = path.resolve(here, write.landsIn.value)
+    const dir = write.landsIn.value.endsWith('/') ? spot : path.dirname(spot)
+    const relative = within(top, realPathOf(dir))
+    // Outside this worktree, it writes none of its files.
+    if (relative === null) return { relatives: [], unsure }
+    return { relatives: [relative === '' ? '' : `${relative}/`], unsure }
+  }
+  if (write.paths === null) return whole()
+  const literalAll = /^(?:1|true)$/i.test(
+    String(env.GIT_LITERAL_PATHSPECS ?? ''),
+  )
+  const relatives = []
+  let included = false
+  for (const spec of write.paths) {
+    let text = spec.value
+    let fromTop = false
+    let exclude = false
+    let literal = literalAll
+    let readable = spec.known
+    if (readable && !literalAll && text.startsWith(':(')) {
+      const close = text.indexOf(')')
+      const magic = close < 0 ? [] : text.slice(2, close).split(',')
+      if (close < 0 || magic.some((word) => !pathspecMagic.has(word)))
+        readable = false
+      fromTop = magic.includes('top')
+      exclude = magic.includes('exclude')
+      literal = literal || magic.includes('literal')
+      text = close < 0 ? '' : text.slice(close + 1)
+    } else if (readable && !literalAll && text.startsWith(':')) {
+      let at = 1
+      while (at < text.length && '/!^'.includes(text[at])) {
+        if (text[at] === '/') fromTop = true
+        else exclude = true
+        at += 1
+      }
+      if (text[at] === ':') at += 1
+      text = text.slice(at)
+    }
+    if (!readable) {
+      unsure.push(`o caminho "${spec.value}"`)
+      relatives.push('')
+      included = true
+      continue
+    }
+    if (exclude) continue
+    included = true
+    // git normalizes the path (`.`, `..`) before it matches it, so the glob
+    // is cut after: `context/intent/*/../../README.md` is context/README.md.
+    const base = fromTop ? top : here
+    const relative = within(top, path.resolve(base, text === '' ? '.' : text))
+    if (relative === null) {
+      unsure.push(`o caminho "${spec.value}", fora do worktree`)
+      relatives.push('')
+      continue
+    }
+    // A glob stands for the directory before its first wildcard. The
+    // directory git runs in is read as it is written, wildcards and all,
+    // unless the path climbs out of it.
+    if (!literal) {
+      const prefix = within(top, base)
+      const kept =
+        prefix !== '' &&
+        (relative === prefix || relative.startsWith(`${prefix}/`))
+          ? prefix.length
+          : 0
+      const wildcard = relative.slice(kept).search(/[*?[\\]/)
+      if (wildcard >= 0) {
+        relatives.push(
+          relative.slice(0, relative.lastIndexOf('/', kept + wildcard) + 1),
+        )
+        continue
+      }
+    }
+    // A directory's paths are the ones under it: the intent directory, named
+    // with or without its slash, holds only the intent.
+    const asDir =
+      relative !== '' && (text.endsWith('/') || `${relative}/` === intentDir)
+    relatives.push(asDir ? `${relative}/` : relative)
+  }
+  if (!included) relatives.push('')
+  return { relatives, unsure }
+}
+
+/**
+ * The decision for a write in this project's worktree `found`: every path
+ * it lands on, judged as an edit of it, and the refusal made uncertain
+ * when a path could not be read.
+ */
+function writeDecision(write, g, sub, found, ctx, env) {
+  if (found.branchKnown === false)
+    return unread(
+      `não consegui saber em que branch o git ${sub} escreve no worktree: ${headMoved}; confira que ali o gate está aberto`,
+    )
+  const { relatives, unsure } = placeWrite(write, g, found, env)
+  if (relatives.length === 0) return pass()
+  const decision = combine(
+    [...new Set(relatives)].map((relative) =>
+      editDecision(found, relative, ctx.input ?? {}, { repoAt: ctx.repoAt }),
+    ),
+  )
+  if (decision.decision === 'pass') return decision
+  const named = relatives.includes('')
+    ? ''
+    : ` (${relatives.slice(0, 3).join(', ')}${relatives.length > 3 ? ', …' : ''})`
+  const reason = `o git ${sub} escreve no worktree${named}: ${decision.reason}`
+  if (unsure.length === 0) return { ...decision, reason }
+  return unread(
+    `${reason} Não consegui ler ${[...new Set(unsure)].join(', ')}: confira.`,
+  )
+}
+
+// ---------------------------------------------------------------------------
 // The entry
 
 /**
@@ -1385,7 +1999,7 @@ export function gitDecision(command, ctx) {
   if (g.at >= argv.length) return pass()
   if (sub === null)
     return unread(
-      `não consegui ler o subcomando do git em "${argv[g.at]}": confira que não é um commit ou um push em ${trunk}`,
+      `não consegui ler o subcomando do git em "${argv[g.at]}": confira que não é um commit ou um push em ${trunk}, nem uma escrita no worktree com o gate fechado`,
     )
   const via = (resolved.via ?? [])
     .map((step) => `o alias ${step.name} do git é "${step.value}"`)
@@ -1400,10 +2014,10 @@ function decide({ command, g, sub, alias }, ctx, env) {
   const argv = g.argv
   if (alias !== null) {
     const reasons = {
-      unknown: `não consegui ler o alias ${sub} do git: confira que ele não faz commit nem push em ${trunk}`,
+      unknown: `não consegui ler o alias ${sub} do git: confira que ele não faz commit nem push em ${trunk}, nem escreve no worktree com o gate fechado`,
       deep: `o alias ${sub} do git leva a aliases demais: confira o que ele roda`,
-      shell: `o alias ${sub} do git roda um comando de shell que o hook não confere ("${alias.value}"): confira que ele não faz commit nem push em ${trunk}`,
-      unreadable: `não consegui ler o alias ${sub} do git ("${alias.value}"): confira que ele não faz commit nem push em ${trunk}`,
+      shell: `o alias ${sub} do git roda um comando de shell que o hook não confere ("${alias.value}"): confira que ele não faz commit nem push em ${trunk}, nem escreve no worktree com o gate fechado`,
+      unreadable: `não consegui ler o alias ${sub} do git ("${alias.value}"): confira que ele não faz commit nem push em ${trunk}, nem escreve no worktree com o gate fechado`,
     }
     return unread(reasons[alias.stop])
   }
@@ -1415,15 +2029,20 @@ function decide({ command, g, sub, alias }, ctx, env) {
       .slice(g.at + 1)
       .find(
         (word, offset) =>
-          guarded.has(word) && wordKnown(command, g.at + 1 + offset),
+          (guarded.has(word) || writers.has(word)) &&
+          wordKnown(command, g.at + 1 + offset),
       )
     return later === undefined
       ? pass()
       : unread(
-          `não reconheci "${sub}" como subcomando nem alias do git, e o comando cita ${later}: confira que não é um commit ou um push em ${trunk}`,
+          `não reconheci "${sub}" como subcomando nem alias do git, e o comando cita ${later}: confira que não é um commit ou um push em ${trunk}, nem uma escrita no worktree com o gate fechado`,
         )
   }
-  if (!guarded.has(sub)) return pass()
+  // Whether it may write, judged before any git read: the directory is
+  // looked at next, and it may not be readable.
+  const mayWrite =
+    writers.has(sub) && writeOf(command, g, sub, env, ctx.files, false) !== null
+  if (!guarded.has(sub) && !mayWrite) return pass()
   // A directory that holds an expansion resolves to the nearest one that
   // exists, which may be another worktree on another branch, and one that
   // does not exist yet will be created by the line: either way the verdict
@@ -1435,7 +2054,7 @@ function decide({ command, g, sub, alias }, ctx, env) {
     !existsSync(g.dir)
   )
     return unread(
-      `não consegui ler o diretório em que o git ${sub} roda: confira que não é ${trunk}`,
+      `não consegui ler o diretório em que o git ${sub} roda: confira que não é ${trunk}${mayWrite ? ', e que ali o gate está aberto para a branch' : ''}`,
     )
   const repo = ctx.repoAt(g.gitDir ?? g.dir)
   if (repo == null) return pass()
@@ -1444,6 +2063,10 @@ function decide({ command, g, sub, alias }, ctx, env) {
   if (!isProject(repo)) return pass()
 
   const decisions = []
+  const write = mayWrite ? writeOf(command, g, sub, env, ctx.files, true) : null
+  if (write !== null)
+    decisions.push(writeDecision(write, g, sub, repo, ctx, env))
+  if (!guarded.has(sub)) return combine(decisions)
   const rest = argv.slice(g.at + 1)
   if (!rest.some((arg) => leaving.has(arg))) {
     if (repo.branchKnown === false)

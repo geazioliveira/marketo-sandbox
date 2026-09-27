@@ -367,7 +367,7 @@ describe.concurrent('the input', () => {
     const hooks = path.join(root, '.claude', 'hooks')
     mkdirSync(path.join(hooks, 'lib'), { recursive: true })
     copyFileSync(hookPath('build-guard'), path.join(hooks, 'build-guard.mjs'))
-    for (const lib of ['io.mjs', 'repo.mjs', 'budget.mjs'])
+    for (const lib of ['io.mjs', 'repo.mjs', 'budget.mjs', 'edit-gate.mjs'])
       copyFileSync(
         path.join(hooksDir, 'lib', lib),
         path.join(hooks, 'lib', lib),

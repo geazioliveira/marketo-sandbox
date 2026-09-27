@@ -687,8 +687,9 @@ function defaultHost(command, ctx) {
  * The repository `-R` or GH_REPO names, as gh parses it: `OWNER/REPO` on
  * the default host, `HOST/OWNER/REPO`, or a URL (`scheme://` or the scp form
  * `git@host:`). A host other than github.com is another GitHub, never this
- * project; a default host that cannot be read leaves the target unknown.
- * @returns {{ repo: string | null, unknown: boolean }}
+ * project, and `host` names it; a default host that cannot be read leaves
+ * the target unknown.
+ * @returns {{ repo: string | null, unknown: boolean, host?: string }}
  */
 function namedTarget(value, host) {
   const text = String(value).trim()
@@ -701,7 +702,8 @@ function namedTarget(value, host) {
   if (parts.length !== 2) return { repo: repoFromArg(text), unknown: false }
   const on = named === null ? host : { host: normalHost(named), unknown: false }
   if (on.unknown) return { repo: null, unknown: true }
-  if (on.host !== 'github.com') return { repo: null, unknown: false }
+  if (on.host !== 'github.com')
+    return { repo: null, unknown: false, host: on.host }
   const name = parts[1].replace(/\.git$/i, url ? '' : '$&')
   return { repo: repoFromArg(`${parts[0]}/${name}`), unknown: false }
 }
@@ -721,13 +723,16 @@ function ghRepoEnv(command, ctx) {
  * exported earlier on the line, or inherited), else the repository around
  * the command's directory. A repository named without a host, and the
  * remotes, are on GH_HOST when it is set: another host is another GitHub,
- * never this project (Copilot review of #26). A value that holds an
- * expansion, a directory that could not be read, or a GH_HOST that could
- * not be read may be this project: the target is then unknown, judged as
- * this project for a refusal and never for a pass.
- * @returns {{ repo: string | null, unknown: boolean }}
+ * never this project (Copilot review of #26), and `host` names it. A value
+ * that holds an expansion, a directory that could not be read, or a GH_HOST
+ * that could not be read may be this project: the target is then unknown,
+ * judged as this project for a refusal and never for a pass.
+ *
+ * plan-to-issue reads a publication's target here too (fourth round), with
+ * ctx = { env, repo, cwdKnown } of the place its gh runs.
+ * @returns {{ repo: string | null, unknown: boolean, host?: string }}
  */
-function targetOf(command, ctx, operands) {
+export function targetOf(command, ctx, operands = []) {
   const fromUrl = operands.map(refOf).find((ref) => ref?.repo)
   if (fromUrl) return { repo: fromUrl.repo, unknown: false }
   const host = defaultHost(command, ctx)
@@ -742,7 +747,8 @@ function targetOf(command, ctx, operands) {
   // gh keeps only the remotes on GH_HOST when it is set: on another host,
   // none of them is this project's (or gh refuses to run).
   if (host.unknown) return { repo: null, unknown: true }
-  if (host.host !== 'github.com') return { repo: null, unknown: false }
+  if (host.host !== 'github.com')
+    return { repo: null, unknown: false, host: host.host }
   if (!remotesKnown(ctx)) return { repo: null, unknown: true }
   return { repo: ctx.repo?.repo ?? null, unknown: false }
 }

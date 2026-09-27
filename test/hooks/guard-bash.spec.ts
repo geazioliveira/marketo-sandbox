@@ -12,6 +12,8 @@ import path from 'node:path'
 import { test as base } from 'vitest'
 import {
   copilotReviewer,
+  gateCacheFile,
+  gateCacheSchema,
   requiredChecks,
 } from '../../scripts/loop-sections.mjs'
 import {
@@ -46,8 +48,11 @@ let onMain: HookRepo
 let elsewhere: HookRepo
 
 beforeAll(async () => {
+  // The gate is open on the branch of the issue: a git command that writes
+  // the worktree passes there as an edit would (Copilot review of #26,
+  // fourth round), and the other rules are judged alone.
   ;[feature, onMain, elsewhere] = await Promise.all([
-    hookRepo({ branch: FEATURE }),
+    hookRepo({ branch: FEATURE, cache: true }),
     hookRepo(),
     hookRepo({ origin: 'https://github.com/alguem/outro.git' }),
   ])
@@ -902,12 +907,23 @@ describe.concurrent(
 
     it.each([
       'git checkout -b feature/9-x && git push -u origin HEAD',
-      'git commit -m x && git checkout main && git pull',
-      'git stash && git checkout main && git stash pop',
+      'git commit -m x && git checkout main && git fetch',
+      'git stash && git checkout main && git stash list',
       'git checkout README.md && git commit -m x',
     ])('passes %s', async (text) => {
       expectPass(await guard(text))
     })
+
+    it.each([
+      'git commit -m x && git checkout main && git pull',
+      'git stash && git checkout main && git stash pop',
+      'git switch main && git checkout -- README.md',
+    ])(
+      'denies %s: a write to the worktree after main was checked out (fourth round)',
+      async (text) => {
+        expectDeny(await guard(text), /em main, nada se edita/)
+      },
+    )
 
     it('reads a gh alias set earlier on the line', async () => {
       expectDeny(
@@ -1999,6 +2015,121 @@ describe.concurrent(
     ])('asks for %s, and denies it in auto', async (_, text, reason) => {
       expectAsk(await guard(text()), reason)
       expectDeny(await guard(text(), { mode: 'auto' }), reason)
+    })
+  },
+)
+
+// ---------------------------------------------------------------------------
+// Fourth round of Copilot's review of #26
+
+describe.concurrent(
+  'git writes to the worktree go through the gate (Copilot review of #26, fourth round)',
+  () => {
+    /**
+     * This project's main checkout, and a linked worktree beside it on a
+     * branch of #5, as the session works: the gate ran there and is closed.
+     * git-rules.spec.ts covers each subcommand; here are the probe Copilot
+     * ran, end to end, the session's plan marker, and the modes.
+     */
+    let base: HookRepo
+    let worktree: { dir: string; gitDir: string }
+    const SESSION = 'sessao-das-escritas'
+
+    const writeCache = (gitDir: string, open: boolean) =>
+      writeFileSync(
+        path.join(gitDir, gateCacheFile),
+        `${JSON.stringify({
+          schema: gateCacheSchema,
+          repo: 'geazioliveira/marketo-sandbox',
+          branch: FEATURE,
+          issue: 5,
+          headSha: HEAD,
+          open,
+          verified: true,
+          steps: [],
+          checkedAt: new Date().toISOString(),
+        })}\n`,
+      )
+
+    beforeAll(async () => {
+      base = await hookRepo()
+      worktree = await base.addWorktree('wt-5', FEATURE)
+      writeCache(worktree.gitDir, false)
+    }, setupTimeout)
+
+    afterAll(() => base?.remove(), setupTimeout)
+
+    const probe = (command: string, mode: string, cwd = worktree.dir) =>
+      base.run(
+        'guard-bash',
+        {
+          session_id: SESSION,
+          hook_event_name: 'PreToolUse',
+          tool_name: 'Bash',
+          tool_input: { command },
+          permission_mode: mode,
+          cwd,
+        },
+        { cwd },
+      )
+
+    it.each(['default', 'auto'])(
+      'does not pass the probe Copilot ran, git checkout -- README.md on a feature/5-* worktree with the gate closed (%s)',
+      async (mode) => {
+        expectDeny(
+          await probe('git checkout -- README.md', mode),
+          /o git checkout escreve no worktree \(README\.md\): o gate está fechado/,
+        )
+        // The same from the main checkout, through a cd.
+        expectDeny(
+          await probe(
+            `cd ${worktree.dir} && git checkout -- README.md`,
+            mode,
+            base.dir,
+          ),
+          /o gate está fechado/,
+        )
+      },
+    )
+
+    it.each(['default', 'auto'])(
+      'passes a switch of branch and a write of the intent alone with the gate closed (%s)',
+      async (mode) => {
+        for (const command of [
+          'git fetch origin',
+          'git switch -c feature/9-x',
+          'git checkout -- context/intent/feature-x.md',
+        ])
+          expectPass(await probe(command, mode))
+      },
+    )
+
+    it('asks, and denies in auto, a write with this session’s plan not yet posted', async () => {
+      const other = await hookRepo()
+      try {
+        const wt = await other.addWorktree('wt-5', FEATURE)
+        writeCache(wt.gitDir, true)
+        const run = (mode: string) =>
+          other.run(
+            'guard-bash',
+            {
+              session_id: SESSION,
+              hook_event_name: 'PreToolUse',
+              tool_name: 'Bash',
+              tool_input: { command: 'git restore README.md' },
+              permission_mode: mode,
+              cwd: wt.dir,
+            },
+            { cwd: wt.dir },
+          )
+        expectPass(await run('default'))
+        // The marker lives in the common git dir, which the worktree shares.
+        other.writeMarker(SESSION)
+        expectAsk(await run('default'), /plano aceito nesta sessão/)
+        expectDeny(await run('auto'), /Em auto, a confirmação vira negação/)
+      } finally {
+        other.remove()
+      }
     })
   },
 )

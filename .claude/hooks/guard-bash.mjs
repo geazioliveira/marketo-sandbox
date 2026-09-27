@@ -1531,35 +1531,6 @@ function watchScript(command) {
     : words.map((w) => w.value).join(' ')
 }
 
-/** Variables the rules read from the environment, carried across `export`. */
-const watchedVariable = /^(?:GH_|GIT_|XDG_CONFIG_HOME$|HOME$)/
-
-function recordExports(command, state) {
-  const program = programOf(command)
-  const argv = command.argv.map(String)
-  const exporting =
-    program === 'export' ||
-    (['declare', 'typeset'].includes(program) &&
-      argv.some((a) => /^-[a-z]*x/.test(a)))
-  if (program === 'unset') {
-    for (const name of argv.slice(1))
-      if (watchedVariable.test(name)) state.exported[name] = ''
-    return
-  }
-  if (!exporting) return
-  for (const [index, arg] of argv.entries()) {
-    if (index === 0 || arg.startsWith('-')) continue
-    const eq = arg.indexOf('=')
-    const name = eq < 0 ? arg : arg.slice(0, eq)
-    if (!watchedVariable.test(name)) continue
-    if (eq < 0) {
-      if (!(name in state.exported)) state.exported[name] = '${EXPORTADO}'
-    } else
-      state.exported[name] =
-        command.known?.[index] === false ? '${EXPORTADO}' : arg.slice(eq + 1)
-  }
-}
-
 // ---------------------------------------------------------------------------
 // The line
 
@@ -1718,6 +1689,9 @@ async function decide(input, libs) {
       lineConfig: state.lineConfig,
       files,
       cache: state.cache,
+      // The session whose plan marker a write to the worktree reads, as
+      // build-guard reads it for an edit.
+      input,
     }
 
     state.evaluators.push(...evaluatorsOf(command, gitCtx, libs, state))
@@ -1939,7 +1913,7 @@ async function decide(input, libs) {
       decisions.push(await judgeUnresolved(command, cwd, cwdKnown, depth))
     } else {
       decisions.push(...(await judgeProgram(command, cwd, cwdKnown, depth)))
-      recordExports(command, state)
+      shell.recordExports(command, state.exported)
     }
 
     if (state.evaluators.length > 0 || state.opaque.length > 0)

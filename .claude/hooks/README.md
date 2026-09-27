@@ -9,7 +9,7 @@ Hooks de projeto que interrompem, antes da ação, os atalhos do loop issue-firs
 | `plan-to-issue.mjs`   | PostToolUse `ExitPlanMode`, `Bash`, `Monitor` e `mcp__terminal__run_in_terminal` | Marca o plano aceito como pendente até ele ser publicado numa issue                    |
 | `session-context.mjs` | SessionStart e UserPromptSubmit                                                  | Diz a branch, a issue e o estado do gate, e lembra que aprovação no chat não é Approve |
 
-`lib/` guarda o que os quatro compartilham. Os contratos do loop vêm de `scripts/loop-sections.mjs`, a mesma fonte do gate e da auditoria. Os testes ficam em `test/hooks/`, e cada um roda o hook como processo, com a entrada em JSON no stdin.
+`lib/` guarda o que os quatro compartilham. `lib/edit-gate.mjs` é a decisão do gate para uma escrita no worktree: o `build-guard` a pede para o arquivo que o Edit ou o Write escreve, e o `guard-bash` (por `lib/git-rules.mjs`) para os arquivos que um comando `git` escreve (`git checkout -- arquivo`, `git restore`, `git merge`…). `lib/plan-publication.mjs` é o trabalho do `plan-to-issue`, carregado dentro de um `try`: se uma biblioteca não carrega, o hook ainda marca o plano aceito como pendente, nunca remove o marcador e avisa o Claude pelo stderr com saída 2. Os contratos do loop vêm de `scripts/loop-sections.mjs`, a mesma fonte do gate e da auditoria. Os testes ficam em `test/hooks/`, e cada um roda o hook como processo, com a entrada em JSON no stdin.
 
 Os hooks só restringem: nunca devolvem `allow`. Na dúvida, pedem confirmação (`ask`), e em `bypassPermissions`, `dontAsk` ou `auto` o `ask` crítico vira `deny`.
 
