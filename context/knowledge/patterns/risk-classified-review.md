@@ -8,7 +8,7 @@ Todo plano de issue e toda PR declaram o risco, `HIGH` ou `NORMAL`, com o racioc
 
 - Os dois forms de issue e o template de PR pedem o risco, `HIGH` ou `NORMAL`, e o raciocínio (`.github/ISSUE_TEMPLATE/feature.yml:76-83`, `.github/ISSUE_TEMPLATE/bug.yml:86-93`, `.github/pull_request_template.md:10-12`). O form de funcionalidade e o template dizem que o risco decide a profundidade da revisão, e o passo 8 do loop diz o mesmo ([o loop](../../../docs/development/workflow.md#o-loop)).
 - Até este pattern, só uma regra dizia o que é HIGH: uma PR que toca `.github/workflows/**` ([Pull requests e merge](../../../docs/development/workflow.md#pull-requests-e-merge), [ADR 0002](../../decisions/0002-soft-enforcement-on-github-free.md)). Nada dizia o que HIGH pede a mais.
-- Nenhum script lê o token. O gate só exige que a seção Riscos (ou Risco) exista e não esteja vazia (`scripts/loop-sections.mjs:95-98,124,135,398-401`). A classificação é conferida na leitura.
+- Nenhum script lê o token. O gate só exige que a seção Riscos (ou Risco) exista e não esteja vazia (`scripts/loop-sections.mjs:103-106,132,143,406-409`). A classificação é conferida na leitura.
 - As PRs do harness mostram o que uma revisão mais funda acha:
   - na #2, três rodadas de revisão e verificação adversariais acharam mais de 30 defeitos reais e distintos num gate que já passava em todos os testes ([changelog](../../evolution/changelog.md));
   - uma revisão adversarial da #3 achou o limite da auditoria tirado do evento ([anti-pattern](../anti-patterns/audit-bound-from-the-event.md)).

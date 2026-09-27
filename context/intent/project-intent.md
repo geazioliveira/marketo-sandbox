@@ -33,7 +33,7 @@ Um critério só é marcado quando um teste ou um check o prova.
 - [ ] Espaços isolados, autenticação, modelo com estado, log de requisições, falhas roteirizadas e validação estrita, como pede a Track A do lite-campaign (R1–R8).
 - [ ] O mock registra qual cópia do Swagger o gerou (sha256).
 - [ ] Toda mudança nasce numa issue, com plano e Approve do dono, e entra por uma PR que fecha essa issue (#1).
-- [x] O CI roda lint, typecheck, testes, build e `check:all` em toda PR (#3 e #7). O `npm run check` termina com o `check:all`, e o `test/scripts/forms-parity.spec.ts` pina a cadeia e o passo do `check.yml` que a roda. A run 36276370167 do `Qualidade / check`, na PR #27, mostra as 16 linhas "are current".
+- [x] O CI roda lint, typecheck, testes, build e `check:all` em toda PR (#3 e #7). O `npm run check` termina com o `check:all`, e o `test/scripts/forms-parity.spec.ts` pina a cadeia e o passo do `check.yml` que a roda. A run 36279581085 do `Qualidade / check`, na cabeça `217042d` da PR #27, mostra as 16 linhas "are current".
 
 ## Fora de escopo
 
