@@ -312,7 +312,7 @@ Desde a #5, hooks de projeto em `.claude/hooks/`, ligados pelo `.claude/settings
 - **Valem assim que o `.claude/settings.json` muda.** O Claude Code recarrega o arquivo sem reiniciar a sessão (medido na #5).
 - **Só restringem.** Nenhum hook devolve `allow`: sem objeção, o fluxo normal de permissão segue. Na dúvida, pedem confirmação.
 - **Cada execução tem um prazo** (`.claude/hooks/lib/budget.mjs`), bem abaixo do `timeout` do hook no `.claude/settings.json`: passado o prazo, o hook pede confirmação crítica, em vez de o Claude Code matá-lo e deixar a ação seguir sem decisão.
-- **Em `bypassPermissions`, `dontAsk` e `auto`,** uma confirmação crítica (merge, caminho do harness, cache não verificado, plano pendente, indireção, programa que o hook não consegue nomear, `gh pr create --web`, prazo esgotado) vira negação. Nesses casos, a ação é feita fora desse modo.
+- **Em `bypassPermissions`, `dontAsk` e `auto`,** uma confirmação crítica (merge, caminho do harness, cache não verificado, plano pendente, indireção, programa que o hook não consegue nomear, `gh pr create --web`, prazo esgotado, e todo valor que o hook não lê numa regra que nega) vira negação. Por isso, nesses modos, a mensagem, o corpo, o título e as labels vão literais, num heredoc ou em `"$(cat <<'EOF' … EOF)"`. Nesses casos, a ação é feita fora desse modo.
 - **Quando um hook nega ou pede confirmação,** a mensagem diz o motivo. O agente resolve a causa (roda o gate, publica o plano, responde na thread) em vez de contornar o hook.
 - **Os limites** estão na ADR 0002: os hooks param o agente, não o dono; não leem um programa rodado a partir de um arquivo; só valem nas sessões do Claude Code deste projeto.
 

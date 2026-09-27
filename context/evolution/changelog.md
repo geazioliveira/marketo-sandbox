@@ -33,15 +33,21 @@ Uma entrada por mudança mergeada, da mais nova para a mais antiga, escrita no p
   - cada hook tem um prazo por execução, bem abaixo do `timeout` do `settings.json`, e responde com confirmação crítica quando ele acaba;
   - os nomes protegidos valem neste projeto, e não no clone de outro;
   - o `plan-to-issue` também roda depois do `Monitor` e do terminal, e só tira o marcador com a URL na saída ou com a confirmação ao vivo do GitHub.
+- **A terceira revisão achou onze,** quase todas do mesmo tipo: um valor que o hook não lê numa regra que nega recebia só uma confirmação simples, que não vira negação em `auto`. A correção foi uma varredura de todo ponto assim, com uma regra: dúvida sobre uma negação é confirmação crítica. Vieram junto:
+  - o plano pendente antes do atalho do arquivo ignorado, no `build-guard`;
+  - o `GH_HOST` e o host do `-R` no alvo do `gh`;
+  - as duas leituras do `git push --repo`;
+  - a leitura de `"$(cat <<'EOF' … EOF)"` e de um `for` com valores literais, para as formas de sempre continuarem passando.
 
 ### Números medidos
 
-- `npm run check`: 2.618 testes, com os da #7, dos quais 1.213 são dos hooks, em 11 arquivos de `test/hooks/`. Os dos hooks eram 1.022 antes das revisões do Copilot, e 1.111 depois da primeira.
-- O código dos hooks tem 10,3 mil linhas; os testes e o suporte deles, 12,2 mil.
+- `npm run check`: 2.830 testes, com os da #7, dos quais 1.425 são dos hooks, em 11 arquivos de `test/hooks/`. Os dos hooks eram 1.022 antes das revisões do Copilot, 1.111 depois da primeira e 1.213 depois da segunda.
+- O código dos hooks tem 11 mil linhas; os testes e o suporte deles, 13,5 mil.
 - Corpus de 902 comandos Bash reais das sessões deste projeto: 816, 75 e 11 (passa, confirma, nega) na primeira rodada; 847, 44 e 11 depois das correções, com as mesmas 11 recusas certas. Mediana de 93 ms e máximo de 1,5 s.
 - As duas sondas do plano foram negadas com os hooks ativos, em modo `auto`.
 - As correções da primeira revisão: 19 mutações, cada uma revertendo uma parte de uma correção, e todas pegas por um teste. O corpus deu de novo 847, 44 e 11, sem nenhuma decisão mudada.
 - As da segunda: 62 mutações, das quais 17 passaram na primeira verificação e ganharam teste. Um desses testes achou uma brecha real, o `core.useReplaceRefs` do próprio comando, corrigida com teste. O corpus deu 846, 45 e 11: uma linha com um programa numa variável que o hook não lê passou a pedir confirmação simples, e as 11 recusas são as mesmas.
+- As da terceira: 105 mutações na verificação e 51 na rodada final, todas pegas no fim. O corpus, com os caminhos de worktrees apagados apontados para cópias, deu 842, 49 e 11 no modo padrão, com as mesmas 11 recusas, e 842, 0 e 60 em `auto`, contra 846, 27 e 29 antes. Das 31 negações novas em `auto`, 25 já pediam confirmação, e 6 passavam: 4 commits por uma função de shell e 2 escritas por `xargs` ou por um laço sobre um arquivo.
 
 ### Decisões tomadas
 
@@ -62,6 +68,7 @@ Uma entrada por mudança mergeada, da mais nova para a mais antiga, escrita no p
 - **Um agente de verificação rodou por engano uma lista de casos** escrita num heredoc que continha `EOF`. Nada chegou ao projeto, mas a lista de casos agora é escrita como dado, nunca como shell.
 - **A revisão de fora achou o que o autor e o verificador não procuraram.** As seis brechas do Copilot são do mesmo tipo: o que um comando muda antes do `gh` ou do `git` que o hook julga (o remote, o worktree do `cd`), e o que chega por outro caminho que não o comando de sempre (a API, o `git merge`). Nenhuma das rodadas adversariais tinha olhado por aí.
 - **Cada rodada de revisão achou brechas de outro tipo.** A primeira, o que muda antes do comando julgado; a segunda, o que o hook não consegue ler (um programa numa variável, um corpo escrito depois, uma mensagem que vem de outro commit, o tempo que ele leva). A resposta foi a mesma nas duas: julgar o que não se lê pelo lado que restringe, e medir no corpus o custo disso.
+- **Uma regra geral fecha o que o caso a caso deixa aberto.** Duas rodadas corrigiram, ponto a ponto, valores ilegíveis que o Copilot apontou, e a terceira achou mais nove do mesmo tipo. A varredura com uma regra só ("dúvida sobre uma negação é confirmação crítica") fechou os nove e mais os que ninguém tinha apontado. O custo ficou medido no corpus nos dois modos.
 - **Para mexer nos hooks, eles precisam estar desligados.** Com os hooks ativos em modo `auto`, a edição de um arquivo do harness vira negação, como devia. As correções da revisão foram feitas com a saída de emergência do dono ligada, e uma sonda confere, depois, que os hooks voltaram a valer.
 - **A verificação adversarial parou no meio duas vezes,** porque um filtro de segurança barrou a escrita dos comandos de evasão. As brechas provadas antes disso foram fechadas, e o que não dá para ver pelo texto do comando foi para os limites da ADR 0002.
 

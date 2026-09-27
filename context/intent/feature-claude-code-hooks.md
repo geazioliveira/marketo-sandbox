@@ -91,7 +91,7 @@ As respostas do Approve de 2026-09-25 continuam: em `auto`, os `ask` críticos v
 
 ## Resultados
 
-O que foi construído está na [entrada do changelog](../evolution/changelog.md): os quatro hooks em `.claude/hooks/`, a biblioteca em `.claude/hooks/lib/`, o `run.sh`, o `.claude/settings.json` e 1.213 testes em `test/hooks/`.
+O que foi construído está na [entrada do changelog](../evolution/changelog.md): os quatro hooks em `.claude/hooks/`, a biblioteca em `.claude/hooks/lib/`, o `run.sh`, o `.claude/settings.json` e 1.425 testes em `test/hooks/`.
 
 Como foi verificado:
 
@@ -102,6 +102,7 @@ Como foi verificado:
   - A mediana ficou em 93 ms, e o máximo, em 1,5 s.
 - **A revisão do Copilot na PR #26** achou seis brechas: um remote mudado antes do `gh` na mesma linha, a PR criada pela API sem corpo, um `-R` ilegível tratado como este projeto, a mensagem do `git merge`, a publicação feita de outro worktree e o cache do gate dos outros worktrees. Cada uma foi fechada com um teste que falha sem a correção, e uma verificação independente reverteu cada correção, em 19 mutações, todas pegas. O corpus não mudou nenhuma decisão.
 - **A segunda revisão do Copilot** achou mais seis: um programa numa variável que o hook não lê, o `gh pr create --web`, as mensagens que um commit traz de outro (`cherry-pick`, `revert`, `am`, `commit -C`), a falta de um prazo por execução, os nomes protegidos no clone de outro projeto e o `plan-to-issue` depois do `Monitor` e do terminal. Foram 62 mutações; as 17 que nenhum teste pegava ganharam teste, e um deles achou a brecha do `core.useReplaceRefs`, corrigida. O corpus passou a pedir confirmação numa linha a mais, das 902.
+- **A terceira revisão do Copilot** achou onze, quase todas um valor ilegível numa regra que nega com só uma confirmação simples. Uma varredura de todo ponto assim aplicou uma regra só: dúvida sobre uma negação é confirmação crítica. Em `auto`, as negações do corpus foram de 29 para 60, das 902 linhas. Das 31 novas, 25 já pediam confirmação, e o caminho para as outras é escrever os valores literais ou num heredoc.
 - **As sondas,** com os hooks ligados nesta sessão, em modo `auto`:
   - `gh issue edit 1 --remove-label needs-info` foi negado pelo `guard-bash`;
   - um `Edit` em `src/main.ts` numa sonda `claude/x` cortada de `origin/main` foi negado pelo `build-guard` ("o gate ainda não rodou neste worktree");
@@ -141,3 +142,4 @@ Para o dono:
 - **Atualizado**: 2026-09-26 (Fase: Learn), os hooks existem, ligados pelo `.claude/settings.json`, e as duas sondas foram negadas com eles ativos (#5)
 - **Atualizado**: 2026-09-26 (Fase: Learn), as seis brechas da revisão do Copilot na PR #26 foram fechadas (#5)
 - **Atualizado**: 2026-09-27 (Fase: Learn), as seis brechas da segunda revisão do Copilot na PR #26 foram fechadas (#5)
+- **Atualizado**: 2026-09-27 (Fase: Learn), as onze brechas da terceira revisão do Copilot na PR #26 foram fechadas por uma varredura (#5)
