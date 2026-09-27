@@ -507,6 +507,15 @@ function tripwire(text, evaluators, libs) {
   )
 }
 
+/**
+ * What the hook cannot read (a script, a pipe, a line it cannot parse whole)
+ * where a gh or a git it would refuse may run: it asks, critical, so the
+ * modes where nobody is asked refuse it (Copilot review of #26, third
+ * round). Which such program asks at all is still told by mentionsGhOrGit:
+ * a program the line runs from elsewhere is a documented limit.
+ */
+const unread = (io, reason) => io.ask(reason, { critical: true })
+
 /** Whether the line names gh or git as a word: then an opaque program asks. */
 const mentionsGhOrGit = (text) =>
   /(?:^|[^\w.-])(?:gh|git)(?:\s|$|['"])/.test(text)
@@ -1148,11 +1157,25 @@ const isUserSettings = (file, { realPathOf }) => {
  * repository's, or a directory under none, are not the loop's. The user's
  * own settings.local.json stays refused wherever it lies: Claude Code may
  * read it for every session, and the current rule refused it.
+ *
+ * A write whose place cannot be read (an expansion, a relative path after
+ * a `cd` it cannot read) may land on the harness: it asks, critical, so the
+ * modes where nobody is asked refuse it (Copilot review of #26, third
+ * round). `$$`, the shell's process id, is digits, and an absolute path does
+ * not depend on the directory: neither leaves the place unknown.
  */
 function protectedWrite(write, cwd, cwdKnown, repoOf, libs) {
   const { io, loop, repo: repoLib, budget } = libs
   const spelled = write.word.value
-  const file = write.word.known && cwdKnown ? path.resolve(cwd, spelled) : null
+  const readable = write.word.known
+    ? spelled
+    : /^[^$`]*$/.test(spelled.replaceAll('$$', ''))
+      ? spelled.replaceAll('$$', '0')
+      : null
+  const file =
+    readable !== null && (cwdKnown || path.isAbsolute(readable))
+      ? path.resolve(cwd, readable)
+      : null
   const name = file === null ? spelled : path.basename(file)
   const names =
     file === null
@@ -1182,7 +1205,11 @@ function protectedWrite(write, cwd, cwdKnown, repoOf, libs) {
     return io.deny(
       `o comando mexe em ${spelled}, que só o gate e os hooks escrevem: rode npm run gate, e publique o plano numa issue para o marcador sair`,
     )
-  if (file === null) return io.pass()
+  if (file === null)
+    return unread(
+      io,
+      `não consegui ler onde o comando escreve (${spelled}): confira que não é um caminho do harness nem um arquivo do loop`,
+    )
   const byPlace = placeOfWrite(spelled, file, repoOf, libs)
   if (byPlace !== null) return byPlace
   if (!/[/\\]\.(?:claude|github)(?:[/\\]|$)|[/\\]scripts[/\\]/i.test(file))
@@ -1667,7 +1694,7 @@ async function decide(input, libs) {
     const decisions = []
     if (inner.unparsable && mentionsGhOrGit(script))
       decisions.push(
-        io.ask('não consegui ler inteiro o script que o comando roda'),
+        unread(io, 'não consegui ler inteiro o script que o comando roda'),
       )
     for (const command of inner.commands)
       decisions.push(...(await judge(command, cwd, cwdKnown, depth + 1)))
@@ -1753,7 +1780,8 @@ async function decide(input, libs) {
           )
         else if (inline !== null && mentionsGhOrGit(text))
           decisions.push(
-            io.ask(
+            unread(
+              io,
               `não consegui ler o script que o ${program} roda: confira que ele não roda um gh ou um git que o hook nega`,
             ),
           )
@@ -1775,7 +1803,8 @@ async function decide(input, libs) {
           state.opaque.push(`${program} ${spelled}`)
           if (mentionsGhOrGit(text))
             decisions.push(
-              io.ask(
+              unread(
+                io,
                 `não consegui ler o script que o ${program} roda (${spelled}): confira que ele não roda um gh ou um git que o hook nega`,
               ),
             )
@@ -1784,7 +1813,8 @@ async function decide(input, libs) {
         state.opaque.push(`${program} lendo um pipe`)
         if (mentionsGhOrGit(text))
           decisions.push(
-            io.ask(
+            unread(
+              io,
               `o ${program} roda o que chega pelo pipe, que o hook não lê: confira que não é um gh ou um git que o hook nega`,
             ),
           )
@@ -1797,7 +1827,8 @@ async function decide(input, libs) {
           )
         else if (mentionsGhOrGit(text))
           decisions.push(
-            io.ask(
+            unread(
+              io,
               `não consegui ler o script que o ${program} lê do stdin: confira que ele não roda um gh ou um git que o hook nega`,
             ),
           )
@@ -1820,7 +1851,8 @@ async function decide(input, libs) {
       state.opaque.push('parallel')
       if (mentionsGhOrGit(text))
         decisions.push(
-          io.ask(
+          unread(
+            io,
             'o parallel monta comandos que o hook não lê: confira que não é um gh ou um git que o hook nega',
           ),
         )
@@ -1886,7 +1918,8 @@ async function decide(input, libs) {
   const judge = async (original, base, baseKnown, depth) => {
     if (depth > maxDepth)
       return [
-        io.ask(
+        unread(
+          io,
           'comandos dentro de comandos demais: confira o que a linha roda',
         ),
       ]
@@ -1982,7 +2015,7 @@ async function decide(input, libs) {
     )
   decisions.push(tripwire(text, evaluators, libs))
   if (parsed.unparsable && mentionsGhOrGit(text))
-    decisions.push(io.ask('não consegui ler o comando inteiro'))
+    decisions.push(unread(io, 'não consegui ler o comando inteiro'))
   return io.combine(decisions)
 }
 

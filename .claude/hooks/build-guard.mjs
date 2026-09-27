@@ -6,7 +6,9 @@
 // this hook reads it before every file the agent writes in this project.
 // context/intent/ is the exception, since the intent is written before the
 // gate can open; so are files the repository's own .gitignore files ignore,
-// which never reach a commit, outside the harness. main is never edited, and
+// which never reach a commit, outside the harness, unless a plan accepted in
+// this session is still unpublished: then only the intent goes through
+// without a person looking. main is never edited, and
 // neither is the git dir or the owner's emergency exit. A path is judged
 // where the write lands, through every symlink, dangling ones included.
 //
@@ -265,6 +267,9 @@ function targetsOf(named, cwd, realPathOf) {
  * repository, one place per repository whatever worktree the session is in,
  * named for the session. So the target's common git dir counts, and so does
  * the common git dir of a session cwd in another clone of this project.
+ * null when it cannot be told: an input with no absolute cwd names no
+ * session repository to look in (Copilot review of #26, third round).
+ * @returns {boolean | null}
  */
 function hasPendingPlan(found, input, { repo, repoAt, realPathOf }) {
   const marked = (dir) => repo.pendingPlanExists(dir, input.session_id)
@@ -274,7 +279,7 @@ function hasPendingPlan(found, input, { repo, repoAt, realPathOf }) {
   // another one: a cwd inside the target's worktree with no `.git` between
   // them is that worktree, whose common git dir was just read.
   const cwd = typeof input.cwd === 'string' ? input.cwd : ''
-  if (!path.isAbsolute(cwd)) return false
+  if (!path.isAbsolute(cwd)) return null
   if (insideWorktree(realPathOf(found.top), realPathOf(cwd), repo)) return false
   const here = repoAt(cwd)
   return here !== null && repo.isProject(here) && marked(here.commonDir)
@@ -339,10 +344,23 @@ function judge(target, input, libs) {
   if (relative.startsWith(intentDir)) return io.pass()
 
   const harness = repo.isHarnessPath(folded)
+  const pending = hasPendingPlan(found, input, libs)
   const status = loop.gateStatus(repo.readGateCache(found.gitDir), {
     branch: found.branch,
-    pendingPlan: hasPendingPlan(found, input, libs),
+    pendingPlan: pending !== false,
   })
+  // A plan accepted and not yet posted asks before any shortcut: an ignored
+  // file (a build output, a generated file) is still building before the
+  // plan is on an issue (Copilot review of #26, third round). Only the
+  // intent, written before the plan, and the refusals above come first. A
+  // marker it cannot look for counts as one.
+  if (status.state === 'pending-plan')
+    return io.ask(
+      pending === null
+        ? 'não consegui saber se esta sessão tem um plano aceito e ainda não publicado: a entrada não traz o cwd da sessão'
+        : pendingPlanReason,
+      { critical: true },
+    )
   // An open gate lets an ordinary file through, ignored or not, so git is
   // asked about the ignore rules only when the answer changes the decision.
   if (status.state === 'open' && !harness) return io.pass()
@@ -353,8 +371,6 @@ function judge(target, input, libs) {
   if (!harness && isIgnored(found.top, relative, budget)) return io.pass()
 
   switch (status.state) {
-    case 'pending-plan':
-      return io.ask(pendingPlanReason, { critical: true })
     case 'open':
       return harness
         ? io.ask(`caminho do harness (${relative}): confira`, {

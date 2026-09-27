@@ -11,11 +11,12 @@
 // read is said so (`unparsable`, a word's `known` false), for the rules to
 // ask about instead of passing.
 //
-// It is not a shell. Besides `~`, the only expansion it performs is `$NAME`
+// It is not a shell. Besides `~`, the only expansions it performs are `$NAME`
 // and `${NAME}` of a variable the same line assigned before, for sure and to
 // a value known in full (`SP=/x; gh issue comment 8 -F "$SP/plano.md"`):
-// see "Variables the line assigns". Every other `$...` and every
-// substitution stays as text, and the word that holds one is marked unknown.
+// see "Variables the line assigns"; and `"$(cat <<'EOF' … EOF)"`, read as
+// its heredoc (catHeredocText). Every other `$...` and every substitution
+// stays as text, and the word that holds one is marked unknown.
 // A substitution is kept as `$(...)` text whatever its spelling (a backtick
 // one too), so any rule that only checks for `$` still sees it.
 import { readFileSync, statSync } from 'node:fs'
@@ -161,6 +162,31 @@ const wrappers = new Map([
 
 // ---------------------------------------------------------------------------
 // Lexing
+
+/**
+ * The text of `$(cat <<'EOF' … EOF)`, the way a commit message or a PR body
+ * is written in a Claude Code session: a substitution that is only `cat`
+ * (or `cat -`) reading one heredoc whose body holds no expansion. The shell
+ * drops the trailing newlines of a substitution, and so does this. null for
+ * any other substitution, which stays unknown (Copilot review of #26: an
+ * unknown message or body now asks, so the common form must stay readable).
+ */
+function catHeredocText(tokens) {
+  const parts = tokens.filter(
+    (token) => !(token.type === 'op' && token.op === '\n'),
+  )
+  if (parts.some((token) => token.type === 'op')) return null
+  const words = parts.filter((token) => token.type === 'word')
+  const redirs = parts.filter((token) => token.type === 'redir')
+  if (words.length === 0 || words.length > 2 || redirs.length !== 1) return null
+  if (!words.every((word) => word.known && word.subs.length === 0)) return null
+  if (words[0].value !== 'cat') return null
+  if (words[1] !== undefined && words[1].value !== '-') return null
+  const { heredoc, fd } = redirs[0]
+  if (heredoc == null || (fd !== null && fd !== '0')) return null
+  if (!heredoc.known || typeof heredoc.body !== 'string') return null
+  return heredoc.body.replace(/\n+$/, '')
+}
 
 /** The value of a `$'...'` escape (bash's ANSI-C quoting). */
 function ansiEscape(src, at) {
@@ -377,6 +403,12 @@ function lexer(src, state, baseDepth) {
       if (src[i + 2] === '(') return arithmeticOrSubstitution(subs)
       i += 2
       substitution(subs)
+      // Inside double quotes the output is one word, as the heredoc wrote
+      // it: `"$(cat <<'EOF' … EOF)"` is read as its text. Unquoted, the shell
+      // would split it, so it stays unknown. `cat` marks a value that holds
+      // only while cat is the program (see simple()).
+      const text = inDouble ? catHeredocText(subs.at(-1).tokens) : null
+      if (text !== null) return { value: text, known: true, cat: true }
       return { value: src.slice(open, i), known: false }
     }
     if (next === '{') {
@@ -467,8 +499,9 @@ function lexer(src, state, baseDepth) {
     let known = true
     let opaque = false
     let assigns = false
+    let cat = false
     const refs = []
-    const result = () => ({ value, known, refs, opaque, assigns })
+    const result = () => ({ value, known, refs, opaque, assigns, cat })
     while (i < n) {
       const c = src[i]
       if (!heredoc && c === '"') {
@@ -507,6 +540,7 @@ function lexer(src, state, baseDepth) {
           })
         else if (!part.known) opaque = true
         if (part.assigns) assigns = true
+        if (part.cat) cat = true
         value += part.value
         if (!part.known) known = false
         continue
@@ -533,8 +567,10 @@ function lexer(src, state, baseDepth) {
     let quoted = false
     let opaque = false
     let assigns = false
+    let cat = false
     /** A part read by readDollar or readDouble, appended to the word. */
     const absorb = (part, split) => {
+      if (part.cat) cat = true
       if (part.ref !== undefined)
         refs.push({
           name: part.ref,
@@ -664,6 +700,7 @@ function lexer(src, state, baseDepth) {
       refs,
       opaque,
       assigns,
+      cat,
       start,
       end: i,
     }
@@ -743,6 +780,7 @@ function lexer(src, state, baseDepth) {
         heredoc.refs = expanded.refs
         heredoc.opaque = expanded.opaque
         heredoc.assigns = expanded.assigns
+        heredoc.cat = expanded.cat
       }
     }
   }
@@ -1026,7 +1064,10 @@ function shellScript(list) {
 // and only when its value there is certain:
 // - a standalone `NAME=value` (or `export`/`readonly NAME=value`) assigned
 //   it, one that runs for sure: at the top of the line, not inside a
-//   compound command, a subshell or a pipeline, not after `&&` or `||`;
+//   compound command, a subshell or a pipeline, not after `&&` or `||`
+//   (after `&&` only when what comes before it cannot fail: afterSureChain);
+//   one after `&&` that may not run holds only for the rest of its `&&`
+//   list (chainLocal in build);
 // - that value is known in full;
 // - nothing else on the line may assign the name: another assignment that
 //   runs only maybe (in an `if`, a loop, a function, a subshell, after
@@ -1037,10 +1078,18 @@ function shellScript(list) {
 // - nothing before the use may assign names the line does not spell:
 //   `eval`, `source`, a trap, an alias, a function definition, arithmetic,
 //   a builtin that assigns with an argument it cannot read, a command whose
-//   name is unknown. From there on (from the start of the line, when it sits
-//   inside a compound command or a subshell) nothing is filled in.
+//   name is unknown, an IFS that is not only a `read`'s. From there on (from
+//   the start of the line, when it sits inside a compound command or a
+//   subshell) nothing is filled in.
 // A name the line never assigns stays unknown: the hook's own environment is
 // not the one the command runs in.
+//
+// A `for NAME in` loop over values written in full (`for k in a b c`,
+// `for f in "$S/a" "$S/b"` with S known) is read as bash runs it: its body
+// once per value, with NAME filled in there, when nothing in the body may
+// assign NAME (loopOf). Its commands are listed once per value (Copilot
+// review of #26, third round: a copy into `"docs/x-$k.json"` must be read
+// for the write rules, not asked about). After the loop NAME stays unknown.
 
 /** A name the shell keeps a variable under. */
 const variableName = /^[A-Za-z_][A-Za-z0-9_]*$/
@@ -1201,6 +1250,20 @@ const blockClosers = new Set(['fi', 'done', '}', 'esac'])
 
 /** Characters of a value that an unquoted expansion would split or glob. */
 const unsafeUnquoted = /[\s*?[(]/
+
+/**
+ * A loop value the shell takes as written, quoted or not: nothing it would
+ * split, glob, brace-expand or tilde-expand, nor zsh's leading `=`.
+ */
+const plainLoopValue = /^[A-Za-z0-9_./:@%+,-][A-Za-z0-9_./:@%+,=-]*$/
+
+/**
+ * How many units the `for` loops of one list may read again, once per
+ * value: past it a loop is read once, its variable unknown. Enough for a
+ * loop over a handful of files; a line crafted to multiply nested loops
+ * stays linear.
+ */
+const maxLoopUnits = 512
 
 /** Whether an arithmetic text may assign (`n=1`, `n+=1`, `n++`): any `=`, `++` or `--`. */
 function arithmeticAssigns(text) {
@@ -1389,6 +1452,84 @@ function mentionsOf(word) {
 }
 
 /**
+ * The names a unit may assign, for a loop's body (loopOf): those its
+ * assignments before the command spell, a `{NAME}` before a redirection
+ * (bash's `exec {fd}>file`), and, for a builtin that assigns or a
+ * `for`/`select` header, every name any of its words spells (mentionsOf).
+ * An argument of any other command assigns nothing in this shell (`gh api
+ * -F n=$n`). A command whose name is unknown, or one that runs text of its
+ * own (`eval`), stops the filling in for the whole line (analyze): no loop
+ * gets here with one in its body.
+ */
+function namesAssignedBy(words) {
+  const k = commandIndex(words)
+  const head = words[k]
+  const spelling =
+    head !== undefined &&
+    (assigningBuiltins.has(head.value) || headerWords.has(head.value))
+      ? words
+      : [
+          ...words.slice(0, k),
+          ...words.filter(
+            (word) =>
+              word.known && /^\{[A-Za-z_][A-Za-z0-9_]*\}$/.test(word.value),
+          ),
+        ]
+  return spelling.flatMap(mentionsOf)
+}
+
+/**
+ * Whether a unit, at the top of the line, cannot fail: a plain assignment
+ * of known values, or a `cd` to an absolute directory that exists.
+ */
+function cannotFail(unit) {
+  if (
+    unit === null ||
+    !unit.own ||
+    unit.blocks > 0 ||
+    unit.scopes > 0 ||
+    unit.head.rest > 0 ||
+    unit.redirs.length > 0 ||
+    unit.words.length === 0 ||
+    !unit.words.every((word) => word.known)
+  )
+    return false
+  if (unit.words.every((word) => plainAssignment.test(word.raw))) return true
+  const [name, dir, ...rest] = unit.words
+  if (!isBare(name, 'cd') || dir === undefined || rest.length > 0) return false
+  if (!path.isAbsolute(dir.value)) return false
+  try {
+    return statSync(dir.value).isDirectory()
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Whether an assignment after `&&` runs for sure (Copilot review of #26,
+ * third round: `cd "$W" && S=/x && cat > "$S/m" <<EOF` then `git commit -F
+ * "$S/m"` on the next line): every unit before it in its and-or list is
+ * joined by `&&` and cannot fail, so the list reaches it whenever the line
+ * runs, and the lines after it see its value.
+ */
+function afterSureChain(unit) {
+  const { chain, chainLength } = unit
+  if (chainLength === 0) return false
+  // sure[k]: the first k entries all cannot fail and are joined by `&&`.
+  // Read once per list (the list is settled when the units are analyzed),
+  // so a line of many `&&` stays linear.
+  chain.sure ??= [true]
+  while (chain.sure.length <= chainLength) {
+    const k = chain.sure.length
+    const entry = chain[k - 1]
+    chain.sure.push(
+      chain.sure[k - 1] && entry.op === '&&' && cannotFail(entry.unit),
+    )
+  }
+  return chain.sure[chainLength]
+}
+
+/**
  * Whether a unit is an assignment the line may count on, and which kind:
  * 'assign' (`A=1 B=2`), 'export' or 'readonly' (`export A=1 B`), or null.
  */
@@ -1398,7 +1539,7 @@ function definiteShape(unit) {
     words.length === 0 ||
     unit.blocks > 0 ||
     unit.scopes > 0 ||
-    unit.andOr ||
+    (unit.andOr && !afterSureChain(unit)) ||
     !unit.own ||
     unit.head.rest > 0
   )
@@ -1427,6 +1568,25 @@ function ownName(unit, k, word) {
   const match = /^([A-Za-z_][A-Za-z0-9_]*)=/.exec(word.raw)
   if (match !== null) return match[1]
   return word.known && variableName.test(word.value) ? word.value : null
+}
+
+/** Builtins that read a line and split it with IFS, and assign nothing else with a prefix. */
+const ifsReaders = new Set(['read', 'mapfile', 'readarray'])
+
+/**
+ * Whether word k of a unit is an assignment in the environment of a `read`
+ * (`IFS= read -r f`): regular builtins keep such an assignment to
+ * themselves, in bash and in zsh.
+ */
+function onlyForRead(unit, k) {
+  const at = commandIndex(unit.words)
+  const head = unit.words[at]
+  return (
+    k < at &&
+    anyAssignment.test(unit.words[k].raw ?? '') &&
+    isBare(head, head?.value) &&
+    ifsReaders.has(head.value)
+  )
 }
 
 /**
@@ -1459,8 +1619,11 @@ function analyze(units, marks) {
     for (const [k, word] of words.entries()) {
       const own = ownName(unit, k, word)
       for (const name of mentionsOf(word)) {
-        // IFS changes how every unquoted expansion splits.
-        if (name === 'IFS') opaqueFrom = 0
+        // IFS changes how every unquoted expansion splits, unless it is only
+        // the environment of a `read` (`while IFS= read -r f`), which splits
+        // its own input with it and changes nothing else (Copilot review of
+        // #26, third round).
+        if (name === 'IFS' && !onlyForRead(unit, k)) opaqueFrom = 0
         if (name !== own) unstable.add(variableKey(name))
       }
     }
@@ -1493,8 +1656,19 @@ function analyze(units, marks) {
  * line assigns"); `context.exported`, the names the line exported;
  * `context.active` false once nothing is filled in any more.
  */
-function simple(unit, words, redirs, context) {
+function simple(unit, given, redirs, context) {
   const { state, depth, env: inherited, piped, vars, exported } = context
+  // A `"$(cat <<EOF … EOF)"` the lexer read as its text holds that text only
+  // while `cat` is the program. Once the line may have defined a function or
+  // an alias (a function definition, eval, source: what ends `active`), or
+  // this runs inside such a line (`trusted` false), it may be anything: the
+  // word goes back to its raw text, unknown, `$` and all.
+  const trusted = context.active !== false && context.trusted !== false
+  const distrust = (word) =>
+    word.cat && !trusted
+      ? { ...word, value: word.raw, known: false, opaque: true, refs: [] }
+      : word
+  const words = given.map(distrust)
   const extra = []
   const none = new Map()
   const run = (sub, dir, env, subVars = vars, subExported = exported) =>
@@ -1506,6 +1680,7 @@ function simple(unit, words, redirs, context) {
         env: env ?? inherited,
         vars: subVars,
         exported: subExported,
+        trusted,
       }),
     )
   const script = (text, dir, env, subVars, subExported) => {
@@ -1556,7 +1731,7 @@ function simple(unit, words, redirs, context) {
   const targets = redirs.map((redir) =>
     redir.target === null
       ? null
-      : expandWord(redir.target, vars, redir.op !== '<<<'),
+      : expandWord(distrust(redir.target), vars, redir.op !== '<<<'),
   )
 
   // stdin: a pipe unless a redirection says otherwise; the last one wins.
@@ -1573,7 +1748,7 @@ function simple(unit, words, redirs, context) {
     if (redir.heredoc) {
       const heredoc = expandHeredoc(redir.heredoc, vars)
       stdin = heredoc.body
-      stdinKnown = heredoc.known
+      stdinKnown = heredoc.known && (trusted || redir.heredoc.cat !== true)
     } else if (redir.op === '<<<' && target) {
       stdin = `${target.value}\n`
       stdinKnown = target.known
@@ -1760,6 +1935,10 @@ function segment(src, tokens, state) {
   let item = false
   let andOr = false
   let previous = null
+  // The and-or list the next unit belongs to: each unit before it with the
+  // operator after it, and a null unit for what is no plain unit there (a
+  // subshell, a pipeline). Emptied where a list ends.
+  let chain = []
 
   const flush = (after) => {
     if (words.length === 0 && redirs.length === 0) return false
@@ -1783,7 +1962,13 @@ function segment(src, tokens, state) {
       blocks,
       scopes: scopes.length,
       head,
+      // The entries before this unit are settled once it is read: only the
+      // last entry of a list takes the operator after it. So the list is
+      // shared, not copied, which keeps a line of many `&&` linear.
+      chain,
+      chainLength: andOr ? chain.length : 0,
     }
+    chain.push({ unit, op: null })
     // `for x in …` and `select` open a loop that `done` closes.
     const header = words[head.rest]
     if (isBare(header, header?.value) && headerWords.has(header.value))
@@ -1856,10 +2041,12 @@ function segment(src, tokens, state) {
       pattern = true
       item = false
       andOr = false
+      chain = []
       before = op
       continue
     }
     if (op === '(') {
+      chain.push({ unit: null, op: null })
       // `((…))` is arithmetic, which may assign any name.
       if (prior?.type === 'op' && prior.op === '(' && prior.end === token.start)
         marks.push(0)
@@ -1882,10 +2069,15 @@ function segment(src, tokens, state) {
       if (!item && binaryOperators.has(before)) continue
       item = false
       andOr = false
+      chain = []
     } else {
       // `&&`, `;` and the rest need a command before them.
       if (!item) state.unparsable = true
       item = false
+      if (op === '&&' || op === '||' || op === '|' || op === '|&') {
+        if (chain.length === 0) chain.push({ unit: null, op: null })
+        chain.at(-1).op = op
+      } else chain = []
       if (op === '&&' || op === '||') andOr = true
       else if (op !== '|' && op !== '|&') andOr = false
     }
@@ -1895,6 +2087,76 @@ function segment(src, tokens, state) {
   if (!flush(null) && binaryOperators.has(before)) state.unparsable = true
   if (scopes.length > 0) state.unparsable = true
   return { events, units, marks }
+}
+
+/**
+ * The `for NAME in VALUES…` loop whose header is the unit of events[k], when
+ * its body can be read once per value (see "Variables the line assigns"):
+ * { name, values, end, units, carried }, `end` being the index of the event
+ * of the `done` that closes it, `units` how many units its body has, and
+ * `carried` the variables known at the header that no unit of the body may
+ * assign. The body runs only once the header ran, so a value that holds
+ * there holds in it: one assigned earlier in the header's `&&` list
+ * (`S=/x && for n in 1 2; do … > "$S/$n.json"; done`) included. null when
+ * the unit is no such header; when a value is not known in full, or is one
+ * the shell would split, glob or expand (plainLoopValue); when NAME is one
+ * the shell changes by itself; when a unit of the body may assign NAME; or
+ * when reading the body once per value would take more than `budget` units.
+ * `vars` are the variables known at the header.
+ */
+function loopOf(events, k, vars, budget) {
+  const { words, redirs, head, blocks } = events[k].unit
+  const at = head.rest
+  const name = words[at + 1]
+  if (
+    redirs.length > 0 ||
+    !isBare(words[at], 'for') ||
+    name === undefined ||
+    !name.known ||
+    name.quoted ||
+    !variableName.test(name.value) ||
+    dynamicNames.has(name.value.toLowerCase()) ||
+    tiedNames.has(name.value.toLowerCase()) ||
+    !isBare(words[at + 2], 'in')
+  )
+    return null
+  const values = []
+  for (const word of words.slice(at + 3)) {
+    // A substitution, `"$(cat <<EOF … EOF)"` included, runs at the header.
+    if (word.subs.length > 0) return null
+    const filled = expandWord(word, vars)
+    if (!filled.known || !plainLoopValue.test(filled.value)) return null
+    values.push(filled.value)
+  }
+  if (values.length === 0) return null
+  // The body is every unit deeper than the header, up to the first back at
+  // its level, which is the `done` that closes it; the subshells in it
+  // close in it. The search stops once the body is past the budget, so
+  // that the loops of a line are read in linear time whatever they nest.
+  let depth = 0
+  let units = 0
+  const mentioned = new Set()
+  for (let e = k + 1; e < events.length; e += 1) {
+    if ((e - k) * values.length > budget) return null
+    const event = events[e]
+    if (event.kind === 'open') depth += 1
+    if (event.kind === 'close' && --depth < 0) return null
+    if (event.kind !== 'unit') continue
+    const unit = event.unit
+    if (unit.blocks > blocks) {
+      for (const mention of namesAssignedBy(unit.words))
+        mentioned.add(variableKey(mention))
+      units += 1
+      continue
+    }
+    if (depth !== 0 || !unit.head.reserved.includes('done')) return null
+    if (mentioned.has(variableKey(name.value))) return null
+    const carried = new Map(
+      [...vars].filter(([known]) => !mentioned.has(variableKey(known))),
+    )
+    return { name: name.value, values, end: e, units, carried }
+  }
+  return null
 }
 
 /**
@@ -1927,6 +2189,44 @@ function build(unit, context) {
   let next = 0
 
   const visible = () => (next < plan.opaqueFrom ? vars : none)
+
+  // Assignments that hold for the rest of their `&&` list (Copilot review of
+  // #26, third round: `git commit … && SP=/x && npm run check > $SP/log`).
+  // One after a command that may fail is not certain for the lines after
+  // it, but every unit after it in the same list, joined by `&&` alone, runs
+  // only once it ran. Per list: [{ name, value, at }], `at` being its entry.
+  const chainLocal = new Map()
+  const withChain = (unit) => {
+    const local = chainLocal.get(unit.chain)
+    if (local === undefined || unit.chainLength === 0) return vars
+    let merged = null
+    for (const { name, value, at } of local) {
+      if (at >= unit.chainLength) continue
+      let holds = true
+      for (let k = at; k < unit.chainLength && holds; k += 1) {
+        const entry = unit.chain[k]
+        holds =
+          entry.op === '&&' &&
+          (k === at ||
+            (entry.unit !== null &&
+              !entry.unit.words.some((word) =>
+                mentionsOf(word).includes(name),
+              )))
+      }
+      if (!holds) continue
+      merged ??= new Map(vars)
+      merged.set(name, value)
+    }
+    return merged ?? vars
+  }
+  const pureAssignment = (unit) =>
+    unit.andOr &&
+    unit.own &&
+    unit.blocks === 0 &&
+    unit.scopes === 0 &&
+    unit.head.rest === 0 &&
+    unit.words.length > 0 &&
+    unit.words.every((word) => plainAssignment.test(word.raw))
 
   const moveTo = (target) => {
     const to = path.isAbsolute(target)
@@ -1980,32 +2280,63 @@ function build(unit, context) {
     moveTo(target.value)
   }
 
-  for (const event of events) {
+  // The values of the loops whose body is being read (loopOf), by name.
+  const withLoops = (base, loops) => {
+    if (loops.size === 0) return base
+    const merged = new Map(base)
+    for (const [name, value] of loops) merged.set(name, value)
+    return merged
+  }
+  let loopUnits = 0
+
+  // Events from..to-1, with `loops` filled in; a loop's body is walked once
+  // per value, then the walk goes on from its `done`.
+  const walk = (from, to, loops) => {
+    for (let k = from; k < to; k += 1) {
+      const event = events[k]
+      if (event.kind === 'unit') {
+        const loop = unitEvent(k, loops)
+        if (loop === null) continue
+        for (const value of loop.values)
+          walk(k + 1, loop.end, new Map([...loop.carried, [loop.name, value]]))
+        k = loop.end - 1
+      } else otherEvent(event, loops)
+    }
+  }
+
+  const otherEvent = (event, loops) => {
     if (event.kind === 'open') {
       scopes.push({ cwd, previous })
-      continue
+      return
     }
     if (event.kind === 'close') {
       ;({ cwd, previous } = scopes.pop())
-      continue
+      return
     }
-    if (event.kind === 'drain') {
-      for (const word of event.words)
-        for (const sub of word.subs)
-          later.push(
-            ...build(sub, {
-              ...context,
-              depth: depth + 1,
-              cwd,
-              vars: visible(),
-              exported,
-            }),
-          )
-      continue
-    }
-    const current = event.unit
+    // drain
+    for (const word of event.words)
+      for (const sub of word.subs)
+        later.push(
+          ...build(sub, {
+            ...context,
+            depth: depth + 1,
+            cwd,
+            vars: withLoops(visible(), next < plan.opaqueFrom ? loops : none),
+            exported,
+            trusted: context.trusted !== false && next < plan.opaqueFrom,
+          }),
+        )
+  }
+
+  /**
+   * Reads the unit of events[k]; returns the loop it opens when its body is
+   * read once per value, within maxLoopUnits.
+   */
+  const unitEvent = (k, loops) => {
+    const current = events[k].unit
     next = current.index
     const active = next < plan.opaqueFrom
+    const seen = active ? withLoops(withChain(current), loops) : none
     const result = simple(
       { text: current.text },
       current.words,
@@ -2016,9 +2347,10 @@ function build(unit, context) {
         cwd,
         env: context.env,
         piped: current.piped,
-        vars: active ? vars : none,
+        vars: seen,
         active,
         exported,
+        trusted: context.trusted,
       },
     )
     if (result.command !== null) out.push(result.command)
@@ -2035,10 +2367,23 @@ function build(unit, context) {
           if (known) vars.set(name, value)
           else vars.delete(name)
         }
+      else if (pureAssignment(current)) {
+        const local = chainLocal.get(current.chain) ?? []
+        for (const { name, value, known } of result.assigned)
+          if (known && !dynamicNames.has(name.toLowerCase()))
+            local.push({ name, value, at: current.chainLength })
+        chainLocal.set(current.chain, local)
+      }
     }
     if (current.own && result.cd !== null) applyCd(result.cd)
     next = current.index + 1
+    if (!active) return null
+    const loop = loopOf(events, k, seen, maxLoopUnits - loopUnits)
+    if (loop !== null) loopUnits += loop.values.length * loop.units
+    return loop
   }
+
+  walk(0, events.length, new Map())
   return [...out, ...later]
 }
 

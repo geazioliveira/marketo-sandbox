@@ -657,38 +657,110 @@ const branchOf = (ctx) => ({
   value: ctx.repo?.branch ?? null,
 })
 
+/**
+ * A host as gh compares it: lowercased, and any `*.github.com` (the API's
+ * `api.github.com`, `www.github.com`) is github.com, as gh normalizes it.
+ */
+const normalHost = (host) => {
+  const folded = String(host).trim().toLowerCase()
+  return folded === 'github.com' || folded.endsWith('.github.com')
+    ? 'github.com'
+    : folded
+}
+
+/**
+ * The host gh falls back on for a repository named without one (`-R
+ * OWNER/REPO`, GH_REPO, the remotes): GH_HOST as the command sees it (set on
+ * the command, exported earlier on the line, or inherited), else github.com.
+ * { host: null, unknown: true } when it holds an expansion: it may be this
+ * one or not (Copilot review of #26).
+ */
+function defaultHost(command, ctx) {
+  const value = envOf(command, ctx).GH_HOST
+  if (typeof value !== 'string' || value.trim() === '')
+    return { host: 'github.com', unknown: false }
+  if (/[$`]/.test(value)) return { host: null, unknown: true }
+  return { host: normalHost(value), unknown: false }
+}
+
+/**
+ * The repository `-R` or GH_REPO names, as gh parses it: `OWNER/REPO` on
+ * the default host, `HOST/OWNER/REPO`, or a URL (`scheme://` or the scp form
+ * `git@host:`). A host other than github.com is another GitHub, never this
+ * project; a default host that cannot be read leaves the target unknown.
+ * @returns {{ repo: string | null, unknown: boolean }}
+ */
+function namedTarget(value, host) {
+  const text = String(value).trim()
+  const url =
+    /^[a-z][a-z0-9+.-]*:\/\/(?:[^@/]+@)?([^/:]+)(?::\d+)?\/(.*)$/i.exec(text) ??
+    /^git@([^/:]+):(.*)$/i.exec(text)
+  const parts = (url ? url[2] : text).replace(/\/+$/, '').split('/')
+  let named = url ? url[1] : null
+  if (!url && parts.length === 3) named = parts.shift()
+  if (parts.length !== 2) return { repo: repoFromArg(text), unknown: false }
+  const on = named === null ? host : { host: normalHost(named), unknown: false }
+  if (on.unknown) return { repo: null, unknown: true }
+  if (on.host !== 'github.com') return { repo: null, unknown: false }
+  const name = parts[1].replace(/\.git$/i, url ? '' : '$&')
+  return { repo: repoFromArg(`${parts[0]}/${name}`), unknown: false }
+}
+
 /** GH_REPO as the command sees it: { repo, unknown }, or null when unset. */
 function ghRepoEnv(command, ctx) {
   const value = envOf(command, ctx).GH_REPO
   if (typeof value !== 'string' || value === '') return null
   return /[$`]/.test(value)
     ? { repo: null, unknown: true }
-    : { repo: repoFromArg(value), unknown: false }
+    : namedTarget(value, defaultHost(command, ctx))
 }
 
 /**
  * The repository a gh command acts on, as gh picks it: the repository of a
  * URL operand, else the last `-R/--repo`, else GH_REPO (set on the command,
  * exported earlier on the line, or inherited), else the repository around
- * the command's directory. A value that holds an expansion, or a directory
- * that could not be read, could be this project, so it counts as this
- * project.
+ * the command's directory. A repository named without a host, and the
+ * remotes, are on GH_HOST when it is set: another host is another GitHub,
+ * never this project (Copilot review of #26). A value that holds an
+ * expansion, a directory that could not be read, or a GH_HOST that could
+ * not be read may be this project: the target is then unknown, judged as
+ * this project for a refusal and never for a pass.
  * @returns {{ repo: string | null, unknown: boolean }}
  */
 function targetOf(command, ctx, operands) {
   const fromUrl = operands.map(refOf).find((ref) => ref?.repo)
   if (fromUrl) return { repo: fromUrl.repo, unknown: false }
+  const host = defaultHost(command, ctx)
   const flags = findOptions(command.argv.map(String), ['-R', '--repo'])
   if (flags.length > 0) {
     const last = flags.at(-1)
     if (!wordKnown(command, last.index)) return { repo: null, unknown: true }
-    return { repo: repoFromArg(last.value), unknown: false }
+    return namedTarget(last.value, host)
   }
   const env = ghRepoEnv(command, ctx)
   if (env !== null) return env
+  // gh keeps only the remotes on GH_HOST when it is set: on another host,
+  // none of them is this project's (or gh refuses to run).
+  if (host.unknown) return { repo: null, unknown: true }
+  if (host.host !== 'github.com') return { repo: null, unknown: false }
   if (!remotesKnown(ctx)) return { repo: null, unknown: true }
   return { repo: ctx.repo?.repo ?? null, unknown: false }
 }
+
+// ---------------------------------------------------------------------------
+// What the hook cannot read
+
+/**
+ * A value the hook cannot read (an expansion, a file or an --input it cannot
+ * open, a GraphQL variable the call does not send, a live read that failed)
+ * inside a rule that refuses what it can read: a label, a body, a title, a
+ * state, a thread, a message. It asks, critical, so the modes where nobody
+ * is asked refuse it instead of letting it through unseen (Copilot review of
+ * #26, third round). A rule that only asks when it can read (editing a body
+ * after the Approve) keeps a plain ask; and nothing unread is ever dropped
+ * as if it were not there.
+ */
+const unread = (reason) => ask(reason, { critical: true })
 
 // ---------------------------------------------------------------------------
 // What a body opens with, and the skip strings
@@ -726,14 +798,22 @@ function openingDecision(body) {
         `um comentário do agente não abre como Approve, retirada nem título que mencione approve (a primeira linha é ${quote(headAndRest(text).head)}): só o dono escreve essas linhas`,
       )
   if (unknown)
-    return ask(
+    return unread(
       'não consegui ler o corpo do comentário para conferir a primeira linha',
     )
   return pass()
 }
 
-/** A skip string in any of the texts refuses the command. */
-function skipDecision(texts, where) {
+/**
+ * A skip string in any of the texts refuses the command; a text the hook
+ * cannot read (`unknown`, which `unread` names) asks, critical, since it may
+ * hold one.
+ */
+function skipDecision(
+  texts,
+  where,
+  { unknown = false, unread: what = where } = {},
+) {
   for (const text of texts) {
     const token = skipTokenIn(text)
     if (token !== null)
@@ -741,7 +821,18 @@ function skipDecision(texts, where) {
         `${where} traz "${token}", que faz o GitHub pular os checks do merge e do push: tire-o`,
       )
   }
+  if (unknown)
+    return unread(
+      `não consegui ler ${what} para conferir que não traz um texto que faz o GitHub pular os checks`,
+    )
   return pass()
+}
+
+/** The skip check on option values (a title, a subject), each read or not. */
+function skipInWords(words, where) {
+  return skipDecision(knownTexts(words), where, {
+    unknown: words.some((word) => !word.known),
+  })
 }
 
 /**
@@ -819,7 +910,8 @@ function issueComment(command, ctx) {
 /** The state labels an issue may be created with: at most one, and one the agent may set. */
 function createLabels(labels) {
   const decisions = []
-  if (labels.some((label) => !label.known)) decisions.push(ask(unknownLabels))
+  if (labels.some((label) => !label.known))
+    decisions.push(unread(unknownLabels))
   const states = [
     ...new Set(
       labels
@@ -869,7 +961,7 @@ function labelChange(command, ctx) {
     ...ctx.operands.slice(0, 1),
     ...optionWords(command, ['-n', '--name']),
   ]
-  if (names.some((name) => !name.known)) return ask(unknownLabels)
+  if (names.some((name) => !name.known)) return unread(unknownLabels)
   const touched = names
     .map((name) => name.value.trim().toLowerCase())
     .filter(isState)
@@ -886,19 +978,21 @@ function issueCreate(command, ctx) {
     createLabels(labelsOf(command, ['-l', '--label'])),
   ]
   // Spec silent: --recover restores a body and labels from a file the hook
-  // does not read, so it asks.
-  if (
-    command.argv.some(
-      (arg) => arg === '--recover' || String(arg).startsWith('--recover='),
-    )
-  )
+  // does not read. Either could be refused (an Approve, ready-for-agent), so
+  // it asks, critical.
+  if (recovers(command))
     decisions.push(
-      ask(
+      unread(
         'gh issue create --recover traz corpo e labels de um arquivo que o hook não confere',
       ),
     )
   return combine(decisions)
 }
+
+/** Whether the command restores its input from a --recover file. */
+const recovers = (command) =>
+  hasFlag(command, ['--recover']) ||
+  command.argv.some((arg) => String(arg).startsWith('--recover='))
 
 /**
  * The one exception to the label rule, read live: the issue is in
@@ -907,7 +1001,7 @@ function issueCreate(command, ctx) {
 function planTransition(github, target, number) {
   const read = github.issueState(target, number)
   if (!read.ok)
-    return ask(
+    return unread(
       `não consegui confirmar que a issue está em ${planFrom} com um # Plano como último comentário (${read.reason})`,
     )
   const { labels, labelsComplete, lastCommentBody } = read.value
@@ -915,7 +1009,7 @@ function planTransition(github, target, number) {
   const unmet = []
   if (!folded.includes(planFrom)) {
     if (!labelsComplete)
-      return ask(
+      return unread(
         `não consegui confirmar que a issue #${number} está em ${planFrom}: ela tem mais labels do que uma página`,
       )
     unmet.push(
@@ -966,13 +1060,13 @@ function issueEdit(command, ctx) {
       !exception
         ? deny(labelRule)
         : ctx.targetKnown === false
-          ? ask(
+          ? unread(
               `não consegui ler em que repositório o comando troca ${planFrom} por ${planTo}: confira que a issue #${refs[0].number} é deste projeto, está em ${planFrom} e tem um # Plano como último comentário`,
             )
           : planTransition(ctx.github, ctx.target, refs[0].number),
     )
   } else if (others.some((label) => !label.known))
-    decisions.push(ask(unknownLabels))
+    decisions.push(unread(unknownLabels))
   const body = bodyOf(command, ctx, { unknownFlags: [] })
   if (body.source !== 'none')
     decisions.push(
@@ -1016,7 +1110,9 @@ function prCreate(command, ctx) {
   const parsed = branchKnown ? parseBranch(branch) : null
   if (!branchKnown)
     decisions.push(
-      ask(`não consegui ler a branch da PR: ela precisa ser ${branchShapes}`),
+      unread(
+        `não consegui ler a branch da PR: ela precisa ser ${branchShapes}`,
+      ),
     )
   else if (parsed === null)
     decisions.push(
@@ -1035,9 +1131,8 @@ function prCreate(command, ctx) {
   // --web and --editor write the body after the hook ran, where it can
   // never look: neither the Closes line nor a skip string can be checked, so
   // a person must, and in the autonomous modes nobody does (Copilot review
-  // of #26). A body file or an expansion the hook could not read is another
-  // matter: what gh posts is on the line, and it asks like any body it
-  // cannot read.
+  // of #26). A body file or an expansion the hook could not read asks the
+  // same way: a body it can read and that misses the Closes line is refused.
   if (body.source === 'web' || body.source === 'editor')
     decisions.push(
       ask(
@@ -1049,7 +1144,7 @@ function prCreate(command, ctx) {
     )
   else if (!body.known)
     decisions.push(
-      ask('não consegui ler o corpo da PR para conferir a primeira linha'),
+      unread('não consegui ler o corpo da PR para conferir a primeira linha'),
     )
   else if (body.source === 'none')
     decisions.push(
@@ -1060,37 +1155,50 @@ function prCreate(command, ctx) {
       ),
     )
   else decisions.push(closesDecision(body.text, issue, 'da PR'))
-  const { texts } = textsOf(body)
+  const titles = optionWords(command, ['-t', '--title'])
+  // With no --title, --fill takes the title from the commits, which the
+  // hook does not read here.
+  if (titles.length === 0 && filling)
+    decisions.push(
+      unread(
+        '--fill sem --title tira o título dos commits, que o hook não lê aqui: dê o título com --title para ele conferir que não traz um texto que pula os checks',
+      ),
+    )
+  if (recovers(command))
+    decisions.push(
+      unread(
+        'gh pr create --recover traz título e corpo de um arquivo que o hook não confere',
+      ),
+    )
+  // A body it cannot read already asks above; an earlier --body it cannot
+  // read, which gh drops, still asks here.
+  const { texts, unknown } = textsOf(body)
   decisions.push(
-    skipDecision(
-      knownTexts(optionWords(command, ['-t', '--title'])),
-      'o título da PR',
-    ),
-    skipDecision(texts, 'o corpo da PR'),
+    skipInWords(titles, 'o título da PR'),
+    skipDecision(texts, 'o corpo da PR', { unknown: unknown && body.known }),
   )
   return combine(decisions)
 }
 
 function prEdit(command, ctx) {
   const decisions = [
-    skipDecision(
-      knownTexts(optionWords(command, ['-t', '--title'])),
-      'o título da PR',
-    ),
+    skipInWords(optionWords(command, ['-t', '--title']), 'o título da PR'),
   ]
   const body = bodyOf(command, ctx, { unknownFlags: [] })
   if (body.source !== 'none') {
-    const { texts } = textsOf(body)
-    decisions.push(skipDecision(texts, 'o corpo da PR'))
+    const { texts, unknown } = textsOf(body)
+    decisions.push(
+      skipDecision(texts, 'o corpo da PR', { unknown: unknown && body.known }),
+    )
     if (!body.known)
       decisions.push(
-        ask(
+        unread(
           'não consegui ler o novo corpo da PR para conferir a primeira linha',
         ),
       )
     else if (ctx.operands.length === 0 && !branchOf(ctx).known)
       decisions.push(
-        ask(
+        unread(
           'não consegui saber a branch da PR que o gh pr edit muda, para conferir o Closes #N. do novo corpo',
         ),
       )
@@ -1151,34 +1259,42 @@ function prMerge(command, ctx) {
   // Turning auto-merge off merges nothing and only restricts.
   if (hasFlag(command, ['--disable-auto'])) return pass()
   const body = bodyOf(command, ctx, { unknownFlags: [] })
+  const { texts, unknown } = textsOf(body)
   const skip = combine([
-    skipDecision(
-      knownTexts(optionWords(command, ['-t', '--subject'])),
+    skipInWords(
+      optionWords(command, ['-t', '--subject']),
       'o assunto do merge',
     ),
-    skipDecision(textsOf(body).texts, 'o corpo do merge'),
+    skipDecision(texts, 'o corpo do merge', { unknown }),
   ])
-  if (skip.decision !== 'pass') return skip
+  if (skip.decision === 'deny') return skip
+  // A subject or body it cannot read still asks, critical, next to what
+  // the live read says: a merge that is not ready is refused either way.
+  const judged = (decision) => combine([skip, decision])
   const operand = ctx.operands[0]
   const branch = branchOf(ctx)
   let prRef = null
   if (operand === undefined) prRef = branch.known ? branch.value : null
   else if (operand.known) prRef = refOf(operand)?.number ?? operand.value
   if (prRef === null)
-    return mergeDecision(
-      failed(
-        operand !== undefined
-          ? `"${operand.value}" não pôde ser lido`
-          : branch.known
-            ? 'sem número e com o HEAD destacado'
-            : 'sem número, e a branch em que ele roda não pôde ser lida',
+    return judged(
+      mergeDecision(
+        failed(
+          operand !== undefined
+            ? `"${operand.value}" não pôde ser lido`
+            : branch.known
+              ? 'sem número e com o HEAD destacado'
+              : 'sem número, e a branch em que ele roda não pôde ser lida',
+        ),
       ),
     )
   // A repository that cannot be read is not read as this project's PR
   // (Copilot review of #26): it asks, critical, as a failed read does.
   if (ctx.targetKnown === false)
-    return mergeDecision(failed('o repositório da PR não pôde ser lido'))
-  return mergeDecision(ctx.github.prMergeState(ctx.target, prRef))
+    return judged(
+      mergeDecision(failed('o repositório da PR não pôde ser lido')),
+    )
+  return judged(mergeDecision(ctx.github.prMergeState(ctx.target, prRef)))
 }
 
 // ---------------------------------------------------------------------------
@@ -1386,13 +1502,13 @@ function aliasText(expansion, args) {
  */
 async function judgeAlias(name, expansion, args, command, ctx, { live }) {
   if ((ctx.aliasDepth ?? 0) >= 5)
-    return ask(
+    return unread(
       `o alias ${name} do gh leva a aliases demais: confira o que ele roda`,
     )
   const { shell, text } = aliasText(expansion, args)
   const parsed = parseCommand(text)
   if (parsed.unparsable || parsed.commands.length === 0)
-    return ask(
+    return unread(
       `não consegui ler o alias ${name} do gh ("${expansion.trim()}"): confira o que ele roda`,
     )
   const inner = extend(ctx, {
@@ -1421,7 +1537,7 @@ async function judgeAlias(name, expansion, args, command, ctx, { live }) {
           })
     if (!(each.known?.[0] ?? true))
       decisions.push(
-        ask(
+        unread(
           `o alias ${name} do gh roda um programa que o hook não consegue ler: confira o que ele faz`,
         ),
       )
@@ -1430,7 +1546,7 @@ async function judgeAlias(name, expansion, args, command, ctx, { live }) {
       decisions.push(await ctx.judgeOther(run, here))
     else if (each.argv[0] === 'git')
       decisions.push(
-        ask(
+        unread(
           `o alias ${name} do gh roda git, que o hook não confere aqui: confira que não é commit nem push em ${trunk}`,
         ),
       )
@@ -1447,13 +1563,13 @@ async function judgeAlias(name, expansion, args, command, ctx, { live }) {
 async function aliasUse(command, ctx, group) {
   const found = ghAliasOf(group.value, command, ctx)
   if (!found.ok)
-    return ask(
+    return unread(
       `não consegui ler os aliases do gh (${found.reason}): confira que "${group.value}" não é um alias de um comando que o hook confere`,
     )
   // Not an alias either: an extension, or a word gh will refuse.
   if (found.expansion === null) return pass()
   if (!found.expansion.known)
-    return ask(
+    return unread(
       `não consegui ler o alias ${group.value} do gh: confira o que ele roda`,
     )
   const argv = command.argv.map(String)
@@ -1478,8 +1594,13 @@ async function aliasSet(command, ctx, from) {
   const operands = operandsOf(command, from, valuedFlags['alias set'])
   const [name, expansion] = operands
   const text = expansionOf(command, ctx, expansion)
-  // An expansion that cannot be read is the tripwire's to look at.
-  if (text === null || !text.known) return pass()
+  if (text === null) return pass()
+  // An expansion it cannot read could be one the rule refuses: it asks,
+  // critical, besides what the tripwire says (Copilot review of #26).
+  if (!text.known)
+    return unread(
+      `não consegui ler o que o alias ${name?.value ?? ''} do gh roda: confira que não é um comando que o hook nega`,
+    )
   const shell =
     hasFlag(command, ['-s', '--shell']) && !text.text.startsWith('!')
   const decision = await judgeAlias(
@@ -1497,12 +1618,15 @@ async function aliasSet(command, ctx, from) {
     : ask(reason, { critical: decision.critical === true })
 }
 
-/** The aliases a `gh alias import` file (or stdin) brings, or null when unreadable. */
+/**
+ * The aliases a `gh alias import` file (or stdin) brings, or null when
+ * unreadable. With no file, gh reads stdin, as it does for `-` (Copilot
+ * review of #26, third round).
+ */
 function importedAliases(command, ctx, from) {
   const [file] = operandsOf(command, from, [])
-  if (file === undefined) return new Map()
-  if (!file.known) return null
-  const read = readSource(command, ctx.cwd, file.value, true, ctx.files)
+  if (file !== undefined && !file.known) return null
+  const read = readSource(command, ctx.cwd, file?.value ?? '-', true, ctx.files)
   if (!read.known) return null
   const parsed = yamlAliases(read.text)
   return parsed.ok ? parsed.map : null
@@ -1511,7 +1635,7 @@ function importedAliases(command, ctx, from) {
 async function aliasImport(command, ctx, from) {
   const aliases = importedAliases(command, ctx, from)
   if (aliases === null)
-    return ask(
+    return unread(
       'não consegui ler os aliases que o gh alias import traz: confira que nenhum deles faz o que o hook nega',
     )
   const decisions = []
@@ -1521,7 +1645,7 @@ async function aliasImport(command, ctx, from) {
         ? await judgeAlias(name, expansion.text, [], command, ctx, {
             live: false,
           })
-        : ask(
+        : unread(
             `não consegui ler o alias ${name} que o gh alias import traz: confira o que ele roda`,
           ),
     )
@@ -1680,13 +1804,22 @@ function typedValue(command, ctx, raw, known) {
 function apiRequest(command, ctx, from) {
   const argv = command.argv.map(String)
   const params = {}
+  // A field whose key cannot be read (`-f "$F"`, `-f "$K"=v`) may be any
+  // key, `state` or `labels` included: the body it lands in is unknown
+  // (Copilot review of #26, third round). A readable field with no `=` is
+  // one gh refuses, and sends nothing.
+  let keysKnown = true
   const found = findOptions(argv, ['-f', '--raw-field', '-F', '--field'])
   for (const option of found) {
+    const known = wordKnown(command, option.index)
     const eq = option.value.indexOf('=')
+    if (!known && (eq < 0 || /[$`]/.test(option.value.slice(0, eq)))) {
+      keysKnown = false
+      continue
+    }
     if (eq < 0) continue
     const key = option.value.slice(0, eq)
     const raw = option.value.slice(eq + 1)
-    const known = wordKnown(command, option.index)
     const typed = option.name === '-F' || option.name === '--field'
     setParam(
       params,
@@ -1695,7 +1828,7 @@ function apiRequest(command, ctx, from) {
     )
   }
   const inputs = findOptions(argv, ['--input'])
-  let body = params
+  let body = keysKnown ? params : unknown
   if (inputs.length > 0) {
     const last = inputs.at(-1)
     const read = readSource(
@@ -1807,15 +1940,19 @@ function apiPrCreate(head, body, title) {
   const parsed = parseBranch(branch)
   const issue = parsed?.issue ?? null
   const text = fieldText(body)
+  const heading = fieldText(title)
   const bodyDecision = !text.known
-    ? ask('não consegui ler o corpo da PR para conferir a primeira linha')
+    ? unread('não consegui ler o corpo da PR para conferir a primeira linha')
     : text.text === null
       ? deny(noPrBody(issue))
       : closesDecision(text.text, issue, 'da PR')
   return combine([
     parsed === null ? deny(`a PR sai de uma branch ${branchShapes}`) : pass(),
     bodyDecision,
-    skipDecision([fieldText(title).text, text.text], 'a PR'),
+    skipDecision([heading.text, text.text], 'a PR', {
+      unknown: !heading.known,
+      unread: 'o título da PR',
+    }),
   ])
 }
 
@@ -1838,7 +1975,7 @@ function restDecision(method, route, body) {
       more.length > 0
         ? [decode(more.join('/')).trim().toLowerCase()]
         : labelNames(body, { whole: true })
-    if (names === unknown) return ask(unknownLabels)
+    if (names === unknown) return unread(unknownLabels)
     if (names.some(isState)) return deny(apiLabelRule)
     if (more.length === 0 && (method === 'PUT' || method === 'DELETE'))
       return deny(
@@ -1867,7 +2004,9 @@ function restDecision(method, route, body) {
   if (first === 'issues' && numeric(second) && third === undefined) {
     if (method !== 'PATCH' && method !== 'POST') return pass()
     if (body === unknown)
-      return ask('não consegui ler o que o gh api muda na issue')
+      return unread(
+        'não consegui ler o que o gh api muda na issue: confira que não são as labels nem a reabertura',
+      )
     const decisions = []
     // `labels` replaces every label: naming a state label writes it, and
     // leaving it out drops the one the issue has. Either way it is a state
@@ -1880,7 +2019,9 @@ function restDecision(method, route, body) {
       )
     const state = fieldOf(body, 'state')
     if (state.present && !state.known)
-      decisions.push(ask('não consegui ler o estado que o gh api põe na issue'))
+      decisions.push(
+        unread('não consegui ler o estado que o gh api põe na issue'),
+      )
     else if (state.present && String(state.value).toLowerCase() === 'open')
       decisions.push(deny('reabrir uma issue cancela o Approve e é do dono'))
     const text = fieldText(fieldOf(body, 'body'))
@@ -1899,7 +2040,7 @@ function restDecision(method, route, body) {
     return combine([
       openingDecision(fieldText(fieldOf(body, 'body'))),
       names === unknown
-        ? ask(unknownLabels)
+        ? unread(unknownLabels)
         : createLabels(names.map((name) => ({ name, known: true }))),
     ])
   }
@@ -1912,7 +2053,7 @@ function restDecision(method, route, body) {
         : { present: true, known: true, value: decode(second) },
       fieldOf(body, 'new_name'),
     ].filter((field) => field.present)
-    if (names.some((field) => !field.known)) return ask(unknownLabels)
+    if (names.some((field) => !field.known)) return unread(unknownLabels)
     if (
       names.some((field) => isState(String(field.value).trim().toLowerCase()))
     )
@@ -1940,13 +2081,17 @@ function restDecision(method, route, body) {
   if (first === 'pulls' && numeric(second) && third === undefined) {
     if (method === 'GET') return pass()
     const text = fieldText(fieldOf(body, 'body'))
+    const heading = fieldText(fieldOf(body, 'title'))
     return combine([
-      skipDecision([fieldText(fieldOf(body, 'title')).text, text.text], 'a PR'),
+      skipDecision([heading.text, text.text], 'a PR', {
+        unknown: !heading.known,
+        unread: 'o título da PR',
+      }),
       text.known && text.text !== null
         ? closesDecision(text.text, null, 'da PR')
         : text.known
           ? pass()
-          : ask(
+          : unread(
               'não consegui ler o novo corpo da PR para conferir a primeira linha',
             ),
     ])
@@ -2156,13 +2301,13 @@ function argumentOf(args, key, variables) {
 function resolveThread(args, variables, github) {
   const id = argumentOf(args, 'threadId', variables)
   if (!id.present || !id.known || typeof id.value !== 'string')
-    return ask(
+    return unread(
       'não consegui ler a thread que o resolveReviewThread resolve: confira que você respondeu nela antes',
     )
   const author = github.threadLastAuthor(id.value)
   const viewer = author.ok ? github.viewer() : author
   if (!author.ok || !viewer.ok)
-    return ask(
+    return unread(
       `não consegui confirmar que a última resposta da thread é sua (${(author.ok ? viewer : author).reason})`,
     )
   if (
@@ -2177,12 +2322,12 @@ function resolveThread(args, variables, github) {
 
 function graphqlDecision(body, ctx) {
   if (body === unknown)
-    return ask(
+    return unread(
       'não consegui ler a chamada GraphQL do gh api: confira o que ela muda',
     )
   const raw = body?.query
   if (raw === unknown || hasUnknown(raw))
-    return ask(
+    return unread(
       'não consegui ler a query GraphQL: confira que ela não é uma mutation do loop',
     )
   if (typeof raw !== 'string') return pass()
@@ -2220,7 +2365,9 @@ function graphqlDecision(body, ctx) {
       inner.push(deny('labels por id não são conferidas: use gh issue edit'))
     const state = argumentOf(args, 'state', variables)
     if (state.present && !state.known)
-      inner.push(ask('não consegui ler o estado que a mutation põe na issue'))
+      inner.push(
+        unread('não consegui ler o estado que a mutation põe na issue'),
+      )
     else if (state.present && String(state.value).toUpperCase() === 'OPEN')
       inner.push(deny('reabrir uma issue cancela o Approve e é do dono'))
     if (argumentOf(args, 'body', variables).present)
@@ -2271,10 +2418,14 @@ function graphqlDecision(body, ctx) {
   // The pull request is a node id, so its issue is not known: the shape alone.
   each('updatePullRequest', (args) => {
     const body = text(args, 'body')
+    const heading = text(args, 'title')
     return combine([
-      skipDecision([text(args, 'title').text, body.text], 'a PR'),
+      skipDecision([heading.text, body.text], 'a PR', {
+        unknown: !heading.known,
+        unread: 'o título da PR',
+      }),
       !body.known
-        ? ask(
+        ? unread(
             'não consegui ler o novo corpo da PR para conferir a primeira linha',
           )
         : body.text !== null
@@ -2308,15 +2459,15 @@ function apiDecision(command, ctx, from) {
   const host = request.host ?? envOf(command, ctx).GH_HOST ?? null
   if (
     typeof host === 'string' &&
-    host !== '' &&
+    host.trim() !== '' &&
     !/[$`]/.test(host) &&
-    host.toLowerCase() !== 'github.com'
+    normalHost(host) !== 'github.com'
   )
     return pass()
   const endpoint = request.endpoint
   if (endpoint === null) return pass()
   if (!endpoint.known)
-    return ask(
+    return unread(
       `não consegui ler o endpoint do gh api em "${endpoint.value}": confira o que ele escreve`,
     )
   const raw = endpoint.value
@@ -2380,7 +2531,7 @@ export async function ghDecision(command, ctx) {
   const [group, verb] = leadingWords(command)
   if (group === undefined) return pass()
   if (!group.known)
-    return ask(
+    return unread(
       `não consegui ler o subcomando do gh em "${group.value}": confira o que ele faz`,
     )
   const local = extend(ctx, { github: ctx.github ?? githubClient() })
@@ -2392,7 +2543,7 @@ export async function ghDecision(command, ctx) {
     !verb.known &&
     ['issue', 'pr', 'repo', 'alias', 'label'].includes(group.value)
   )
-    return ask(
+    return unread(
       `não consegui ler o subcomando do gh em "${group.value} ${verb.value}": confira o que ele faz`,
     )
   if (key === 'alias set') return aliasSet(command, local, verb.index + 1)

@@ -1216,6 +1216,64 @@ describe.concurrent('the gate state', () => {
   })
 })
 
+describe.concurrent(
+  'a pending plan comes before every shortcut (Copilot review of #26, third round)',
+  () => {
+    test('asks, critical, for an ignored file while this session has a pending plan', async ({
+      expect,
+      fresh,
+    }) => {
+      for (const cache of [false, true]) {
+        const repo = await fresh({ branch: BRANCH, cache, marker: SESSION })
+        await repo.commit({ '.gitignore': 'dist/\n*.log\n' }, 'Ignore')
+        for (const file of ['dist/generated.js', 'debug.log']) {
+          const run = await editIn(repo, file, { tool: 'Write' })
+          expect(run.decision, `${file}, cache ${cache}`).toBe('ask')
+          expect(run.reason).toBe(`${io.hookTag} ${PENDING}`)
+          const auto = await editIn(repo, file, { tool: 'Write', mode: 'auto' })
+          expect(auto.decision).toBe('deny')
+          expect(auto.reason).toContain(PENDING)
+        }
+        // Another session's marker is not this one's plan: the file is
+        // ignored, so it passes, as before.
+        expect(
+          (await editIn(repo, 'dist/generated.js', { session: 'outra' }))
+            .decision,
+        ).toBe('pass')
+        // The intent is written before the plan, and still passes.
+        expect(
+          (await editIn(repo, 'context/intent/feature-x.md')).decision,
+        ).toBe('pass')
+      }
+    })
+
+    test('counts a pending plan it cannot look for as one: an input with no cwd', async ({
+      expect,
+      fresh,
+    }) => {
+      const repo = await fresh({ branch: BRANCH, cache: true })
+      const input = toolCall(path.join(repo.dir, 'src/a.ts'))
+      const run = verdict(
+        await runHook('build-guard', input, { env: repo.env(), cwd: repo.dir }),
+      )
+      expect(run.decision).toBe('ask')
+      expect(run.reason).toContain(
+        'não consegui saber se esta sessão tem um plano aceito',
+      )
+      const auto = verdict(
+        await runHook(
+          'build-guard',
+          { ...input, permission_mode: 'auto' },
+          { env: repo.env(), cwd: repo.dir },
+        ),
+      )
+      expect(auto.decision).toBe('deny')
+      // With the cwd, the same edit passes: the gate is open, no marker.
+      expect((await editIn(repo, 'src/a.ts')).decision).toBe('pass')
+    })
+  },
+)
+
 describe.concurrent('the harness', () => {
   test('asks, critical, for every harness path with the gate open', async ({
     expect,

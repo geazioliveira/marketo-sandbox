@@ -161,6 +161,10 @@ describe('operators and lists', () => {
       ['gh', 'issue', 'edit', '$n', '--add-label', 'x'],
     ])
     expect(argvs('for n in 1 2; do gh issue reopen $n; done')).toEqual([
+      ['gh', 'issue', 'reopen', '1'],
+      ['gh', 'issue', 'reopen', '2'],
+    ])
+    expect(argvs('for n in *; do gh issue reopen $n; done')).toEqual([
       ['gh', 'issue', 'reopen', '$n'],
     ])
     expect(argvs('until false; do git push; done')).toEqual([
@@ -326,9 +330,107 @@ describe('heredocs and here-strings', () => {
     )
     expect(parsed.unparsable).toBe(false)
     expect(parsed.substitution).toBe(true)
-    expect(find(parsed, 'git', 'commit').known[3]).toBe(false)
+    // Read as its text, trailing newlines dropped as the shell drops them
+    // (Copilot review of #26, third round).
+    const commit = find(parsed, 'git', 'commit')
+    expect(commit.known[3]).toBe(true)
+    expect(commit.argv[3]).toBe("Corrigir (#5), don't\n1) item")
     expect(find(parsed, 'cat').stdin).toBe("Corrigir (#5), don't\n1) item\n")
     expect(find(parsed, 'git', 'status').argv).toEqual(['git', 'status'])
+  })
+
+  describe('"$(cat <<EOF … EOF)" as a word (Copilot review of #26, third round)', () => {
+    const word = (text: string) => {
+      const command = find(parse(text), 'git', 'commit')
+      return { value: command.argv[3], known: command.known[3] }
+    }
+
+    it.each([
+      [
+        'a quoted delimiter',
+        `git commit -m "$(cat <<'EOF'\nHooks $5\nEOF\n)"`,
+        'Hooks $5',
+      ],
+      [
+        'an unquoted delimiter, no expansion',
+        `git commit -m "$(cat <<EOF\nHooks\n\n\nEOF\n)"`,
+        'Hooks',
+      ],
+      ['cat -', `git commit -m "$(cat - <<'EOF'\nHooks\nEOF\n)"`, 'Hooks'],
+      [
+        '<<-, tabs stripped',
+        `git commit -m "$(cat <<-'EOF'\n\tHooks\n\tEOF\n)"`,
+        'Hooks',
+      ],
+      [
+        'text around it',
+        `git commit -m "Assunto: $(cat <<'EOF'\ncorpo\nEOF\n)."`,
+        'Assunto: corpo.',
+      ],
+    ])('reads %s', (_, text, value) => {
+      expect(word(text)).toEqual({ value, known: true })
+    })
+
+    it.each([
+      [
+        'unquoted, which the shell splits',
+        `git commit -m $(cat <<'EOF'\nHooks\nEOF\n)`,
+      ],
+      [
+        'an expansion in the heredoc',
+        `git commit -m "$(cat <<EOF\nHooks $X\nEOF\n)"`,
+      ],
+      ['another program', `git commit -m "$(tr a b <<'EOF'\nHooks\nEOF\n)"`],
+      ['cat of a file', 'git commit -m "$(cat msg.txt)"'],
+      [
+        'cat of a file next to a heredoc, which it does not read',
+        `git commit -m "$(cat msg.txt <<'EOF'\nHooks\nEOF\n)"`,
+      ],
+      [
+        'a heredoc on another descriptor than stdin',
+        `git commit -m "$(cat 3<<'EOF'\nHooks\nEOF\n)"`,
+      ],
+      ['a pipeline', `git commit -m "$(cat <<'EOF' | tr a b\nHooks\nEOF\n)"`],
+      [
+        'a second command',
+        `git commit -m "$(cat <<'EOF'; echo x\nHooks\nEOF\n)"`,
+      ],
+      [
+        'cat after a function the line defines',
+        `cat() { echo x; }; git commit -m "$(cat <<'EOF'\nHooks\nEOF\n)"`,
+      ],
+      [
+        'cat after an eval',
+        `eval "$X"; git commit -m "$(cat <<'EOF'\nHooks\nEOF\n)"`,
+      ],
+    ])('leaves %s unknown', (_, text) => {
+      expect(word(text).known).toBe(false)
+    })
+
+    it('fills a variable the line assigned from it', () => {
+      const parsed = parse(
+        `M="$(cat <<'EOF'\nHooks\nEOF\n)"; git commit -m "$M"`,
+      )
+      const commit = find(parsed, 'git', 'commit')
+      expect(commit.argv[3]).toBe('Hooks')
+      expect(commit.known[3]).toBe(true)
+    })
+
+    it('trusts one inside a heredoc only while cat is the program', () => {
+      const body = `gh issue comment 5 -F - <<EOF\n$(cat <<'X'\nRecado\nX\n)\nEOF`
+      const plain = find(parse(body), 'gh')
+      expect(plain.stdin).toBe('Recado\n')
+      expect(plain.stdinKnown).toBe(true)
+      const redefined = find(parse(`cat() { echo x; }; ${body}`), 'gh')
+      expect(redefined.stdinKnown).toBe(false)
+    })
+
+    it('keeps the raw text of one it does not trust, $ and all', () => {
+      const parsed = parse(
+        `cat() { echo x; }; GH_REPO="$(cat <<'EOF'\na/b\nEOF\n)" gh issue view`,
+      )
+      expect(find(parsed, 'gh').env.GH_REPO).toMatch(/^"\$\(cat/)
+    })
   })
 
   it('runs a substitution inside an unquoted heredoc body', () => {
@@ -1170,5 +1272,263 @@ describe('variables the line assigns', () => {
     // the value the prefix gives it.
     const parsed = parse('if :; then R=a; fi; R=b bash -c "echo $R"')
     expect(parsed.commands.at(-1)?.known).toEqual([true, false])
+  })
+})
+
+describe('an assignment after a && chain that cannot fail (Copilot review of #26, third round)', () => {
+  let dir: string
+  beforeAll(() => {
+    dir = realpathSync.native(mkdtempSync(path.join(tmpdir(), 'shell-chain-')))
+  }, setupTimeout)
+  afterAll(() => rmSync(dir, { recursive: true, force: true }))
+
+  const fileOf = (text: string) => {
+    const commit = find(parse(text), 'git', 'commit')
+    return { value: commit.argv[3], known: commit.known[3] }
+  }
+
+  it.each([
+    [
+      'after cd to a directory that exists',
+      (d: string) => `cd "${d}" && S=/tmp/s`,
+    ],
+    [
+      'after another assignment and a cd',
+      (d: string) => `A=1 && cd ${d} && S=/tmp/s`,
+    ],
+  ])('fills a variable assigned %s, for the lines after it', (_, head) => {
+    const text = `${head(dir)} && cat > "$S/m.txt" <<'EOF'\nHooks\nEOF\ngit commit -F "$S/m.txt"`
+    expect(fileOf(text)).toEqual({ value: '/tmp/s/m.txt', known: true })
+  })
+
+  it.each([
+    [
+      'after a cd to a directory that does not exist',
+      'cd /nao/existe && S=/tmp/s',
+    ],
+    ['after a relative cd', 'cd sub && S=/tmp/s'],
+    ['after a command that may fail', 'false && S=/tmp/s'],
+    ['after ||', `cd ${'/'} || S=/tmp/s`],
+    ['after a subshell', '(cd /) && S=/tmp/s'],
+    ['after a pipeline', 'cd / | cat && S=/tmp/s'],
+    ['after an assignment of a substitution', 'A=$(false) && S=/tmp/s'],
+  ])('leaves a variable assigned %s unknown', (_, head) => {
+    expect(fileOf(`${head}\ngit commit -F "$S/m.txt"`).known).toBe(false)
+  })
+})
+
+describe('an assignment certain for the rest of its && list (Copilot review of #26, third round)', () => {
+  const targetOf = (text: string) => {
+    const command = find(parse(text), 'npm')
+    return command.redirs?.[0]?.target
+  }
+
+  it('fills a variable for the commands after it in the same && list', () => {
+    expect(
+      targetOf('git commit -m x && SP=/tmp/sp && npm run check > $SP/c.log'),
+    ).toEqual({ value: '/tmp/sp/c.log', known: true })
+    expect(
+      targetOf('false && SP=/tmp/sp &&\n  npm run check > "$SP/c.log"'),
+    ).toEqual({ value: '/tmp/sp/c.log', known: true })
+  })
+
+  it.each([
+    ['after the list', 'false && SP=/tmp/sp; npm run check > $SP/c.log'],
+    ['after ||', 'false && SP=/tmp/sp || npm run check > $SP/c.log'],
+    [
+      'past a command that assigns it again',
+      'false && SP=/tmp/sp && read SP && npm run check > $SP/c.log',
+    ],
+    ['in a pipeline', 'false && SP=/tmp/sp | npm run check > $SP/c.log'],
+  ])('leaves it unknown %s', (_, text) => {
+    expect(targetOf(text)?.known).toBe(false)
+  })
+})
+
+describe('IFS in the environment of read (Copilot review of #26, third round)', () => {
+  it('keeps the variables of the line after `while IFS= read -r f`', () => {
+    const parsed = parse(
+      'S=/tmp/s\n( while IFS= read -r f; do echo "$f"; done < x ); rm -rf "$S/copy"',
+    )
+    expect(find(parsed, 'rm').argv[2]).toBe('/tmp/s/copy')
+    expect(find(parsed, 'rm').known[2]).toBe(true)
+  })
+
+  it.each([
+    ['read of IFS itself', 'S=/tmp/s; read IFS; rm -rf "$S/copy"'],
+    ['IFS assigned alone', 'S=/tmp/s; IFS=:; rm -rf "$S/copy"'],
+    ['IFS before another program', 'S=/tmp/s; IFS=: eval x; rm -rf "$S/copy"'],
+    // A special builtin keeps an assignment before it, in POSIX sh.
+    ['IFS before a special builtin', 'S=/tmp/s; IFS=/ :; rm -rf "$S/copy"'],
+  ])('still stops filling after %s', (_, text) => {
+    expect(find(parse(text), 'rm').known[2]).toBe(false)
+  })
+})
+
+describe('a for loop over values written in full (Copilot review of #26, third round)', () => {
+  /** argv and known of every command `head` of the line. */
+  const each = (text: string, head: string) =>
+    parse(text)
+      .commands.filter((command) => command.argv[0] === head)
+      .map((command) =>
+        command.argv.map((value, index) => [value, command.known[index]]),
+      )
+
+  it('reads the body once per value, with the variable filled in', () => {
+    const parsed = parse(
+      'S=/tmp/s; for i in 1 2; do npx vitest run > "$S/vitest-$i.txt" 2>&1; done',
+    )
+    expect(
+      parsed.commands.map((command) => command.redirs?.[0]?.target),
+    ).toEqual([
+      { value: '/tmp/s/vitest-1.txt', known: true },
+      { value: '/tmp/s/vitest-2.txt', known: true },
+    ])
+  })
+
+  it('fills in the values from variables the line assigned', () => {
+    expect(
+      each('S=/tmp/s; for f in "$S/a" $S/b; do rm "$f"; done', 'rm'),
+    ).toEqual([
+      [
+        ['rm', true],
+        ['/tmp/s/a', true],
+      ],
+      [
+        ['rm', true],
+        ['/tmp/s/b', true],
+      ],
+    ])
+  })
+
+  it('reads nested loops, a subshell and a cd in the body', () => {
+    expect(
+      argvs(
+        'for k in a b; do for j in c d; do echo "$k$j"; done; ( cd "$k" && echo "$k" ); done',
+      ),
+    ).toEqual([
+      ['echo', 'ac'],
+      ['echo', 'ad'],
+      ['cd', 'a'],
+      ['echo', 'a'],
+      ['echo', 'bc'],
+      ['echo', 'bd'],
+      ['cd', 'b'],
+      ['echo', 'b'],
+    ])
+    const moved = parse('for d in x y; do ( cd "$d" && git push ); done')
+    expect(
+      moved.commands
+        .filter((command) => command.argv[0] === 'git')
+        .map((command) => command.cwd),
+    ).toEqual(['x', 'y'])
+  })
+
+  it('reads a loop inside if, and one written over lines', () => {
+    expect(argvs('if true; then for k in a b; do echo $k; done; fi')).toEqual([
+      ['true'],
+      ['echo', 'a'],
+      ['echo', 'b'],
+    ])
+    expect(argvs('for k in a b\ndo\n  echo $k\ndone')).toEqual([
+      ['echo', 'a'],
+      ['echo', 'b'],
+    ])
+  })
+
+  it('carries into the body a variable the header’s && list assigned, unless the body assigns it', () => {
+    const line = (body: string) =>
+      `git fetch && S=/tmp/s && for n in 1 2; do ${body}; done`
+    expect(
+      parse(line('gh api x > "$S/a-$n.json"')).commands.map(
+        (command) => command.redirs?.[0]?.target,
+      ),
+    ).toEqual([
+      undefined,
+      { value: '/tmp/s/a-1.json', known: true },
+      { value: '/tmp/s/a-2.json', known: true },
+    ])
+    for (const body of ['S=/y; cp a "$S/$n"', 'cp a "$S/$n"; S=/y'])
+      expect(each(line(body), 'cp').map((words) => words[2])).toEqual([
+        ['$S/$n', false],
+        ['$S/$n', false],
+      ])
+  })
+
+  it('binds the variable when the body only hands NAME=… to a program', () => {
+    expect(argvs('for n in 12 13; do gh api graphql -F n=$n; done')).toEqual([
+      ['gh', 'api', 'graphql', '-F', 'n=12'],
+      ['gh', 'api', 'graphql', '-F', 'n=13'],
+    ])
+  })
+
+  it('leaves the variable unknown after the loop', () => {
+    expect(each('for k in a b; do :; done; echo $k', 'echo')).toEqual([
+      [
+        ['echo', true],
+        ['$k', false],
+      ],
+    ])
+  })
+
+  it.each([
+    ['a glob', 'for k in *.md; do echo "$k"; done'],
+    ['a brace expansion', 'for k in {a,b}; do echo "$k"; done'],
+    ['a value with a blank', 'for k in a "b c"; do echo "$k"; done'],
+    ["zsh's ~ glob operator", 'for k in a~b; do echo "$k"; done'],
+    ["zsh's leading =", 'for k in =ls; do echo "$k"; done'],
+    ['a value behind an expansion', 'for k in a "$L"; do echo "$k"; done'],
+    ['a value from a substitution', 'for k in $(ls); do echo "$k"; done'],
+    [
+      'a value from a heredoc read',
+      `for k in "$(cat <<'E'\na\nE\n)"; do echo "$k"; done`,
+    ],
+    ['no list', 'for k; do echo "$k"; done'],
+    ['a body that reassigns it', 'for k in a b; do k=z; echo "$k"; done'],
+    ['a body that reads it', 'for k in a b; do read k; echo "$k"; done'],
+    ['a body that exports it', 'for k in a b; do export k=z; echo "$k"; done'],
+    [
+      'a body that declares it through command',
+      'for k in a b; do command declare k=z; echo "$k"; done',
+    ],
+    [
+      'an assignment before a command in the body',
+      'for k in a b; do k=z true; echo "$k"; done',
+    ],
+    [
+      'a body command whose name it cannot read',
+      'for k in a b; do "$C" k=z; echo "$k"; done',
+    ],
+    [
+      'a body that opens a descriptor into it',
+      'for k in a b; do exec {k}>saida; echo "$k"; done',
+    ],
+    [
+      'a nested loop over the same name',
+      'for k in a; do for k in b; do :; done; echo "$k"; done',
+    ],
+    [
+      'a function the body defines',
+      'for k in a; do f() { :; }; echo "$k"; done',
+    ],
+    ['an eval in the body', 'for k in a; do eval "$X"; echo "$k"; done'],
+    ['a name the shell changes', 'for RANDOM in a; do echo "$RANDOM"; done'],
+    ['IFS as the name', 'for IFS in a; do echo "$IFS"; done'],
+    ['no done closing it', '{ for k in a b; echo "$k"; }'],
+    ['an empty list', 'for k in; do echo "$k"; done'],
+  ])('reads the body once, the variable unknown, with %s', (_, text) => {
+    const echoes = each(text, 'echo')
+    expect(echoes).toHaveLength(1)
+    expect(echoes[0][1][1]).toBe(false)
+  })
+
+  it('reads a loop past the limit once, its variable unknown', () => {
+    const values = Array.from({ length: 600 }, (_, k) => k).join(' ')
+    expect(each(`for n in ${values}; do echo $n; done`, 'echo')).toEqual([
+      [
+        ['echo', true],
+        ['$n', false],
+      ],
+    ])
   })
 })

@@ -34,6 +34,15 @@ import { parseCommand, readBody } from './shell.mjs'
 const escapeRegExp = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
 /**
+ * What the hook cannot read (a message behind an expansion, a file it cannot
+ * open, a directory, a branch, a refspec, the config a push depends on)
+ * inside a rule that refuses what it can read: it asks, critical, so the
+ * modes where nobody is asked refuse it instead of letting it through
+ * unseen (Copilot review of #26, third round).
+ */
+const unread = (reason) => ask(reason, { critical: true })
+
+/**
  * The trailer, read the way GitHub reads it: `skip-checks: true` and
  * `skip-checks:true` both skip the runs, in any case. Built from the
  * contract's text, so the two cannot drift apart. It is matched anywhere in
@@ -601,37 +610,55 @@ function trailerLine(value) {
     : `${value.slice(0, at).trim()}: ${value.slice(at + 1).trim()}`
 }
 
+/** The options whose value lands in the message git writes. */
+const messageParts = new Set([
+  '-m',
+  '--message',
+  '--into-name',
+  '--trailer',
+  '-F',
+  '--file',
+])
+
 /**
  * A commit message carrying a skip string, for `commit` and `merge`, which
  * both write a commit (Copilot review of #26: merge was left out). The
  * message is every `-m` and `--message` (git joins them as paragraphs),
  * every `-F`/`--file`, read relative to the command's directory, `-` being
  * stdin, every `--trailer` (commit) and `--into-name` (merge, whose name git
- * writes into the message). A message that cannot be read (an expansion, a
- * file that is not there, an editor, the subjects `--log` pulls in) is not
- * refused on its own: a skip string is rare, and asking on every `-m "$msg"`
- * would teach the person to click through. That is a known limit.
+ * writes into the message). A part the hook cannot read (an expansion, a
+ * file that is not there, a stdin that is a pipe) asks, critical: it may
+ * hold a skip string (Copilot review of #26, third round). The forms a
+ * session writes stay readable: a literal `-m`, `-F -` with a heredoc,
+ * `-m "$(cat <<'EOF' … EOF)"` and a variable the line assigned. The editor
+ * is editorDecision's. The subjects `--log` pulls in are not read: a
+ * documented limit.
  */
 function commitMessage(command, argv, dir, from, files, { spec, what }) {
   const { options } = readGitArgs(argv, from, spec)
+  const unknown = []
   for (const option of options) {
-    let text = null
-    if (option.value === null || !wordKnown(command, option.index)) text = null
-    else if (
-      option.name === '-m' ||
-      option.name === '--message' ||
-      option.name === '--into-name'
-    )
-      text = option.value
-    else if (option.name === '--trailer') text = trailerLine(option.value)
+    if (!messageParts.has(option.name) || option.value === null) continue
+    let read = { known: wordKnown(command, option.index), text: option.value }
+    if (!read.known) read = { known: false, text: null }
+    else if (option.name === '--trailer')
+      read = { known: true, text: trailerLine(option.value) }
     else if (option.name === '-F' || option.name === '--file')
-      text = readSource(command, dir, option.value, true, files).text
-    const token = skipTokenIn(text)
+      read = readSource(command, dir, option.value, true, files)
+    if (!read.known) {
+      unknown.push(option.value)
+      continue
+    }
+    const token = skipTokenIn(read.text)
     if (token !== null)
       return deny(
         `${what} traz "${token}", que faz o GitHub pular os checks do push e do merge: tire-o da mensagem`,
       )
   }
+  if (unknown.length > 0)
+    return unread(
+      `não consegui ler ${what} (${unknown.map((value) => `"${value.length > 60 ? `${value.slice(0, 59)}…` : value}"`).join(', ')}): confira que ali não há um texto que faz o GitHub pular os checks, ou escreva a mensagem no comando (-m "…", -F - com heredoc, -F arquivo)`,
+    )
   return pass()
 }
 
@@ -703,7 +730,7 @@ function copiedSkip(texts, what, where) {
 }
 
 const unreadCopy = (what, why) =>
-  ask(
+  unread(
     `não consegui ler ${what} (${why}): confira que ali não há um texto que faz o GitHub pular os checks`,
   )
 
@@ -944,7 +971,7 @@ function amDecision(command, g, files) {
  * `-c`/`--reedit-message` take its whole message, `--fixup` and `--squash`
  * its subject (`fixup! <subject>`), `--fixup=amend:` and `reword:` the whole
  * message, and `--amend` with no message of its own keeps HEAD's. The
- * editor, which may change any of them, is the documented limit.
+ * editor, which may change any of them, is editorDecision's.
  */
 function commitSources(command, g, env) {
   const { options } = readGitArgs(g.argv, g.at + 1, commitSpec)
@@ -998,10 +1025,10 @@ function commitSources(command, g, env) {
 /**
  * A commit whose message comes from elsewhere carrying a skip string
  * (Copilot review of #26): cherry-pick and revert copy it from the commits
- * they name, am from the patch, and git commit from a commit it names. Unlike
- * a message on the line, one that cannot be read asks: the source is a
- * commit or a file the line names, not text the person typed, and asking
- * costs only the rare line that names it through an expansion.
+ * they name, am from the patch, and git commit from a commit it names. Like
+ * a message on the line, one that cannot be read asks, critical (third
+ * round): the source is a commit or a file the line names, and asking costs
+ * only the rare line that names it through an expansion.
  */
 function copiedMessage(command, g, sub, env, files) {
   if (sub === 'cherry-pick' || sub === 'revert')
@@ -1009,6 +1036,93 @@ function copiedMessage(command, g, sub, env, files) {
   if (sub === 'am') return amDecision(command, g, files)
   if (sub === 'commit') return commitSources(command, g, env)
   return pass()
+}
+
+/** Editors that leave the message as git prepared it. */
+const noopEditors = new Set(['true', ':'])
+
+/**
+ * Whether the editor git would run writes nothing: GIT_EDITOR, or else the
+ * command's own `-c core.editor`, is `true` or `:`. Any other editor (the
+ * config's, VISUAL, EDITOR, vi) may write anything.
+ */
+function editorWritesNothing(g, env) {
+  const named =
+    typeof env.GIT_EDITOR === 'string'
+      ? { value: env.GIT_EDITOR, known: true }
+      : g.config
+          .filter((entry) => keyOf(entry.pair).key === 'core.editor')
+          .map((entry) => ({
+            value: entry.pair.slice(entry.pair.indexOf('=') + 1),
+            known: entry.known && entry.pair.includes('='),
+          }))
+          .at(-1)
+  return (
+    named !== undefined &&
+    named.known &&
+    !/[$`]/.test(named.value) &&
+    noopEditors.has(named.value.trim())
+  )
+}
+
+/** The editor flags of each subcommand, the last one winning. */
+const editorSpecs = {
+  commit: {
+    ...commitSpec,
+    watch: [...commitSpec.watch, '--edit', '--no-edit'],
+  },
+  merge: { ...mergeSpec, watch: ['--edit', '--no-edit'] },
+  'cherry-pick': pickSpec,
+  revert: pickSpec,
+}
+
+/**
+ * Whether git opens an editor for the message of the commit it makes, as
+ * git 2.50 does with no terminal (the hook's commands have none). git
+ * commit opens one unless the line gives the message (-m, -F, -C), a plain
+ * --fixup or --no-edit, and always with -e, -c (--reedit-message) and a
+ * `--fixup=amend:` or `reword:`; --squash and -t alone open one. git merge
+ * opens one only with -e, GIT_MERGE_AUTOEDIT=yes or --continue (which runs
+ * git commit); cherry-pick and revert only with -e.
+ */
+function opensEditor(g, sub, env) {
+  const spec = editorSpecs[sub]
+  if (spec === undefined) return false
+  const { options } = readGitArgs(g.argv, g.at + 1, spec)
+  const names = options.map((option) => option.name)
+  if (names.some((name) => leaving.has(name))) return false
+  const flag = names
+    .filter((name) => ['-e', '--edit', '--no-edit'].includes(name))
+    .at(-1)
+  if (flag !== undefined) return flag !== '--no-edit'
+  if (sub === 'merge')
+    return (
+      names.includes('--continue') ||
+      String(env.GIT_MERGE_AUTOEDIT ?? '').toLowerCase() === 'yes'
+    )
+  if (sub !== 'commit') return false
+  if (names.some((name) => ['-c', '--reedit-message'].includes(name)))
+    return true
+  // A plain --fixup writes `fixup! <subject>` with no editor.
+  const fixup = options.filter((option) => option.name === '--fixup').at(-1)
+  if (fixup !== undefined)
+    return /^(?:amend|reword):/.test(String(fixup.value ?? ''))
+  return !names.some((name) =>
+    ['-m', '--message', '-F', '--file', '-C', '--reuse-message'].includes(name),
+  )
+}
+
+/**
+ * The message an editor writes (Copilot review of #26, third round: gh pr
+ * create --editor asks, critical, and so does this): it may carry a skip
+ * string, and the hook cannot read it. An editor that writes nothing
+ * (GIT_EDITOR=true) leaves the message the other rules read.
+ */
+function editorDecision(g, sub, env) {
+  if (!opensEditor(g, sub, env) || editorWritesNothing(g, env)) return pass()
+  return unread(
+    `o git ${sub} abre um editor para a mensagem, e o hook não lê o que ele escreve: confira que ali não há um texto que faz o GitHub pular os checks, ou dê a mensagem no comando (-m "…", -F - com heredoc, --no-edit) ou rode com GIT_EDITOR=true`,
+  )
 }
 
 // ---------------------------------------------------------------------------
@@ -1049,7 +1163,7 @@ function destinationOf(refspec, branch) {
 
 function refspecDecision(value, known, repo, deleting, where = '') {
   if (!known)
-    return ask(
+    return unread(
       `não consegui ler o destino do push em "${value}": confira que não é ${trunk}`,
     )
   if (deleting)
@@ -1062,7 +1176,7 @@ function refspecDecision(value, known, repo, deleting, where = '') {
       `${pushToTrunk} (o refspec "${value}"${where} empurra as branches de mesmo nome, ${trunk} junto)`,
     )
   if (destination.viaHead && repo.branchKnown === false)
-    return ask(
+    return unread(
       `não consegui saber qual branch o refspec "${value}" empurra: ${headMoved}; confira que não é ${trunk}`,
     )
   if (destination.target !== null && reachesTrunk(destination.target))
@@ -1106,23 +1220,55 @@ function defaultRemote(config, branch) {
 const isTrue = (value) =>
   ['true', 'yes', 'on', '1'].includes(String(value ?? '').toLowerCase())
 
+/**
+ * A push, judged as git reads it and, with `--repo`, as a reader could take
+ * it (Copilot review of #26, third round). git takes the first operand as
+ * the repository even when `--repo` names one, and the rest as refspecs
+ * (measured on git 2.50: `git push --repo <url> HEAD:main` pushes to a
+ * remote named `HEAD:main`, and fails). A reader takes `--repo` as the
+ * repository and every operand as a refspec. Both readings are judged and
+ * the worst wins: the first is what runs, and the second is what the line
+ * says, so neither can let a push to main through.
+ */
 function pushDecision(command, g, repo, env) {
   const { options, operands } = readGitArgs(g.argv, g.at + 1, pushSpec)
-  const has = (name) => options.some((option) => option.name === name)
   let config = null
   const readConfig = () => {
     config ??= configOf(g, env)
     return config
   }
-
-  // Where the push lands: the remote (or URL) named, `--repo`, or the
-  // remote git picks. A remote that cannot be read may be this project.
   const repoOption = options.filter((option) => option.name === '--repo').at(-1)
-  const remoteWord =
-    operands[0] ??
-    (repoOption?.value != null
+  const named =
+    repoOption?.value != null
       ? { value: repoOption.value, index: repoOption.index }
-      : undefined)
+      : undefined
+  const readings = [
+    operands.length > 0
+      ? { remoteWord: operands[0], refspecs: operands.slice(1) }
+      : { remoteWord: named, refspecs: [] },
+  ]
+  if (named !== undefined && operands.length > 0)
+    readings.push({ remoteWord: named, refspecs: operands })
+  return combine(
+    readings.map((reading) =>
+      pushReading(command, g, repo, env, options, reading, readConfig),
+    ),
+  )
+}
+
+function pushReading(
+  command,
+  g,
+  repo,
+  env,
+  options,
+  { remoteWord, refspecs },
+  readConfig,
+) {
+  const has = (name) => options.some((option) => option.name === name)
+
+  // Where the push lands: the remote (or URL) named, or the remote git
+  // picks. A remote that cannot be read may be this project.
   let remote = null
   let target = { known: false }
   if (remoteWord !== undefined) {
@@ -1147,7 +1293,6 @@ function pushDecision(command, g, repo, env) {
     return deny(`${pushToTrunk} (--mirror empurra ${trunk} junto)`)
   const deleting = has('--delete') || has('-d')
 
-  const refspecs = operands.slice(1)
   if (refspecs.length > 0)
     return combine(
       refspecs.map((refspec) =>
@@ -1163,7 +1308,7 @@ function pushDecision(command, g, repo, env) {
   // No refspec: git's config decides what goes, and where.
   const read = readConfig()
   if (!read.known)
-    return ask(
+    return unread(
       `não consegui ler a configuração que decide o destino do push: confira que ele não vai para ${trunk}`,
     )
   if (remote !== null && isTrue(read.get(`remote.${remote}.mirror`)))
@@ -1184,7 +1329,7 @@ function pushDecision(command, g, repo, env) {
       ),
     )
   if (repo.branchKnown === false)
-    return ask(
+    return unread(
       `não consegui saber qual branch o push leva: ${headMoved}; confira que não é ${trunk}`,
     )
   if (repo.branch === trunk)
@@ -1206,7 +1351,7 @@ function pushDecision(command, g, repo, env) {
       : pass()
   }
   if (['simple', 'current', 'nothing'].includes(mode)) return pass()
-  return ask(
+  return unread(
     `push.default=${mode} não é um modo que o hook conheça: confira que o push não vai para ${trunk}`,
   )
 }
@@ -1239,7 +1384,7 @@ export function gitDecision(command, ctx) {
   const argv = g.argv
   if (g.at >= argv.length) return pass()
   if (sub === null)
-    return ask(
+    return unread(
       `não consegui ler o subcomando do git em "${argv[g.at]}": confira que não é um commit ou um push em ${trunk}`,
     )
   const via = (resolved.via ?? [])
@@ -1260,7 +1405,7 @@ function decide({ command, g, sub, alias }, ctx, env) {
       shell: `o alias ${sub} do git roda um comando de shell que o hook não confere ("${alias.value}"): confira que ele não faz commit nem push em ${trunk}`,
       unreadable: `não consegui ler o alias ${sub} do git ("${alias.value}"): confira que ele não faz commit nem push em ${trunk}`,
     }
-    return ask(reasons[alias.stop])
+    return unread(reasons[alias.stop])
   }
   if (!gitCommands.has(sub)) {
     // No alias either: a word git does not know in the subcommand's place is
@@ -1274,7 +1419,7 @@ function decide({ command, g, sub, alias }, ctx, env) {
       )
     return later === undefined
       ? pass()
-      : ask(
+      : unread(
           `não reconheci "${sub}" como subcomando nem alias do git, e o comando cita ${later}: confira que não é um commit ou um push em ${trunk}`,
         )
   }
@@ -1289,7 +1434,7 @@ function decide({ command, g, sub, alias }, ctx, env) {
     ctx.cwdKnown === false ||
     !existsSync(g.dir)
   )
-    return ask(
+    return unread(
       `não consegui ler o diretório em que o git ${sub} roda: confira que não é ${trunk}`,
     )
   const repo = ctx.repoAt(g.gitDir ?? g.dir)
@@ -1303,7 +1448,7 @@ function decide({ command, g, sub, alias }, ctx, env) {
   if (!rest.some((arg) => leaving.has(arg))) {
     if (repo.branchKnown === false)
       decisions.push(
-        ask(
+        unread(
           `não consegui saber em que branch o git ${sub} roda: ${headMoved}; confira que não é ${trunk}`,
         ),
       )
@@ -1314,6 +1459,7 @@ function decide({ command, g, sub, alias }, ctx, env) {
       commitMessage(command, argv, g.dir, g.at + 1, ctx.files, messages[sub]),
     )
   decisions.push(copiedMessage(command, g, sub, env, ctx.files))
+  decisions.push(editorDecision(g, sub, env))
   return combine(decisions)
 }
 

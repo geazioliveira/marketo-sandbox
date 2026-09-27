@@ -334,9 +334,12 @@ describe('comment openings (gh issue comment)', () => {
     ['a pipe on stdin', 'cat corpo.md | gh issue comment 5 -F -'],
     ['the editor', 'gh issue comment 5 --editor'],
     ['the browser', 'gh issue comment 5 --web'],
-  ])('asks, not critical, when the body is %s', async (_, text) => {
-    expectAsk(await judge(text), { reason: unreadBody })
-  })
+  ])(
+    'asks, critical, when the body is %s (Copilot review of #26, third round)',
+    async (_, text) => {
+      expectAsk(await judge(text), { critical: true, reason: unreadBody })
+    },
+  )
 
   it('asks for --edit-last even with an ordinary body', async () => {
     expectAsk(await judge('gh issue comment 5 --edit-last -b "Corrigido."'), {
@@ -402,8 +405,9 @@ describe('gh issue create', () => {
     )
   })
 
-  it('asks when a label cannot be read', async () => {
+  it('asks, critical, when a label cannot be read', async () => {
     expectAsk(await judge('gh issue create -t T -b c -l "$LABEL"'), {
+      critical: true,
       reason: /não consegui ler as labels/,
     })
   })
@@ -415,8 +419,9 @@ describe('gh issue create', () => {
     )
   })
 
-  it('asks for --recover', async () => {
+  it('asks, critical, for --recover', async () => {
     expectAsk(await judge('gh issue create --recover rascunho.json'), {
+      critical: true,
       reason: /--recover/,
     })
   })
@@ -540,9 +545,10 @@ describe('gh issue edit: the label rule and its one exception', () => {
     expectDeny(await judge(transition, { github }), /não tem comentário/)
   })
 
-  it('asks, not critical, when the read fails', async () => {
+  it('asks, critical, when the read fails', async () => {
     const github = stub({ issueState: failure() })
     expectAsk(await judge(transition, { github }), {
+      critical: true,
       reason:
         /não consegui confirmar que a issue está em needs-triage com um # Plano como último comentário/,
     })
@@ -553,6 +559,7 @@ describe('gh issue edit: the label rule and its one exception', () => {
       issueState: issueAnswer({ labels: ['bug'], labelsComplete: false }),
     })
     expectAsk(await judge(transition, { github }), {
+      critical: true,
       reason: /mais labels do que uma página/,
     })
   })
@@ -564,8 +571,9 @@ describe('gh issue edit: the label rule and its one exception', () => {
     expectPass(await judge('gh issue edit 5 --title "Título novo"'))
   })
 
-  it('asks when a label cannot be read and no state label is named', async () => {
+  it('asks, critical, when a label cannot be read and no state label is named', async () => {
     expectAsk(await judge('gh issue edit 5 --add-label "$L"'), {
+      critical: true,
       reason: /não consegui ler as labels/,
     })
   })
@@ -604,7 +612,7 @@ describe('gh label on a state label (spec silent)', () => {
 
   it('passes a label that is no state label, and asks for one it cannot read', async () => {
     expectPass(await judge('gh label edit bug --color ff0000'))
-    expectAsk(await judge('gh label delete "$L" --yes'))
+    expectAsk(await judge('gh label delete "$L" --yes'), { critical: true })
   })
 
   it('denies the same through the API', async () => {
@@ -718,11 +726,13 @@ describe('gh pr create', () => {
     )
   })
 
-  it('asks, not critical, when the body cannot be read', async () => {
+  it('asks, critical, when the body cannot be read', async () => {
     expectAsk(await judge('gh pr create -t T -F /nao/existe.md'), {
+      critical: true,
       reason: /não consegui ler o corpo da PR/,
     })
     expectAsk(await judge('gh pr create -t T -b "$CORPO"'), {
+      critical: true,
       reason: /não consegui ler o corpo da PR/,
     })
   })
@@ -933,7 +943,7 @@ describe('gh api (REST)', () => {
         await judge(`gh api ${repoPath}/issues/5/labels --input nada.json`, {
           cwd: dir,
         }),
-        { reason: /não consegui ler as labels/ },
+        { critical: true, reason: /não consegui ler as labels/ },
       )
     } finally {
       rmSync(dir, { recursive: true, force: true })
@@ -981,7 +991,7 @@ describe('gh api (REST)', () => {
     )
     expectAsk(
       await judge(`gh api ${repoPath}/issues/5/comments -F body=@/nao/existe`),
-      { reason: unreadBody },
+      { critical: true, reason: unreadBody },
     )
   })
 
@@ -1042,8 +1052,9 @@ describe('gh api (REST)', () => {
     )
   })
 
-  it('asks when a write names no readable endpoint', async () => {
+  it('asks, critical, when a write names no readable endpoint', async () => {
     expectAsk(await judge('gh api "$URL" -f body=x'), {
+      critical: true,
       reason: /endpoint do gh api/,
     })
   })
@@ -1156,8 +1167,9 @@ describe('gh api graphql', () => {
     }
   })
 
-  it('asks when the query cannot be read', async () => {
+  it('asks, critical, when the query cannot be read', async () => {
     expectAsk(await judge('gh api graphql -f query="$Q"'), {
+      critical: true,
       reason: /não consegui ler a query GraphQL/,
     })
   })
@@ -1281,12 +1293,12 @@ describe('gh api graphql', () => {
     )
   })
 
-  it('asks when the updatePullRequest body cannot be read', async () => {
+  it('asks, critical, when the updatePullRequest body cannot be read', async () => {
     expectAsk(
       await judge(
         'gh api graphql -f query=\'mutation($b: String!) { updatePullRequest(input: {pullRequestId: "PR_1", body: $b}) { clientMutationId } }\' -f b="$CORPO"',
       ),
-      { reason: /não consegui ler o novo corpo da PR/ },
+      { critical: true, reason: /não consegui ler o novo corpo da PR/ },
     )
   })
 
@@ -1334,12 +1346,13 @@ describe('gh api graphql', () => {
       expectDeny(await judge(resolve(), { github }), /uma conta apagada/)
     })
 
-    it('asks when a read fails', async () => {
+    it('asks, critical, when a read fails', async () => {
       expectAsk(
         await judge(resolve(), {
           github: stub({ threadLastAuthor: failure() }),
         }),
         {
+          critical: true,
           reason:
             /não consegui confirmar que a última resposta da thread é sua/,
         },
@@ -1351,7 +1364,7 @@ describe('gh api graphql', () => {
             viewer: failure(),
           }),
         }),
-        { reason: /não consegui confirmar/ },
+        { critical: true, reason: /não consegui confirmar/ },
       )
     })
 
@@ -1369,8 +1382,9 @@ describe('gh api graphql', () => {
       expect(github.calls[0]).toEqual(['threadLastAuthor', 'PRRT_9'])
     })
 
-    it('asks when the thread id cannot be read', async () => {
+    it('asks, critical, when the thread id cannot be read', async () => {
       expectAsk(await judge(resolve('$missing')), {
+        critical: true,
         reason: /não consegui ler a thread/,
       })
     })
@@ -1448,11 +1462,12 @@ describe('which repository a gh command acts on', () => {
     expectPass(await judge('gh issue reopen 5', { repo: null }))
   })
 
-  it('asks when the subcommand cannot be read', async () => {
+  it('asks, critical, when the subcommand cannot be read', async () => {
     expectAsk(await judge('gh "$GRUPO" edit 5'), {
+      critical: true,
       reason: /não consegui ler o subcomando do gh/,
     })
-    expectAsk(await judge('gh issue "$VERBO" 5'))
+    expectAsk(await judge('gh issue "$VERBO" 5'), { critical: true })
   })
 })
 
@@ -2130,6 +2145,7 @@ describe('the directory and the environment a gh command runs in (review of #5)'
     expectAsk(
       await judge(`gh pr create --body 'Closes #5.'`, { repo: moved }),
       {
+        critical: true,
         reason: /não consegui ler a branch da PR/,
       },
     )
@@ -2145,6 +2161,7 @@ describe('the directory and the environment a gh command runs in (review of #5)'
     })
     expect(github.calls).toEqual([])
     expectAsk(await judge(`gh pr edit --body 'Closes #5.'`, { repo: moved }), {
+      critical: true,
       reason: /não consegui saber a branch da PR/,
     })
     expectPass(await judge(`gh pr edit 7 --body 'Closes #5.'`, { repo: moved }))
@@ -2174,7 +2191,7 @@ describe('the directory and the environment a gh command runs in (review of #5)'
       await judge('gh issue comment 5 --body-file b.md', {
         extra: { files: unknownFile },
       }),
-      { reason: unreadBody },
+      { critical: true, reason: unreadBody },
     )
   })
 })
@@ -2242,6 +2259,7 @@ describe('gh aliases (review of #5)', () => {
   }) => {
     const env = config(scratch(), aliases)
     expectAsk(await judge('gh g', { extra: { env } }), {
+      critical: true,
       reason: /o alias g do gh roda git/,
     })
     const judged: unknown[] = []
@@ -2263,6 +2281,7 @@ describe('gh aliases (review of #5)', () => {
   test('asks when gh’s config cannot be read', async ({ scratch }) => {
     const env = config(scratch(), '    x: [issue]\n  torto')
     expectAsk(await judge('gh x edit 5', { extra: { env } }), {
+      critical: true,
       reason: /não consegui ler os aliases do gh/,
     })
     expectPass(await judge('gh issue view 5', { extra: { env } }))
@@ -2285,6 +2304,7 @@ describe('gh aliases (review of #5)', () => {
       }),
     )
     expectAsk(await judge('gh u 5', { extra: { ghAliases } }), {
+      critical: true,
       reason: /não consegui ler o alias u do gh/,
     })
   })
@@ -2295,7 +2315,12 @@ describe('gh aliases (review of #5)', () => {
       /o alias k faria o que o hook confere/,
     )
     expectPass(await judge("gh alias set v - <<'EOF'\nissue view\nEOF"))
-    expectPass(await judge('cat x | gh alias set k -'))
+    // An expansion it cannot read (a pipe) asks, critical: it may be one
+    // the rule refuses (Copilot review of #26, third round).
+    expectAsk(await judge('cat x | gh alias set k -'), {
+      critical: true,
+      reason: /não consegui ler o que o alias k do gh roda/,
+    })
   })
 
   test('judges each alias gh alias import brings', async ({ scratch }) => {
@@ -2317,6 +2342,7 @@ describe('gh aliases (review of #5)', () => {
       /reabrir uma issue/,
     )
     expectAsk(await judge('gh alias import nao-existe.yml', { cwd: dir }), {
+      critical: true,
       reason: /não consegui ler os aliases que o gh alias import traz/,
     })
   })
@@ -2383,10 +2409,13 @@ describe('a repository it cannot read is never this project for a pass (Copilot 
     ['--repo= of a variable', `gh issue edit 5 "--repo=$REPO" ${transition}`],
     ['GH_REPO of a variable', `GH_REPO=$DESTINO gh issue edit 5 ${transition}`],
   ])(
-    'asks, not critical, before reading an issue named through %s',
+    'asks, critical, before reading an issue named through %s',
     async (_, text) => {
       const github = stub({ issueState: issueAnswer() })
-      expectAsk(await judge(text, { github }), { reason: unplaced })
+      expectAsk(await judge(text, { github }), {
+        critical: true,
+        reason: unplaced,
+      })
       expect(github.calls).toEqual([])
     },
   )
@@ -2398,14 +2427,14 @@ describe('a repository it cannot read is never this project for a pass (Copilot 
         github,
         extra: { cwdKnown: false },
       }),
-      { reason: unplaced },
+      { critical: true, reason: unplaced },
     )
     expectAsk(
       await judge(`gh issue edit 5 ${transition}`, {
         github,
         repo: { ...project(), remoteKnown: false },
       }),
-      { reason: unplaced },
+      { critical: true, reason: unplaced },
     )
     expect(github.calls).toEqual([])
   })
@@ -2502,7 +2531,7 @@ describe('a PR created through the API (Copilot review of #26)', () => {
       await judge(
         `gh api ${repoPath}/pulls -f head=${BRANCH} -f base=main -f body="$CORPO"`,
       ),
-      { reason: unreadPrBody },
+      { critical: true, reason: unreadPrBody },
     )
   })
 
@@ -2562,7 +2591,488 @@ describe('a PR created through the API (Copilot review of #26)', () => {
     )
     expectAsk(
       await judge(`gh api graphql -f head=${BRANCH} -f query='${query}'`),
-      { reason: unreadPrBody },
+      { critical: true, reason: unreadPrBody },
     )
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Third round of Copilot's review of #26
+
+describe('a value it cannot read asks, critical, where the rule would refuse (Copilot review of #26, third round)', () => {
+  const repoPath = `repos/${PROJECT}`
+
+  it.each([
+    [
+      'a label of gh issue create',
+      'gh issue create -t T -b corpo -l "$LABEL"',
+      /não consegui ler as labels do comando/,
+    ],
+    [
+      'the name of gh label edit',
+      'gh label edit "$LABEL" --color fff',
+      /não consegui ler as labels do comando/,
+    ],
+    [
+      'an added label of gh issue edit',
+      'gh issue edit 5 --add-label "$LABEL"',
+      /não consegui ler as labels do comando/,
+    ],
+    [
+      'the file gh issue create --recover restores',
+      'gh issue create --recover rascunho.json',
+      /--recover traz corpo e labels/,
+    ],
+    [
+      'the title of gh pr create',
+      `gh pr create --title "$TITLE" --body 'Closes #5.'`,
+      /não consegui ler o título da PR/,
+    ],
+    [
+      'the title of gh pr edit',
+      'gh pr edit 7 -t "$TITLE"',
+      /não consegui ler o título da PR/,
+    ],
+    [
+      'the --input of the labels endpoint',
+      `gh api ${repoPath}/issues/5/labels --input "$BODY"`,
+      /não consegui ler as labels do comando/,
+    ],
+    [
+      'the --input of a REST issue edit',
+      `gh api -X PATCH ${repoPath}/issues/5 --input "$BODY"`,
+      /não consegui ler o que o gh api muda na issue/,
+    ],
+    [
+      'the state of a REST issue edit',
+      `gh api -X PATCH ${repoPath}/issues/5 -f state="$STATE"`,
+      /não consegui ler o estado que o gh api põe na issue/,
+    ],
+    [
+      'the labels of a REST issue create',
+      `gh api ${repoPath}/issues -f title=T -f body=corpo -f 'labels[]'="$LABEL"`,
+      /não consegui ler as labels do comando/,
+    ],
+    [
+      'the name of a REST label create',
+      `gh api ${repoPath}/labels -f name="$LABEL" -f color=fff`,
+      /não consegui ler as labels do comando/,
+    ],
+    [
+      'the title of a REST pull request',
+      `gh api ${repoPath}/pulls -f head=feature/5-x -f base=main -f title="$TITLE" -f 'body=Closes #5.'`,
+      /não consegui ler o título da PR/,
+    ],
+    [
+      'the title of a REST pull request edit',
+      `gh api -X PATCH ${repoPath}/pulls/7 -f title="$TITLE"`,
+      /não consegui ler o título da PR/,
+    ],
+    [
+      'a GraphQL state sent by no variable',
+      `gh api graphql -f query='mutation($s: IssueState!) { updateIssue(input: {id: "I_1", state: $s}) { issue { id } } }'`,
+      /não consegui ler o estado que a mutation põe na issue/,
+    ],
+    [
+      'a GraphQL state behind an expansion',
+      `gh api graphql -f s="$STATE" -f query='mutation($s: IssueState!) { updateIssue(input: {id: "I_1", state: $s}) { issue { id } } }'`,
+      /não consegui ler o estado que a mutation põe na issue/,
+    ],
+    [
+      'a GraphQL title of updatePullRequest',
+      `gh api graphql -f t="$TITLE" -f query='mutation($t: String!) { updatePullRequest(input: {pullRequestId: "PR_1", title: $t}) { pullRequest { id } } }'`,
+      /não consegui ler o título da PR/,
+    ],
+    ['a comment body', 'gh issue comment 5 --body "$BODY"', unreadBody],
+    [
+      'the thread resolveReviewThread resolves',
+      `gh api graphql -f query='mutation($id: ID!) { resolveReviewThread(input: {threadId: $id}) { thread { id } } }'`,
+      /não consegui ler a thread que o resolveReviewThread resolve/,
+    ],
+    [
+      'the expansion of an alias being set',
+      'gh alias set x "$EXPANSAO"',
+      /não consegui ler o que o alias x do gh roda/,
+    ],
+    [
+      'the body of gh pr edit',
+      'gh pr edit 7 --body "$BODY"',
+      /não consegui ler o novo corpo da PR/,
+    ],
+    [
+      'the body of a REST pull request edit',
+      `gh api -X PATCH ${repoPath}/pulls/7 -f body="$BODY"`,
+      /não consegui ler o novo corpo da PR/,
+    ],
+    [
+      'a GraphQL call from an --input it cannot read',
+      'gh api graphql --input "$F"',
+      /não consegui ler a chamada GraphQL do gh api/,
+    ],
+    [
+      'the file gh pr create --recover restores, next to a readable body',
+      `gh pr create --recover f --title T --body 'Closes #5.'`,
+      /gh pr create --recover traz título e corpo/,
+    ],
+    [
+      'an earlier --body of gh pr create, which gh drops',
+      `gh pr create --title T --body "$X" --body 'Closes #5.'`,
+      /não consegui ler o corpo da PR para conferir que não traz/,
+    ],
+    [
+      'the aliases gh alias import reads from a pipe',
+      'cat x | gh alias import',
+      /não consegui ler os aliases que o gh alias import traz/,
+    ],
+    [
+      'an alias gh alias import brings and it cannot read',
+      "gh alias import - <<'EOF'\nm: [pr, merge]\nEOF",
+      /não consegui ler o alias m que o gh alias import traz/,
+    ],
+  ])('asks, critical, for %s', async (_, text, reason) => {
+    const github = stub()
+    expectAsk(await judge(text, { github }), { critical: true, reason })
+    expect(github.calls).toEqual([])
+  })
+
+  it('asks, critical, for a merge subject or body it cannot read, next to the live read', async () => {
+    const github = stub({ prMergeState: mergeAnswer() })
+    const decision = await judge(
+      'gh pr merge 7 --squash --subject "$SUBJECT"',
+      {
+        github,
+      },
+    )
+    expectAsk(decision, {
+      critical: true,
+      reason: /não consegui ler o assunto do merge/,
+    })
+    expect(decision.reason).toMatch(/confira antes do merge/)
+    const red = stub({
+      prMergeState: mergeAnswer({ checksOk: false, checksDetail: 'vermelho' }),
+    })
+    expectDeny(
+      await judge('gh pr merge 7 --squash --body "$BODY"', { github: red }),
+      /não está pronto/,
+    )
+  })
+
+  it('names the merge body it cannot read, next to the live read', async () => {
+    const github = stub({ prMergeState: mergeAnswer() })
+    expectAsk(
+      await judge('gh pr merge 7 --squash --body "$BODY"', { github }),
+      { critical: true, reason: /não consegui ler o corpo do merge/ },
+    )
+  })
+
+  describe('a gh api field whose key it cannot read', () => {
+    it.each([
+      [
+        'a REST issue edit',
+        `gh api -X PATCH ${repoPath}/issues/5 -f "$F"`,
+        /não consegui ler o que o gh api muda na issue/,
+      ],
+      [
+        'a REST issue edit, the key behind an expansion',
+        `gh api -X PATCH ${repoPath}/issues/5 -f "$K"=open`,
+        /não consegui ler o que o gh api muda na issue/,
+      ],
+      [
+        'the labels endpoint',
+        `gh api ${repoPath}/issues/5/labels -F "$K"=x`,
+        /não consegui ler as labels do comando/,
+      ],
+      [
+        'a REST issue create',
+        `gh api ${repoPath}/issues -f title=T -f body=corpo -f "$K"=x`,
+        /não consegui ler as labels do comando/,
+      ],
+      [
+        'a REST label create',
+        `gh api ${repoPath}/labels --raw-field "$K"=x`,
+        /não consegui ler as labels do comando/,
+      ],
+      [
+        'a REST comment',
+        `gh api ${repoPath}/issues/5/comments --field "$K"=x`,
+        unreadBody,
+      ],
+      [
+        'a GraphQL call',
+        'gh api graphql -f "$Q"',
+        /não consegui ler a chamada GraphQL do gh api/,
+      ],
+    ])(
+      'asks, critical, on %s: it may be state or labels (Copilot review of #26, third round)',
+      async (_, text, reason) => {
+        expectAsk(await judge(text), { critical: true, reason })
+      },
+    )
+
+    it('leaves alone a route whose body no rule reads, and a field gh refuses', async () => {
+      expectPass(await judge(`gh api -X GET ${repoPath}/issues -f "$K"=x`))
+      expectPass(
+        await judge(`gh api ${repoPath}/pulls/7/comments/9/replies -f "$K"=x`),
+      )
+      // A readable field with no `=` makes gh stop before any request.
+      expectPass(await judge(`gh api -X PATCH ${repoPath}/issues/5 -f state`))
+      // With --input, the fields go to the query string, not the body.
+      expectDeny(
+        await judge(
+          `gh api -X PATCH ${repoPath}/issues/5 --input - -f "$K"=x <<'EOF'\n{"state": "open"}\nEOF`,
+        ),
+        /reabrir uma issue/,
+      )
+    })
+  })
+
+  it('reads gh alias import with no file from its stdin, as gh does (Copilot review of #26, third round)', async () => {
+    expectDeny(
+      await judge("gh alias import <<'EOF'\nr: issue reopen 5\nEOF"),
+      /reabrir uma issue/,
+    )
+    expectPass(await judge("gh alias import <<'EOF'\nv: issue view\nEOF"))
+    expect(
+      gh.ghAliasDefinitions(
+        shell.parseCommand("gh alias import <<'EOF'\nx: issue\nEOF")
+          .commands[0],
+        { cwd: tmpdir() },
+      ),
+    ).toEqual([['x', { known: true, text: 'issue' }]])
+  })
+
+  it('asks, critical, for an alias it cannot follow to its end', async () => {
+    const chain = new Map(
+      Array.from({ length: 7 }, (_, k) => [
+        `a${k}`,
+        { known: true, text: `a${k + 1}` },
+      ]),
+    )
+    chain.set('a7', { known: true, text: 'issue view' })
+    expectAsk(await judge('gh a0 5', { extra: { ghAliases: chain } }), {
+      critical: true,
+      reason: /leva a aliases demais/,
+    })
+    const ghAliases = new Map([
+      ['t', { known: true, text: 'issue comment 5 --body "sem fim' }],
+      ['p', { known: true, text: '!$CMD issue list' }],
+    ])
+    expectAsk(await judge('gh t', { extra: { ghAliases } }), {
+      critical: true,
+      reason: /não consegui ler o alias t do gh \("/,
+    })
+    expectAsk(await judge('gh p', { extra: { ghAliases } }), {
+      critical: true,
+      reason: /roda um programa que o hook não consegue ler/,
+    })
+  })
+
+  it('asks, critical, when the live read of the label transition fails', async () => {
+    const github = stub({ issueState: failure() })
+    expectAsk(
+      await judge(
+        'gh issue edit 5 --remove-label needs-triage --add-label ready-for-human',
+        { github },
+      ),
+      { critical: true, reason: /não consegui confirmar que a issue está em/ },
+    )
+  })
+
+  it('asks, critical, for the transition in a repository it cannot read', async () => {
+    const github = stub({ issueState: issueAnswer() })
+    expectAsk(
+      await judge(
+        'gh issue edit 5 -R "$REPO" --remove-label needs-triage --add-label ready-for-human',
+        { github },
+      ),
+      {
+        critical: true,
+        reason: /não consegui ler em que repositório o comando troca/,
+      },
+    )
+    expect(github.calls).toEqual([])
+  })
+
+  it('asks, critical, for a title --fill takes from the commits', async () => {
+    expectAsk(await judge(`gh pr create --fill --body 'Closes #5.'`), {
+      critical: true,
+      reason: /--fill sem --title/,
+    })
+    expectPass(
+      await judge(`gh pr create --fill --title Hooks --body 'Closes #5.'`),
+    )
+  })
+
+  it('keeps a plain ask where the rule itself only asks', async () => {
+    expectAsk(await judge('gh issue edit 5 --body "Novo corpo, legível."'), {
+      reason: /editar o corpo da issue depois do Approve o revoga/,
+    })
+    expectAsk(await judge('gh issue comment 5 --edit-last -b "Recado."'), {
+      reason: /editar um comentário depois do Approve o revoga/,
+    })
+    expectAsk(await judge(`gh api -X DELETE ${repoPath}/issues/comments/9`), {
+      reason: /apagar um comentário depois do Approve o revoga/,
+    })
+  })
+
+  describe('the forms a session writes stay readable, and pass', () => {
+    it('reads a body in "$(cat <<\'EOF\' … EOF)"', async () => {
+      expectPass(
+        await judge(
+          `gh pr create --title "Hooks do loop" --body "$(cat <<'EOF'\nCloses #5.\n\nO resto.\nEOF\n)"`,
+        ),
+      )
+      expectPass(
+        await judge(
+          `gh issue comment 5 --body "$(cat <<'EOF'\nRecado com $5 e \`crases\`.\nEOF\n)"`,
+        ),
+      )
+      expectDeny(
+        await judge(
+          `gh issue comment 5 --body "$(cat <<'EOF'\n# Owner Approve\nEOF\n)"`,
+        ),
+        opening,
+      )
+      expectDeny(
+        await judge(
+          `gh pr create --title "Hooks" --body "$(cat <<'EOF'\nCloses #5.\n\n[skip ci]\nEOF\n)"`,
+        ),
+        /skip ci/,
+      )
+    })
+
+    test('reads a title and a body file the line assigned', async ({
+      scratch,
+    }) => {
+      const dir = scratch()
+      writeFileSync(path.join(dir, 'pr.md'), 'Closes #5.\n\nTexto.\n')
+      expectPass(
+        await judge(
+          `T='Hooks do loop'; P=${dir}/pr.md; gh pr create --title "$T" --body-file "$P"`,
+        ),
+      )
+      expectPass(await judge(`gh pr create --title T --body-file ${dir}/pr.md`))
+      expectPass(await judge(`gh issue comment 5 -F - <<'EOF'\nRecado.\nEOF`))
+    })
+  })
+})
+
+describe('the GitHub host a gh command talks to (Copilot review of #26, third round)', () => {
+  const transition = '--remove-label needs-triage --add-label ready-for-human'
+
+  it('passes the transition on another host without reading this project’s issue', async () => {
+    const github = stub()
+    expectPass(
+      await judge(
+        `GH_HOST=ghe.example.com GH_REPO=geazioliveira/marketo-sandbox gh issue edit 5 ${transition}`,
+        { github },
+      ),
+    )
+    expectPass(
+      await judge(
+        `GH_HOST=ghe.example.com gh issue edit 5 -R geazioliveira/marketo-sandbox ${transition}`,
+        { github },
+      ),
+    )
+    expect(github.calls).toEqual([])
+  })
+
+  it('reads GH_HOST inherited from the environment, for -R and for the remotes', async () => {
+    const github = stub()
+    const env = { GH_HOST: 'ghe.example.com' }
+    expectPass(
+      await judge(`gh issue edit 5 ${transition}`, { github, extra: { env } }),
+    )
+    expectPass(await judge('gh issue reopen 5', { github, extra: { env } }))
+    expectPass(
+      await judge('gh issue reopen 5 -R geazioliveira/marketo-sandbox', {
+        github,
+        extra: { env },
+      }),
+    )
+    expect(github.calls).toEqual([])
+  })
+
+  it('asks, critical, before any live read when GH_HOST cannot be read', async () => {
+    const github = stub({ issueState: issueAnswer() })
+    expectAsk(
+      await judge(`GH_HOST=$HOST gh issue edit 5 ${transition}`, { github }),
+      {
+        critical: true,
+        reason: /não consegui ler em que repositório o comando troca/,
+      },
+    )
+    expectAsk(
+      await judge(`gh issue edit 5 ${transition}`, {
+        github,
+        extra: { env: { GH_HOST: '$(cat /etc/host)' } },
+      }),
+      { critical: true },
+    )
+    expect(github.calls).toEqual([])
+    expectDeny(await judge('GH_HOST=$HOST gh issue reopen 5', { github }))
+  })
+
+  it.each([
+    ['-R', `GH_HOST=$HOST gh issue edit 5 -R ${PROJECT} ${transition}`],
+    [
+      'GH_REPO',
+      `GH_HOST=$HOST GH_REPO=${PROJECT} gh issue edit 5 ${transition}`,
+    ],
+  ])(
+    'asks, critical, for a repository named with %s on a host it cannot read: it may be github.com',
+    async (_, text) => {
+      const github = stub({ issueState: issueAnswer() })
+      expectAsk(await judge(text, { github }), {
+        critical: true,
+        reason: /não consegui ler em que repositório o comando troca/,
+      })
+      expect(github.calls).toEqual([])
+    },
+  )
+
+  it('reads github.com however gh spells it, on the command, GH_HOST or -R', async () => {
+    const github = stub({ issueState: issueAnswer() })
+    expectPass(
+      await judge(`GH_HOST=GitHub.com gh issue edit 5 ${transition}`, {
+        github,
+      }),
+    )
+    expect(github.calls).toEqual([['issueState', PROJECT, 5]])
+    for (const repo of [
+      'www.github.com/geazioliveira/marketo-sandbox',
+      'https://www.github.com/geazioliveira/marketo-sandbox',
+      'github.com/geazioliveira/marketo-sandbox',
+      'git@github.com:geazioliveira/marketo-sandbox.git',
+    ])
+      expectDeny(
+        await judge(
+          `GH_HOST=ghe.example.com gh issue edit 5 -R ${repo} --add-label ready-for-agent`,
+        ),
+        /ready-for-agent são do dono/,
+      )
+    expectDeny(
+      await judge(
+        `GH_HOST=api.github.com gh api -X PATCH repos/${PROJECT}/issues/5 -f state=open`,
+      ),
+      /reabrir uma issue/,
+    )
+  })
+
+  it('passes a repository on another host named with -R HOST/OWNER/REPO', async () => {
+    const github = stub()
+    expectPass(
+      await judge(
+        `gh issue edit 5 -R ghe.example.com/geazioliveira/marketo-sandbox ${transition}`,
+        { github },
+      ),
+    )
+    expectPass(
+      await judge(
+        'gh issue reopen 5 --repo https://ghe.example.com/geazioliveira/marketo-sandbox',
+        { github },
+      ),
+    )
+    expect(github.calls).toEqual([])
   })
 })

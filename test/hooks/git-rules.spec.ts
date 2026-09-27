@@ -306,11 +306,26 @@ describe('skip strings in commit messages', () => {
 
   it.each([
     ['an ordinary message', '-m "Hooks do loop. Refs #5"'],
-    ['a message it cannot read (a documented limit)', '-m "$MSG"'],
-    ['a file that is not there', '-F /nao/existe.txt'],
     ['a reused message', '-C HEAD'],
   ])('passes %s', (_, args) => {
     expect(verdict(`git commit ${args}`, onFeature.dir).decision).toBe('pass')
+  })
+
+  // Copilot review of #26, third round: a message it cannot read may carry a
+  // skip string, so it asks, critical, and the autonomous modes refuse it.
+  it.each([
+    ['a message behind an expansion', '-m "$MSG"'],
+    ['a file that is not there', '-F /nao/existe.txt'],
+    ['a file behind an expansion', '-F "$FILE"'],
+    ['a trailer behind an expansion', '-m Hooks --trailer "$TRAILER"'],
+  ])('asks, critical, for %s', (_, args) => {
+    expect(verdict(`git commit ${args}`, onFeature.dir)).toMatchObject({
+      decision: 'ask',
+      critical: true,
+      reason: expect.stringMatching(
+        /^não consegui ler a mensagem do commit/,
+      ) as string,
+    })
   })
 })
 
@@ -350,11 +365,27 @@ describe('skip strings in merge commit messages (Copilot review of #26)', () => 
   it.each([
     ['an ordinary message', '--no-ff -m "Trazer main. Refs #5" origin/main'],
     ['no message', 'origin/main'],
-    ['a message it cannot read (a documented limit)', '-m "$MSG" origin/main'],
     ['--abort, which writes no commit', '--abort'],
   ])('passes %s', (_, args) => {
     expect(verdict(`git merge ${args}`, onFeature.dir).decision).toBe('pass')
   })
+
+  it.each([
+    ['a message behind an expansion', '-m "$MSG" origin/main'],
+    ['a file behind an expansion', '-F "$FILE" origin/main'],
+    ['an --into-name behind an expansion', '--into-name "$N" origin/main'],
+  ])(
+    'asks, critical, for %s (Copilot review of #26, third round)',
+    (_, args) => {
+      expect(verdict(`git merge ${args}`, onFeature.dir)).toMatchObject({
+        decision: 'ask',
+        critical: true,
+        reason: expect.stringMatching(
+          /^não consegui ler a mensagem do merge/,
+        ) as string,
+      })
+    },
+  )
 
   it('passes a merge in another repository', () => {
     expect(
@@ -492,8 +523,8 @@ describe('messages a commit brings from elsewhere (Copilot review of #26)', () =
     ['a patch that is not there', 'git am /nao/existe.patch'],
     ['a patch read from a pipe', 'cat x.patch | git am'],
     ['commit -C behind an expansion', 'git commit -C "$REV"'],
-  ])('asks, not critical, for %s', (_, text) => {
-    expect(at(text)).toMatchObject({ decision: 'ask', critical: false })
+  ])('asks, critical, for %s', (_, text) => {
+    expect(at(text)).toMatchObject({ decision: 'ask', critical: true })
   })
 
   it('asks for a cherry-pick whose commits an option picks: they are not the revisions it names', () => {
@@ -501,7 +532,7 @@ describe('messages a commit brings from elsewhere (Copilot review of #26)', () =
     // among them; the hook would read only `^main`, which names none.
     expect(at('git cherry-pick --all ^main')).toMatchObject({
       decision: 'ask',
-      critical: false,
+      critical: true,
       reason: expect.stringMatching(/a opção --all escolhe commits/) as string,
     })
   })
@@ -513,7 +544,7 @@ describe('messages a commit brings from elsewhere (Copilot review of #26)', () =
     for (const text of ['git cherry-pick "$LIMPO"', 'git revert "$LIMPO"'])
       expect(at(text)).toMatchObject({
         decision: 'ask',
-        critical: false,
+        critical: true,
         reason: expect.stringMatching(
           /a revisão "\$LIMPO" não pôde ser lida/,
         ) as string,
@@ -526,7 +557,7 @@ describe('messages a commit brings from elsewhere (Copilot review of #26)', () =
     // instead, and runs nothing.
     const marker = path.join(sourced.root, 'buscou')
     const text = `git -c remote.lazy.promisor=true -c remote.lazy.url='ext::touch ${marker}' -c protocol.ext.allow=always cherry-pick ${'1'.repeat(40)}`
-    expect(at(text)).toMatchObject({ decision: 'ask', critical: false })
+    expect(at(text)).toMatchObject({ decision: 'ask', critical: true })
     expect(existsSync(marker)).toBe(false)
   })
 
@@ -549,7 +580,7 @@ describe('messages a commit brings from elsewhere (Copilot review of #26)', () =
       }
       expect(
         at(`git -c core.useReplaceRefs="$V" revert ${sha.subject}`),
-      ).toMatchObject({ decision: 'ask', critical: false })
+      ).toMatchObject({ decision: 'ask', critical: true })
     } finally {
       await sourced.git('replace', '-d', sha.subject)
     }
@@ -620,10 +651,10 @@ describe('messages a commit brings from elsewhere (Copilot review of #26)', () =
       expect(at(`git am ${mailbox('in-diff')}`)).toEqual({ decision: 'pass' })
     })
 
-    it('asks, not critical, for a multipart message it does not read', () => {
+    it('asks, critical, for a multipart message it does not read', () => {
       expect(at(`git am ${mailbox('multi')}`)).toMatchObject({
         decision: 'ask',
-        critical: false,
+        critical: true,
       })
     })
   })
@@ -671,10 +702,10 @@ describe('pushes to main', () => {
     expect(verdict(text, onFeature.dir).decision).toBe('pass')
   })
 
-  it('asks when a destination cannot be read', () => {
+  it('asks, critical, when a destination cannot be read', () => {
     expect(verdict('git push origin "$BRANCH"', onFeature.dir)).toMatchObject({
       decision: 'ask',
-      critical: false,
+      critical: true,
     })
   })
 
@@ -697,10 +728,10 @@ describe('what the rules leave alone', () => {
     expect(asked).toEqual([])
   })
 
-  it('asks for a commit or a push in a directory it cannot read', () => {
+  it('asks, critical, for a commit or a push in a directory it cannot read', () => {
     expect(verdict('git -C "$WT" commit -m x', onFeature.dir)).toMatchObject({
       decision: 'ask',
-      critical: false,
+      critical: true,
     })
     const [command] = shell.parseCommand('git push').commands
     expect(
@@ -713,10 +744,10 @@ describe('what the rules leave alone', () => {
     expect(verdict('git -C "$WT" log', onFeature.dir).decision).toBe('pass')
   })
 
-  it('asks when the subcommand cannot be read', () => {
+  it('asks, critical, when the subcommand cannot be read', () => {
     expect(verdict('git "$SUB" -m x', onMain.dir)).toMatchObject({
       decision: 'ask',
-      critical: false,
+      critical: true,
     })
   })
 })
@@ -773,10 +804,10 @@ describe('git reads more than its argv (review of #5)', () => {
       /não consegui ler o alias p/,
     ],
     ['an alias that loops', 'git loop', /aliases demais/],
-  ])('asks for %s', (_, text, reason) => {
+  ])('asks, critical, for %s', (_, text, reason) => {
     expect(verdict(text, aliased.dir)).toMatchObject({
       decision: 'ask',
-      critical: false,
+      critical: true,
       reason,
     })
   })
@@ -856,17 +887,19 @@ describe('git reads more than its argv (review of #5)', () => {
     expect(verdict(text, onFeature.dir).decision).toBe('pass')
   })
 
-  it('asks when the config that decides the push cannot be read', () => {
+  it('asks, critical, when the config that decides the push cannot be read', () => {
     expect(
       verdict('git -c push.default="$M" push', onFeature.dir),
     ).toMatchObject({
       decision: 'ask',
+      critical: true,
       reason: /configuração que decide o destino do push/,
     })
     expect(
       verdict('git -c push.default=estranho push', onFeature.dir),
     ).toMatchObject({
       decision: 'ask',
+      critical: true,
       reason: /push.default=estranho/,
     })
   })
@@ -966,7 +999,7 @@ describe('a HEAD an earlier command of the line moved (review of #5)', () => {
     ).toMatch(pushTrunk)
   })
 
-  it('asks when the branch it moved to cannot be told', () => {
+  it('asks, critical, when the branch it moved to cannot be told', () => {
     const seen = moved(null, false)
     for (const text of [
       'git commit -m x',
@@ -976,6 +1009,7 @@ describe('a HEAD an earlier command of the line moved (review of #5)', () => {
     ])
       expect(verdict(text, onFeature.dir, { seen })).toMatchObject({
         decision: 'ask',
+        critical: true,
         reason: /um comando anterior da linha muda o HEAD/,
       })
     expect(
@@ -1244,3 +1278,178 @@ function onMainDir(): string {
 function aliasedDir(): string {
   return aliased.dir
 }
+
+// ---------------------------------------------------------------------------
+// Third round of Copilot's review of #26
+
+describe('a commit message it cannot read (Copilot review of #26, third round)', () => {
+  it.each([
+    ['git commit -m "$MSG"', 'a mensagem do commit'],
+    ['git merge -F "$FILE" origin/main', 'a mensagem do merge'],
+    ['printf "Hooks\\n" | git commit -F -', 'a mensagem do commit'],
+    ['git commit -F /nao/existe.txt', 'a mensagem do commit'],
+  ])('asks, critical, for %s', (text, what) => {
+    expect(verdict(text, onFeature.dir)).toMatchObject({
+      decision: 'ask',
+      critical: true,
+      reason: expect.stringContaining(`não consegui ler ${what}`) as string,
+    })
+  })
+
+  it('still denies a skip string it can read next to a part it cannot', () => {
+    expect(
+      verdict('git commit -m "$MSG" -m "[skip ci]"', onFeature.dir).decision,
+    ).toBe('deny')
+  })
+
+  describe('the forms a session writes stay readable', () => {
+    it.each([
+      [
+        '-F - with a heredoc',
+        "git commit -F - <<'MSG'\nHooks do loop.\n\nRefs #5\nMSG",
+      ],
+      [
+        '-m "$(cat <<\'EOF\' … EOF)"',
+        `git commit -m "$(cat <<'EOF'\nHooks do loop.\n\nRefs #5\nEOF\n)"`,
+      ],
+      [
+        'the same with an unquoted delimiter and no expansion',
+        `git commit -m "$(cat <<EOF\nHooks do loop.\nEOF\n)"`,
+      ],
+      [
+        'a variable the line assigned',
+        'M=\'Hooks do loop. Refs #5\'; git commit -m "$M"',
+      ],
+      [
+        'a variable the line assigned from "$(cat <<\'EOF\' … EOF)"',
+        `M="$(cat <<'EOF'\nHooks do loop.\nEOF\n)"; git commit -m "$M"`,
+      ],
+      ['-F with a file that is there', 'git commit -F msg-ok.txt'],
+    ])('passes %s', (_, text) => {
+      onFeature.write({ 'msg-ok.txt': 'Hooks\n' })
+      expect(verdict(text, onFeature.dir)).toEqual({ decision: 'pass' })
+    })
+
+    it.each([
+      [
+        '-m "$(cat <<\'EOF\' … EOF)"',
+        `git commit -m "$(cat <<'EOF'\nHooks\n\n[skip ci]\nEOF\n)"`,
+      ],
+      [
+        'a variable the line assigned from it',
+        `M="$(cat <<'EOF'\nHooks [ci skip]\nEOF\n)"; git commit -m "$M"`,
+      ],
+    ])('denies a skip string in %s', (_, text) => {
+      expect(verdict(text, onFeature.dir).decision).toBe('deny')
+    })
+
+    it('does not read "$(cat …)" after the line defines a function', () => {
+      expect(
+        verdict(
+          `cat() { printf '[skip ci]'; }; git commit -m "$(cat <<'EOF'\nHooks\nEOF\n)"`,
+          onFeature.dir,
+        ),
+      ).toMatchObject({ decision: 'ask', critical: true })
+    })
+  })
+})
+
+describe('git push --repo (Copilot review of #26, third round)', () => {
+  it.each([
+    `git push --repo ${PROJECT_URL} HEAD:main`,
+    `git push --repo=${PROJECT_URL} HEAD:main`,
+    'git push --repo origin main',
+    'git push --repo=origin +HEAD:refs/heads/main',
+    'git push --repo origin feature/5-x:main feature/5-x',
+    'git push --repo "$REMOTE" HEAD:main',
+  ])('denies %s from a branch of the issue', (text) => {
+    const decision = verdict(text, onFeature.dir)
+    expect(decision.decision).toBe('deny')
+    expect(decision.reason).toMatch(pushTrunk)
+  })
+
+  it('keeps git’s own reading: the repository on the line wins over --repo', () => {
+    expect(
+      verdict(
+        `git push --repo=https://github.com/alguem/outro.git ${PROJECT_URL} HEAD:main`,
+        onFeature.dir,
+      ).reason,
+    ).toMatch(pushTrunk)
+  })
+
+  it.each([
+    'git push --repo origin',
+    `git push --repo=${PROJECT_URL}`,
+    `git push --repo origin ${FEATURE}`,
+    `git push --repo=origin HEAD:${FEATURE}`,
+    'git push --repo https://github.com/alguem/outro.git HEAD:main',
+  ])('passes %s', (text) => {
+    expect(verdict(text, onFeature.dir).decision).toBe('pass')
+  })
+})
+
+describe('the editor a commit opens for its message (Copilot review of #26, third round)', () => {
+  const editor = /o git (?:commit|merge|revert) abre um editor para a mensagem/
+
+  it.each([
+    ['a commit with no message on the line', 'git commit -a'],
+    ['an amend that keeps the editor', 'git commit --amend'],
+    ['-e next to -m', 'git commit -m x -e'],
+    ['--edit after --no-edit', 'git commit --no-edit --edit -m x'],
+    ['-c, which reedits a message', 'git commit -c HEAD'],
+    ['--squash alone', 'git commit --squash HEAD'],
+    ['--fixup=reword:', 'git commit --fixup=reword:HEAD'],
+    ['-t, a template to edit', 'git commit -t modelo.txt'],
+    ['git merge -e', 'git merge -e origin/main'],
+    [
+      'git merge with GIT_MERGE_AUTOEDIT=yes',
+      'GIT_MERGE_AUTOEDIT=yes git merge x',
+    ],
+    ['git merge --continue, which runs git commit', 'git merge --continue'],
+    ['git revert -e', 'git revert -e HEAD'],
+    ['an editor it cannot read', 'GIT_EDITOR="$E" git commit --amend'],
+    ['an editor that writes', `GIT_EDITOR='sed -i s/^/x/' git commit --amend`],
+    ['core.editor that writes', 'git -c core.editor=vim commit --amend'],
+  ])('asks, critical, for %s', (_, text) => {
+    expect(verdict(text, onFeature.dir)).toMatchObject({
+      decision: 'ask',
+      critical: true,
+      reason: expect.stringMatching(editor) as string,
+    })
+  })
+
+  it.each([
+    ['a message on the line', 'git commit -m x'],
+    ['--amend --no-edit', 'git commit --amend --no-edit'],
+    ['a plain --fixup', 'git commit --fixup HEAD'],
+    ['--squash with -m', 'git commit --squash HEAD -m x'],
+    ['-C, which reuses a message as it is', 'git commit -C HEAD'],
+    ['GIT_EDITOR=true', 'GIT_EDITOR=true git commit --amend'],
+    ['GIT_EDITOR=:', 'GIT_EDITOR=: git commit -a'],
+    ['core.editor=true', 'git -c core.editor=true commit --amend'],
+    ['a merge with no terminal', 'git merge origin/main'],
+    ['a merge --abort', 'git merge --abort'],
+    ['a revert with no terminal', 'git revert --no-edit HEAD'],
+  ])('passes %s', (_, text) => {
+    expect(verdict(text, onFeature.dir)).toEqual({ decision: 'pass' })
+  })
+
+  it('reads GIT_EDITOR the session exports', () => {
+    expect(
+      verdict('git commit --amend', onFeature.dir, {
+        env: { GIT_EDITOR: 'true' },
+      }),
+    ).toEqual({ decision: 'pass' })
+  })
+})
+
+describe('a word git does not know in the subcommand’s place (Copilot review of #26, third round)', () => {
+  it('asks, critical, when the command names a commit or a push after it', () => {
+    expect(verdict('git valor push', onFeature.dir)).toMatchObject({
+      decision: 'ask',
+      critical: true,
+      reason: /não reconheci "valor" como subcomando nem alias do git/,
+    })
+    expect(verdict('git valor status', onFeature.dir).decision).toBe('pass')
+  })
+})

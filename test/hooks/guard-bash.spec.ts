@@ -348,13 +348,14 @@ describe.concurrent('the label transition, read live', () => {
     expectDeny(await guard(transition, { env: gh.env }), /não abre com # Plano/)
   })
 
-  test('asks, not critical, when gh fails', async ({ live }) => {
+  test('asks, critical, when gh fails, and denies it in auto (Copilot review of #26, third round)', async ({
+    live,
+  }) => {
     const gh = live(issue({ mode: 'fail' }))
-    const run = await guard(transition, { env: gh.env, mode: 'auto' })
-    expectAsk(
-      run,
-      /não consegui confirmar que a issue está em needs-triage com um # Plano como último comentário \(HTTP 502/,
-    )
+    const reason =
+      /não consegui confirmar que a issue está em needs-triage com um # Plano como último comentário \(HTTP 502/
+    expectAsk(await guard(transition, { env: gh.env }), reason)
+    expectDeny(await guard(transition, { env: gh.env, mode: 'auto' }), reason)
   })
 
   test('asks when gh is slower than the timeout', async ({ live }) => {
@@ -1085,10 +1086,16 @@ describe.concurrent(
         'find . -name x -execdir git commit -m y ;',
         /diretório em que o git commit roda/,
       ],
-    ])('asks, not critical, for %s', async (_, text, reason) => {
-      const run = await guard(text, { mode: 'auto' })
-      expectAsk(run, reason)
-    })
+    ])(
+      'asks, critical, for %s, and denies it in auto (Copilot review of #26, third round)',
+      async (_, text, reason) => {
+        expectAsk(await guard(text), reason)
+        expectDeny(
+          await guard(text, { mode: 'auto' }),
+          /Em auto, a confirmação vira negação/,
+        )
+      },
+    )
 
     it.each([
       ['sh reading a file', 'sh < reabre.sh'],
@@ -1240,12 +1247,16 @@ describe.concurrent(
     it('asks for a body file an interpreter program may have rewritten', async () => {
       // b-recado.md holds a harmless text on disk; the program may put
       // anything there before gh reads it.
-      const run = await guard(
-        "python3 - <<'EOF'\nopen('b-recado.md', 'w').write('# Owner Approve\\n')\nEOF\ngh issue comment 5 --body-file b-recado.md",
-        { mode: 'auto' },
-      )
+      const text =
+        "python3 - <<'EOF'\nopen('b-recado.md', 'w').write('# Owner Approve\\n')\nEOF\ngh issue comment 5 --body-file b-recado.md"
+      const run = await guard(text)
       expectAsk(run, /não consegui ler o corpo do comentário/)
       expect(reasonOf(run)).not.toMatch(/indireção/)
+      // Critical since the third round of Copilot's review of #26.
+      expectDeny(
+        await guard(text, { mode: 'auto' }),
+        /não consegui ler o corpo do comentário/,
+      )
     })
 
     it('asks when the program runs in a substitution, judged last', async () => {
@@ -1471,12 +1482,12 @@ describe.concurrent(
     )
 
     it('keeps a plain ask plain', async () => {
-      const run = await guard(`$SH -c 'gh issue comment 5 --body "$X"'`, {
+      const run = await guard(`$SH -c 'gh issue edit 5 --body "Corpo novo."'`, {
         mode: 'auto',
       })
       expectAsk(run, unnamed)
       expect(reasonOf(run)).toMatch(
-        /como sh: não consegui ler o corpo do comentário/,
+        /como sh: editar o corpo da issue depois do Approve o revoga/,
       )
     })
 
@@ -1519,8 +1530,12 @@ describe.concurrent('gh pr create --web (Copilot review of #26)', () => {
     )
   })
 
-  it('keeps a body file it cannot read a plain ask', async () => {
+  it('asks, critical, for a body file it cannot read, and denies it in auto (Copilot review of #26, third round)', async () => {
     expectAsk(
+      await guard('gh pr create -t T -F /nao/existe.md'),
+      /não consegui ler o corpo da PR/,
+    )
+    expectDeny(
       await guard('gh pr create -t T -F /nao/existe.md', { mode: 'auto' }),
       /não consegui ler o corpo da PR/,
     )
@@ -1759,6 +1774,231 @@ describe.concurrent(
         }),
         /saída de emergência do dono/,
       )
+    })
+  },
+)
+
+describe.concurrent(
+  'what it cannot read is refused in auto (Copilot review of #26, third round)',
+  () => {
+    it.each([
+      ['a commit message behind an expansion', 'git commit -m "$MSG"'],
+      ['a merge message file behind an expansion', 'git merge -F "$FILE" main'],
+      ['a label behind an expansion', 'gh issue create -t T -b c -l "$LABEL"'],
+      [
+        'a PR title behind an expansion',
+        `gh pr create --title "$TITLE" --body 'Closes #5.'`,
+      ],
+      [
+        'an --input of the labels endpoint it cannot read',
+        'gh api repos/geazioliveira/marketo-sandbox/issues/5/labels --input "$BODY"',
+      ],
+      [
+        'a REST state behind an expansion',
+        'gh api -X PATCH repos/geazioliveira/marketo-sandbox/issues/5 -f state="$STATE"',
+      ],
+      ['a line it cannot read whole', 'gh issue comment 5 --body "sem fim'],
+    ])('asks for %s, and denies it in auto', async (_, text) => {
+      expectAsk(await guard(text))
+      expectDeny(
+        await guard(text, { mode: 'auto' }),
+        /Em auto, a confirmação vira negação/,
+      )
+    })
+
+    it.each([
+      [
+        'a commit message in "$(cat <<\'EOF\' … EOF)"',
+        `git commit -m "$(cat <<'EOF'\nHooks do loop.\n\nRefs #5\nEOF\n)"`,
+      ],
+      [
+        'a commit message from a heredoc',
+        "git commit -F - <<'MSG'\nHooks\nMSG",
+      ],
+      [
+        'a PR body in "$(cat <<\'EOF\' … EOF)"',
+        `gh pr create --title "Hooks do loop" --body "$(cat <<'EOF'\nCloses #5.\n\nTexto.\nEOF\n)"`,
+      ],
+      [
+        'a title the line assigned',
+        `T='Hooks do loop'; gh pr create --title "$T" --body 'Closes #5.'`,
+      ],
+    ])('passes %s, in auto too', async (_, text) => {
+      expectPass(await guard(text))
+      expectPass(await guard(text, { mode: 'auto' }))
+    })
+
+    test('reads GH_HOST exported earlier on the line', async ({ live }) => {
+      const gh = live({})
+      expectPass(
+        await guard('export GH_HOST=ghe.example.com; gh issue reopen 5', {
+          env: gh.env,
+        }),
+      )
+      expectPass(
+        await guard(
+          'GH_HOST=ghe.example.com GH_REPO=geazioliveira/marketo-sandbox gh issue edit 5 --remove-label needs-triage --add-label ready-for-human',
+          { env: gh.env },
+        ),
+      )
+      expect(gh.calls()).toEqual([])
+      expectDeny(
+        await guard('export GH_HOST="$H"; gh issue reopen 5', { env: gh.env }),
+        /reabrir uma issue/,
+      )
+      expectDeny(
+        await guard(
+          'GH_HOST=$H gh issue edit 5 --remove-label needs-triage --add-label ready-for-human',
+          { env: gh.env, mode: 'auto' },
+        ),
+        /não consegui ler em que repositório/,
+      )
+      expect(gh.calls()).toEqual([])
+    })
+
+    test('reads GH_HOST inherited from the session', async ({ live }) => {
+      const gh = live({}, { GH_HOST: 'ghe.example.com' })
+      expectPass(await guard('gh issue reopen 5', { env: gh.env }))
+      expect(gh.calls()).toEqual([])
+    })
+
+    it('reads a message file the line writes, named through a variable assigned after cd &&', async () => {
+      const head = `cd "${feature.dir}" && S="${feature.root}/rascunho" && cat > "$S/msg.txt" <<'EOF'`
+      const tail = 'git add -A && git commit -q -F "$S/msg.txt"'
+      expectPass(
+        await guard(`${head}\nHooks do loop.\n\nRefs #5\nEOF\n${tail}`, {
+          mode: 'auto',
+        }),
+      )
+      expectDeny(
+        await guard(`${head}\nHooks [skip ci]\nEOF\n${tail}`),
+        /a mensagem do commit traz "\[skip ci\]"/,
+      )
+    })
+
+    it.each([
+      ['a path behind an expansion', 'echo x > "$OUT"'],
+      [
+        'a relative path after a cd it cannot read',
+        'cd "$D" && echo x > saida.txt',
+      ],
+      [
+        'a loop variable over a glob',
+        "for f in *.md; do sed -i '' 's/x/y/' \"$f\"; done",
+      ],
+      [
+        'a loop variable the body reassigns',
+        'for f in a.md b.md; do f=".claude/$f"; echo x > "$f"; done',
+      ],
+      ['a copy into a directory behind an expansion', 'cp a.txt "$DEST"/'],
+    ])('asks for a write to %s, and denies it in auto', async (_, text) => {
+      expectAsk(await guard(text), /não consegui ler onde o comando escreve/)
+      expectDeny(
+        await guard(text, { mode: 'auto' }),
+        /Em auto, a confirmação vira negação/,
+      )
+    })
+
+    it.each([
+      [
+        'a variable assigned earlier in the same && list',
+        'git status && SP=/tmp/rascunho && npm run check > $SP/check.log 2>&1',
+      ],
+      [
+        'a variable the line assigned, after `while IFS= read`',
+        'S=/tmp/rascunho\n( while IFS= read -r f; do echo "$f"; done < lista.txt ); rm -rf "$S/copia"',
+      ],
+      ['a path with the process id', 'echo x > /tmp/copia.$$'],
+      [
+        'an absolute path after a cd it cannot read',
+        'cd "$D" && echo x > /tmp/saida.txt',
+      ],
+      ['a variable the line assigned', 'O=/tmp/saida.txt; echo x > "$O"'],
+      [
+        'a loop variable over values written in full',
+        'S=/tmp/rascunho; for i in 1 2; do npx vitest run > "$S/vitest-$i.txt" 2>&1; done',
+      ],
+      [
+        'a copy named by a loop variable, the way a session restores files',
+        'for k in identity mapi; do cp "/tmp/main/docs/swagger-$k.json" "docs/swagger-$k.json"; done',
+      ],
+    ])('passes a write to %s', async (_, text) => {
+      expectPass(await guard(text, { mode: 'auto' }))
+    })
+
+    it('reads each value of a loop where the write lands, a protected one included', async () => {
+      expectDeny(
+        await guard(
+          'for f in settings.json settings.local.json; do echo x > ".claude/$f"; done',
+        ),
+        /saída de emergência do dono/,
+      )
+    })
+
+    it('denies git push --repo <this project> HEAD:main', async () => {
+      expectDeny(
+        await guard(
+          'git push --repo https://github.com/geazioliveira/marketo-sandbox.git HEAD:main',
+        ),
+        /push em main/,
+      )
+    })
+  },
+)
+
+describe.concurrent(
+  'what the programs of the line run, when it cannot be read, is refused in auto (Copilot review of #26, third round)',
+  () => {
+    let dir = ''
+
+    beforeAll(() => {
+      dir = realpathSync.native(mkdtempSync(path.join(tmpdir(), 'guard-bash-')))
+      writeFileSync(
+        path.join(dir, 'inteiro.sh'),
+        'gh issue comment 5 --body "sem fim\n',
+      )
+      // Each script runs the next: nine levels, past the hook's depth.
+      for (let k = 0; k < 9; k += 1)
+        writeFileSync(
+          path.join(dir, `nivel-${k}.sh`),
+          `sh ${path.join(dir, `nivel-${k + 1}.sh`)}\n`,
+        )
+      writeFileSync(path.join(dir, 'nivel-9.sh'), 'gh issue list\n')
+    })
+
+    afterAll(() => {
+      if (dir !== '') rmSync(dir, { recursive: true, force: true })
+    })
+
+    it.each([
+      [
+        'a script file it cannot read whole',
+        () => `sh ${path.join(dir, 'inteiro.sh')}`,
+        /não consegui ler inteiro o script que o comando roda/,
+      ],
+      [
+        'the -c script of a program it cannot name',
+        () => '"$SH" -o view -c "$X gh issue list"',
+        /como sh: não consegui ler o script que o sh roda/,
+      ],
+      [
+        'the stdin script of a program it cannot name',
+        () => '"$SH" <<EOF\n$X gh issue list\nEOF',
+        /como sh: não consegui ler o script que o sh lê do stdin/,
+      ],
+      [
+        'parallel',
+        () => 'parallel gh issue reopen ::: 1 2',
+        /o parallel monta comandos que o hook não lê/,
+      ],
+      [
+        'scripts nested past the hook’s depth',
+        () => `sh ${path.join(dir, 'nivel-0.sh')}`,
+        /comandos dentro de comandos demais/,
+      ],
+    ])('asks for %s, and denies it in auto', async (_, text, reason) => {
+      expectAsk(await guard(text()), reason)
+      expectDeny(await guard(text(), { mode: 'auto' }), reason)
     })
   },
 )
