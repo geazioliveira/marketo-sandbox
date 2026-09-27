@@ -68,8 +68,12 @@ function git(dir, args, env) {
     stdio: ['ignore', 'pipe', 'pipe'],
   })
   afterSpawn(run, gitTimeoutMs, timeout, step)
+  // The cause keeps the spawn's code: session-context tells a git that did
+  // not answer in time (ETIMEDOUT) from one that could not start.
   if (run.error)
-    throw new Error(`git não pôde rodar em ${dir}: ${run.error.message}`)
+    throw new Error(`git não pôde rodar em ${dir}: ${run.error.message}`, {
+      cause: run.error,
+    })
   return {
     status: run.status,
     out: (run.stdout ?? '').replace(/\n$/, ''),
@@ -255,6 +259,178 @@ export function repoAt(dir, { env = process.env } = {}) {
   const repo = origin.status === 0 ? repoFromRemote(origin.out) : null
 
   return { top, gitDir, commonDir, branch, repo }
+}
+
+// ---------------------------------------------------------------------------
+// The git config a command gives gh (Copilot review of #26, seventh round)
+//
+// gh picks its repository from the remotes git reports, and git reads them
+// from the config the environment points it at. repoAt reads them with the
+// environment the hook inherited, which is the one a command inherits too;
+// a command that sets any of the variables below on itself, or exports them
+// earlier on the line, gives gh a config the hook did not read: another
+// `remote.origin.url`, a `url.<base>.insteadOf` that rewrites it, a global
+// config in another HOME. Such a command is read again with exactly its
+// environment, and only a config the hook can take in full counts.
+
+/**
+ * The variables that decide which git config a process reads: the `-c`
+ * git takes from the environment (GIT_CONFIG_COUNT with its
+ * GIT_CONFIG_KEY_<n> and GIT_CONFIG_VALUE_<n>, and GIT_CONFIG_PARAMETERS),
+ * the files it reads (GIT_CONFIG_GLOBAL, GIT_CONFIG_SYSTEM,
+ * GIT_CONFIG_NOSYSTEM, and HOME and XDG_CONFIG_HOME, where the global
+ * config lives), and GIT_CONFIG, which points `git config`, and so gh's read
+ * of its `gh-resolved` keys, at another file.
+ */
+export const gitConfigVariable =
+  /^(?:GIT_CONFIG(?:_(?:COUNT|PARAMETERS|GLOBAL|SYSTEM|NOSYSTEM|KEY_\d+|VALUE_\d+))?|HOME|XDG_CONFIG_HOME)$/
+
+/** Of those, the ones that hold a path, which git resolves from its own cwd. */
+const gitConfigPaths = new Set([
+  'GIT_CONFIG',
+  'GIT_CONFIG_GLOBAL',
+  'GIT_CONFIG_SYSTEM',
+  'HOME',
+  'XDG_CONFIG_HOME',
+])
+
+/**
+ * The git config environment a command runs with, when it is not the one
+ * the hook inherited: `overrides` are the variables the command sets (on
+ * itself, or exported earlier on the line), `inherited` the hook's own
+ * environment, `cwd` the directory the command runs in.
+ * - { set: false } when no variable of gitConfigVariable differs from what
+ *   the hook inherited (unset and empty count as the same);
+ * - { set: true, known: false, why } when one of them cannot be read: an
+ *   expansion, an empty value (the parser gives `unset NAME` as empty, and
+ *   git reads an empty HOME as `/`), a path starting with `~`, a relative
+ *   path with no directory to read it from, or GIT_CONFIG set at all;
+ * - { set: true, known: true, env, what } otherwise: the hook's environment
+ *   with the command's values over it, each path made absolute from `cwd`,
+ *   as the gh the command starts would hand them to git.
+ */
+export function commandGitConfig(
+  overrides,
+  inherited = process.env,
+  cwd = null,
+) {
+  const given = overrides ?? {}
+  const names = Object.keys(given)
+    .filter(
+      (name) =>
+        gitConfigVariable.test(name) &&
+        String(given[name] ?? '') !== String(inherited?.[name] ?? ''),
+    )
+    .sort()
+  if (names.length === 0) return { set: false }
+  const what = `o comando dá ao git uma configuração própria (${names.join(', ')})`
+  const unknown = (detail) => ({
+    set: true,
+    known: false,
+    why: `${what}, e ${detail}`,
+  })
+  const env = { ...inherited }
+  for (const name of names) {
+    const value = String(given[name] ?? '')
+    if (/[$`]/.test(value)) return unknown(`${name} traz uma expansão`)
+    if (value === '')
+      return unknown(`não sei se ${name} fica vazia ou deixa de existir`)
+    if (gitConfigPaths.has(name) && !path.isAbsolute(value)) {
+      if (value.startsWith('~'))
+        return unknown(`${name} começa com ~, que o hook não expande`)
+      if (typeof cwd !== 'string' || cwd === '')
+        return unknown(`${name} é relativa a um diretório que não li`)
+      env[name] = path.resolve(cwd, value)
+    } else env[name] = value
+  }
+  if (typeof env.GIT_CONFIG === 'string' && env.GIT_CONFIG !== '')
+    return unknown(
+      'GIT_CONFIG leva o git config que o gh roda a outro arquivo, que o hook não segue',
+    )
+  return { set: true, known: true, env, what }
+}
+
+const configuredRemotes = new Map()
+
+/**
+ * The repository gh picks from the remotes of `repo` (repoAt of the place
+ * the command's gh finds its repository from) when the command gives git
+ * the environment `env` (commandGitConfig's): read with exactly that
+ * environment, through argv, bounded by the run's budget, once per git dir
+ * and config. Only a config the hook reads in full counts; anything gh or
+ * git could resolve in a way the hook does not follow leaves it unknown:
+ * - an include (`include.path`, `includeIf.<cond>.path`), which brings
+ *   another file, perhaps only under a condition;
+ * - a rewriting of URLs (`url.<base>.insteadOf` or `pushInsteadOf`);
+ * - a default repository of gh (`remote.<name>.gh-resolved`);
+ * - a remote other than origin, which gh may pick before it;
+ * - a push URL of origin, which gh may read in place of its URL;
+ * - origin's URLs naming more than one repository (a `remote.origin.url`
+ *   given through the environment adds a URL, and does not replace the
+ *   one on disk);
+ * - a config git itself refuses (a GIT_CONFIG_COUNT with a key missing).
+ * @returns {{ known: true, repo: string | null } | { known: false, why: string }}
+ */
+export function configuredRemote(repo, env) {
+  const key = JSON.stringify([
+    repo.gitDir,
+    Object.entries(env)
+      .filter(([name]) => gitConfigVariable.test(name))
+      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)),
+  ])
+  if (!configuredRemotes.has(key))
+    configuredRemotes.set(key, readConfiguredRemote(repo, env))
+  return configuredRemotes.get(key)
+}
+
+function readConfiguredRemote(repo, env) {
+  const run = git(
+    repo.top ?? repo.gitDir,
+    ['--git-dir', repo.gitDir, 'config', '--list', '-z'],
+    env,
+  )
+  if (run.status !== 0)
+    return {
+      known: false,
+      why: `o git recusou essa configuração (${run.err || `saída ${run.status}`})`,
+    }
+  const origins = new Set()
+  for (const entry of run.out.split('\0')) {
+    if (entry === '') continue
+    const nl = entry.indexOf('\n')
+    const key = nl < 0 ? entry : entry.slice(0, nl)
+    const value = nl < 0 ? '' : entry.slice(nl + 1)
+    const first = key.indexOf('.')
+    const last = key.lastIndexOf('.')
+    const section = key.slice(0, first).toLowerCase()
+    const name = key.slice(last + 1).toLowerCase()
+    const subsection = last > first ? key.slice(first + 1, last) : ''
+    if (section === 'include' || section === 'includeif')
+      return { known: false, why: `ela inclui outro arquivo (${key})` }
+    if (section === 'url' && (name === 'insteadof' || name === 'pushinsteadof'))
+      return { known: false, why: `ela reescreve URLs (${key})` }
+    if (section !== 'remote' || subsection === '') continue
+    if (name === 'gh-resolved')
+      return {
+        known: false,
+        why: `ela dá ao gh um repositório padrão (${key})`,
+      }
+    if (name !== 'url' && name !== 'pushurl') continue
+    if (subsection !== 'origin')
+      return {
+        known: false,
+        why: `ela tem outro remote além do origin (${subsection}), que o gh pode escolher`,
+      }
+    if (name === 'pushurl')
+      return { known: false, why: `o origin tem uma URL de push própria` }
+    origins.add(repoFromRemote(value))
+  }
+  if (origins.size > 1)
+    return {
+      known: false,
+      why: 'o origin aponta para mais de um repositório',
+    }
+  return { known: true, repo: origins.size === 0 ? null : [...origins][0] }
 }
 
 /**

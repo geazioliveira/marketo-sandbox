@@ -1564,7 +1564,12 @@ async function decide(input, libs) {
   const githubFor = gh.githubClients()
 
   // One repoAt per directory, and only when a rule asks for it: `gh issue
-  // view` costs no git call, and a line of five gh commands costs one.
+  // view` costs no git call, and a line of five gh commands costs one. It
+  // runs with the environment the hook inherited, which is the one each
+  // command inherits too; a gh command that gives git a config of its own
+  // (GIT_CONFIG_*, HOME, XDG_CONFIG_HOME) is read again with it, in
+  // gh-rules' remotesRepo, not from this cache (Copilot review of #26,
+  // seventh round).
   const repos = new Map()
   const repoOf = (dir) => {
     if (!repos.has(dir)) repos.set(dir, repo.repoAt(dir))
@@ -1637,7 +1642,10 @@ async function decide(input, libs) {
    * may name it now (a change may fail, and `git remote add` of a name that
    * exists does, leaving the old URL), else the last URL. With a change it
    * cannot follow, remoteKnown false: gh-rules then judges the command as
-   * this project, never as another repository.
+   * this project, never as another repository. Any change sets
+   * remotesChanged: a command that gives git a config of its own is read
+   * again from the disk with it (gh-rules' remotesRepo), which would miss
+   * what the line changed before it (Copilot review of #26, seventh round).
    */
   const withRemotes = (info) => {
     if (state.remotesLost)
@@ -1655,11 +1663,13 @@ async function decide(input, libs) {
     if (info == null) return info
     const seen = state.remotes.get(info.commonDir)
     if (seen === undefined) return info
-    if (!seen.known) return { ...info, repo: null, remoteKnown: false }
+    if (!seen.known)
+      return { ...info, repo: null, remoteKnown: false, remotesChanged: true }
     return {
       ...info,
       repo:
         seen.repos.find((name) => repo.isProject(name)) ?? seen.repos.at(-1),
+      remotesChanged: true,
     }
   }
 
@@ -1906,6 +1916,9 @@ async function decide(input, libs) {
     // rules also need it to exist, since the repository around it decides.
     const cwdSpelled = baseKnown && !/[$`]/.test(original.cwd ?? '')
     const cwdKnown = cwdSpelled && existsSync(cwd)
+    // `HOME=/x; gh …`: what a standalone assignment before it may have
+    // changed in its environment, unknown (seventh round).
+    shell.recordAssignments(original, state.exported)
     const command = throughXargs({
       ...original,
       env: { ...state.exported, ...original.env },

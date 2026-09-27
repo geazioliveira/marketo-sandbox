@@ -235,6 +235,11 @@ export interface SimpleCommand {
     fd: string | null
     target: { value: string; known: boolean }
   }[]
+  /**
+   * The standalone assignments (`HOME=/x;`) since the command before it, not
+   * enumerable: recordAssignments reads them.
+   */
+  assignedBefore?: { name: string; value: string; known: boolean }[]
 }
 
 export interface ParsedCommand {
@@ -280,6 +285,14 @@ export interface ShellLib {
       unknownFlags?: string[]
     },
   ): BodyRead
+  recordExports(
+    command: Partial<SimpleCommand> & { argv: string[] },
+    exported: Record<string, string>,
+  ): void
+  recordAssignments(
+    command: Partial<SimpleCommand>,
+    exported: Record<string, string>,
+  ): void
 }
 
 export interface Decision {
@@ -330,6 +343,19 @@ export interface RepoLib {
   clearPendingPlan(gitDir: string, sessionId: unknown): void
   harnessPaths: readonly string[]
   isHarnessPath(relativePath: string): boolean
+  gitConfigVariable: RegExp
+  commandGitConfig(
+    overrides: Record<string, string>,
+    inherited?: NodeJS.ProcessEnv,
+    cwd?: string | null,
+  ):
+    | { set: false }
+    | { set: true; known: false; why: string }
+    | { set: true; known: true; env: NodeJS.ProcessEnv; what: string }
+  configuredRemote(
+    repo: { top?: string | null; gitDir: string },
+    env: NodeJS.ProcessEnv,
+  ): { known: true; repo: string | null } | { known: false; why: string }
 }
 
 /**

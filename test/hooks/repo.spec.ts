@@ -667,3 +667,230 @@ process.stdout.write(readFileSync(process.env.FAKE_GH_FIXTURE, 'utf8'))
     await expect(repo.git('remote', 'get-url', 'origin')).rejects.toThrow()
   })
 })
+
+// ---------------------------------------------------------------------------
+// Seventh round of Copilot's review of #26
+
+describe('the git config a command gives git (Copilot review of #26, seventh round)', () => {
+  const inherited = {
+    HOME: '/casa',
+    GIT_CONFIG_GLOBAL: '/casa/.gitconfig',
+    GIT_CONFIG_NOSYSTEM: '1',
+    PATH: '/usr/bin',
+  }
+
+  it('names the variables that move git’s config', () => {
+    for (const name of [
+      'GIT_CONFIG',
+      'GIT_CONFIG_COUNT',
+      'GIT_CONFIG_KEY_0',
+      'GIT_CONFIG_VALUE_12',
+      'GIT_CONFIG_PARAMETERS',
+      'GIT_CONFIG_GLOBAL',
+      'GIT_CONFIG_SYSTEM',
+      'GIT_CONFIG_NOSYSTEM',
+      'HOME',
+      'XDG_CONFIG_HOME',
+    ])
+      expect(lib.gitConfigVariable.test(name)).toBe(true)
+    for (const name of ['GIT_DIR', 'GH_REPO', 'GIT_CONFIG_KEY_', 'PATH'])
+      expect(lib.gitConfigVariable.test(name)).toBe(false)
+  })
+
+  it('is not set when the command keeps the inherited config', () => {
+    expect(lib.commandGitConfig({}, inherited, '/w')).toEqual({ set: false })
+    expect(
+      lib.commandGitConfig(
+        { HOME: '/casa', GH_REPO: 'a/b', GIT_DIR: '/x', XDG_CONFIG_HOME: '' },
+        inherited,
+        '/w',
+      ),
+    ).toEqual({ set: false })
+  })
+
+  it('gives the inherited environment with the command’s values over it, paths made absolute from its directory', () => {
+    const config = lib.commandGitConfig(
+      {
+        GIT_CONFIG_COUNT: '1',
+        GIT_CONFIG_KEY_0: 'user.name',
+        GIT_CONFIG_VALUE_0: 'Outro',
+        GIT_CONFIG_GLOBAL: 'cfg/global',
+        HOME: '/outra',
+      },
+      inherited,
+      '/w',
+    )
+    expect(config).toEqual({
+      set: true,
+      known: true,
+      env: {
+        ...inherited,
+        GIT_CONFIG_COUNT: '1',
+        GIT_CONFIG_KEY_0: 'user.name',
+        GIT_CONFIG_VALUE_0: 'Outro',
+        GIT_CONFIG_GLOBAL: '/w/cfg/global',
+        HOME: '/outra',
+      },
+      what: 'o comando dá ao git uma configuração própria (GIT_CONFIG_COUNT, GIT_CONFIG_GLOBAL, GIT_CONFIG_KEY_0, GIT_CONFIG_VALUE_0, HOME)',
+    })
+  })
+
+  it.each([
+    [{ GIT_CONFIG_VALUE_0: '$URL' }, 'GIT_CONFIG_VALUE_0 traz uma expansão'],
+    [{ HOME: '`pwd`' }, 'HOME traz uma expansão'],
+    [{ HOME: '' }, 'não sei se HOME fica vazia ou deixa de existir'],
+    [{ GIT_CONFIG_GLOBAL: '~/x' }, 'GIT_CONFIG_GLOBAL começa com ~'],
+    [{ GIT_CONFIG: '/x/config' }, 'GIT_CONFIG leva o git config'],
+  ])('is unknown for %j', (overrides, why) => {
+    const config = lib.commandGitConfig(overrides, inherited, '/w')
+    expect(config).toMatchObject({ set: true, known: false })
+    expect(config.set && !config.known ? config.why : '').toContain(why)
+  })
+
+  it('is unknown for a relative path with no directory, and for GIT_CONFIG inherited', () => {
+    expect(
+      lib.commandGitConfig({ GIT_CONFIG_GLOBAL: 'x.cfg' }, inherited, null),
+    ).toMatchObject({ set: true, known: false })
+    expect(
+      lib.commandGitConfig(
+        { HOME: '/outra' },
+        { ...inherited, GIT_CONFIG: '/x' },
+        '/w',
+      ),
+    ).toMatchObject({ set: true, known: false })
+  })
+})
+
+describe.concurrent(
+  'configuredRemote (Copilot review of #26, seventh round)',
+  () => {
+    const project = 'https://github.com/geazioliveira/marketo-sandbox.git'
+    const other = 'https://github.com/alguem/outro.git'
+    const withVars = (repo: HookRepo, pairs: [string, string][]) => {
+      const env: NodeJS.ProcessEnv = {
+        ...repo.env(),
+        GIT_CONFIG_COUNT: String(pairs.length),
+      }
+      for (const [index, [key, value]] of pairs.entries()) {
+        env[`GIT_CONFIG_KEY_${index}`] = key
+        env[`GIT_CONFIG_VALUE_${index}`] = value
+      }
+      return env
+    }
+
+    test('reads origin with the command’s config', async ({
+      expect,
+      fresh,
+    }) => {
+      const repo = await fresh()
+      const info = lib.repoAt(repo.dir, { env: repo.env() })
+      expect(info).not.toBeNull()
+      if (info === null) return
+      expect(
+        lib.configuredRemote(info, withVars(repo, [['user.name', 'Outro']])),
+      ).toEqual({ known: true, repo: PROJECT })
+      // The same URL twice is still one repository.
+      expect(
+        lib.configuredRemote(
+          info,
+          withVars(repo, [['remote.origin.url', project]]),
+        ),
+      ).toEqual({ known: true, repo: PROJECT })
+      expect(
+        lib.configuredRemote(
+          info,
+          withVars(repo, [['remote.origin.url', other]]),
+        ),
+      ).toEqual({
+        known: false,
+        why: 'o origin aponta para mais de um repositório',
+      })
+    })
+
+    test.for<[string, [string, string][], string]>([
+      [
+        'a rewriting of URLs',
+        [[`url.${project}.insteadOf`, other]],
+        'ela reescreve URLs',
+      ],
+      [
+        'a push rewriting',
+        [[`url.${project}.pushInsteadOf`, other]],
+        'ela reescreve URLs',
+      ],
+      [
+        'an include',
+        [['include.path', '/nao/existe.cfg']],
+        'ela inclui outro arquivo',
+      ],
+      [
+        'a conditional include',
+        [['includeIf.gitdir:/x/.path', '/nao/existe.cfg']],
+        'ela inclui outro arquivo',
+      ],
+      [
+        'gh’s default repository',
+        [['remote.origin.gh-resolved', 'base']],
+        'ela dá ao gh um repositório padrão',
+      ],
+      [
+        'another remote',
+        [['remote.upstream.url', project]],
+        'ela tem outro remote além do origin (upstream)',
+      ],
+      [
+        'a push URL of origin',
+        [['remote.origin.pushurl', project]],
+        'o origin tem uma URL de push própria',
+      ],
+    ])('is unknown with %s', async ([, pairs, why], { expect, fresh }) => {
+      const repo = await fresh({ origin: other })
+      const info = lib.repoAt(repo.dir, { env: repo.env() })
+      expect(info).not.toBeNull()
+      if (info === null) return
+      const found = lib.configuredRemote(info, withVars(repo, pairs))
+      expect(found.known).toBe(false)
+      expect(found.known ? '' : found.why).toContain(why)
+    })
+
+    test('is unknown when git refuses the config', async ({
+      expect,
+      fresh,
+    }) => {
+      const repo = await fresh()
+      const info = lib.repoAt(repo.dir, { env: repo.env() })
+      if (info === null) throw new Error('sem repositório')
+      const env = { ...repo.env(), GIT_CONFIG_COUNT: '1' }
+      const found = lib.configuredRemote(info, env)
+      expect(found.known).toBe(false)
+      expect(found.known ? '' : found.why).toContain(
+        'o git recusou essa configuração',
+      )
+    })
+
+    test('gives no repository without origin, and reads a linked worktree through its git dir', async ({
+      expect,
+      fresh,
+    }) => {
+      const bare = await fresh({ origin: null })
+      const info = lib.repoAt(bare.dir, { env: bare.env() })
+      if (info === null) throw new Error('sem repositório')
+      expect(
+        lib.configuredRemote(info, withVars(bare, [['user.name', 'Outro']])),
+      ).toEqual({ known: true, repo: null })
+      const repo = await fresh()
+      const tree = await repo.addWorktree('arvore', 'feature/8-outra')
+      const linked = lib.repoAt(tree.dir, { env: repo.env() })
+      if (linked === null) throw new Error('sem worktree')
+      expect(
+        lib.configuredRemote(
+          linked,
+          withVars(repo, [[`url.${other}.insteadOf`, project]]),
+        ),
+      ).toMatchObject({ known: false })
+      expect(
+        lib.configuredRemote(linked, withVars(repo, [['user.name', 'Outro']])),
+      ).toEqual({ known: true, repo: PROJECT })
+    })
+  },
+)

@@ -2466,3 +2466,339 @@ describe.concurrent(
     })
   },
 )
+
+// ---------------------------------------------------------------------------
+// Seventh round of Copilot's review of #26
+
+describe.concurrent(
+  'the git config a gh command gives git (Copilot review of #26, seventh round)',
+  () => {
+    const modes = ['default', 'auto'] as const
+    const project = 'https://github.com/geazioliveira/marketo-sandbox.git'
+    const other = 'https://github.com/alguem/outro.git'
+    const transition =
+      'gh issue edit 5 --remove-label needs-triage --add-label ready-for-human'
+    /** The example of the review, word for word. */
+    const example = `GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=remote.origin.url GIT_CONFIG_VALUE_0=${project} ${transition}`
+    /** git config that sends the other clone's origin to this project. */
+    const redirect = `[url "${project}"]\n\tinsteadOf = ${other}\n`
+    const redirectVars = `GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=url.${project}.insteadOf GIT_CONFIG_VALUE_0=${other}`
+    const inPlan = () => ({
+      issues: {
+        5: {
+          labels: ['enhancement', 'needs-triage'],
+          lastCommentBody: '# Plano\n\n## Contexto e porquê\n\nTexto.',
+        },
+      },
+    })
+    const unknownTransition =
+      /não consegui ler em que repositório o comando troca needs-triage por ready-for-human \(o comando dá ao git uma configuração própria/
+
+    /** A dir of its own for the config files a case writes, removed after it. */
+    const configDir = (files: Record<string, string>) => {
+      const dir = realpathSync.native(
+        mkdtempSync(path.join(tmpdir(), 'guard-bash-config-')),
+      )
+      for (const [file, content] of Object.entries(files)) {
+        mkdirSync(path.dirname(path.join(dir, file)), { recursive: true })
+        writeFileSync(path.join(dir, file), content)
+      }
+      return dir
+    }
+
+    /** The label exception with a target it cannot read: a critical ask, a deny in auto, nothing read live. */
+    function expectUnknownTransition(
+      run: HookRun,
+      mode: string,
+      calls: () => GhCall[],
+      why?: RegExp,
+    ) {
+      if (mode === 'auto') {
+        expectDeny(run, /Em auto, a confirmação vira negação/)
+      } else expectAsk(run)
+      expect(reasonOf(run)).toMatch(unknownTransition)
+      if (why !== undefined) expect(reasonOf(run)).toMatch(why)
+      expect(calls()).toEqual([])
+    }
+
+    test.for(modes)(
+      'the example of the review, from a clone of another repository: the target is unknown, in %s',
+      async (mode, { live }) => {
+        const gh = live(inPlan())
+        expectUnknownTransition(
+          await guard(example, { repo: elsewhere, env: gh.env, mode }),
+          mode,
+          gh.calls,
+          /GIT_CONFIG_COUNT, GIT_CONFIG_KEY_0, GIT_CONFIG_VALUE_0\), e o origin aponta para mais de um repositório/,
+        )
+      },
+    )
+
+    test.for(modes)(
+      'the example of the review, from a clone of this project: read live and passed, as today, in %s',
+      async (mode, { live }) => {
+        const gh = live(inPlan())
+        expectPass(await guard(example, { env: gh.env, mode }))
+        expect(gh.calls()).toEqual([
+          expect.objectContaining({ call: 'issueState', key: '5', mode: 'ok' }),
+        ])
+      },
+    )
+
+    test.for(modes)(
+      'gh pr merge with the variables of the example, from a clone of another repository: reads nothing and says why, in %s',
+      async (mode, { live }) => {
+        const gh = live({ prs: { 26: { pr: readyPr({ number: 26 }) } } })
+        const vars = example.slice(0, example.length - transition.length)
+        // Without the variables, the merge is another repository's: it passes.
+        expectPass(
+          await guard('gh pr merge 26', { repo: elsewhere, env: gh.env, mode }),
+        )
+        const run = await guard(`${vars}gh pr merge 26`, {
+          repo: elsewhere,
+          env: gh.env,
+          mode,
+        })
+        if (mode === 'auto')
+          expectDeny(run, /Em auto, a confirmação vira negação/)
+        else expectAsk(run)
+        expect(reasonOf(run)).toMatch(
+          /não consegui ler o estado da PR \(o repositório da PR não pôde ser lido \(o comando dá ao git uma configuração própria \(GIT_CONFIG_COUNT, GIT_CONFIG_KEY_0, GIT_CONFIG_VALUE_0\), e o origin aponta para mais de um repositório\)\)/,
+        )
+        expect(gh.calls()).toEqual([])
+      },
+    )
+
+    test.for(modes)(
+      'a label the agent never adds, from a clone of another repository sent to this project: denied, in %s',
+      async (mode) => {
+        expectDeny(
+          await guard(
+            `${redirectVars} gh issue edit 5 --add-label ready-for-agent`,
+            { repo: elsewhere, mode },
+          ),
+          /ready-for-agent são do dono/,
+        )
+      },
+    )
+
+    test.for(modes)(
+      'each variable that moves git’s config, from a clone of another repository: the target is unknown, in %s',
+      async (mode, { live }) => {
+        const files = configDir({
+          'redirect.cfg': redirect,
+          'resolved.cfg': `[remote "origin"]\n\tgh-resolved = geazioliveira/marketo-sandbox\n`,
+          'home/.gitconfig': redirect,
+          'xdg/git/config': redirect,
+        })
+        try {
+          const cases: [string, Record<string, string | null>, RegExp][] = [
+            [redirectVars, {}, /reescreve URLs/],
+            [
+              `GIT_CONFIG_PARAMETERS="'url.${project}.insteadof'='${other}'"`,
+              {},
+              /GIT_CONFIG_PARAMETERS\), e ela reescreve URLs/,
+            ],
+            [
+              `GIT_CONFIG_GLOBAL=${files}/redirect.cfg`,
+              {},
+              /GIT_CONFIG_GLOBAL\), e ela reescreve URLs/,
+            ],
+            [
+              `GIT_CONFIG_NOSYSTEM=0 GIT_CONFIG_SYSTEM=${files}/redirect.cfg`,
+              {},
+              /GIT_CONFIG_NOSYSTEM, GIT_CONFIG_SYSTEM\), e ela reescreve URLs/,
+            ],
+            // The hook inherits a system config it does not read; the
+            // command turns it on.
+            [
+              'GIT_CONFIG_NOSYSTEM=0',
+              { GIT_CONFIG_SYSTEM: `${files}/redirect.cfg` },
+              /GIT_CONFIG_NOSYSTEM\), e ela reescreve URLs/,
+            ],
+            [
+              `GIT_CONFIG=${files}/resolved.cfg`,
+              {},
+              /GIT_CONFIG leva o git config que o gh roda a outro arquivo/,
+            ],
+            // HOME and XDG_CONFIG_HOME count where GIT_CONFIG_GLOBAL does
+            // not replace them, as outside the specs.
+            [
+              `HOME=${files}/home`,
+              { GIT_CONFIG_GLOBAL: null },
+              /\(HOME\), e ela reescreve URLs/,
+            ],
+            [
+              `XDG_CONFIG_HOME=${files}/xdg`,
+              { GIT_CONFIG_GLOBAL: null },
+              /\(XDG_CONFIG_HOME\), e ela reescreve URLs/,
+            ],
+          ]
+          for (const [vars, inherited, why] of cases) {
+            const gh = live(inPlan())
+            const env = { ...gh.env }
+            for (const [name, value] of Object.entries(inherited))
+              if (value === null) delete env[name]
+              else env[name] = value
+            // Without the variable, the other clone passes: what changes
+            // the verdict is the config the command gives git.
+            expectPass(await guard(transition, { repo: elsewhere, env, mode }))
+            expectUnknownTransition(
+              await guard(`${vars} ${transition}`, {
+                repo: elsewhere,
+                env,
+                mode,
+              }),
+              mode,
+              gh.calls,
+              why,
+            )
+          }
+        } finally {
+          rmSync(files, { recursive: true, force: true })
+        }
+      },
+    )
+
+    test.for(modes)(
+      'the variables exported earlier on the line, or assigned there, count as on the command, in %s',
+      async (mode, { live }) => {
+        const files = configDir({ 'home/.gitconfig': redirect })
+        try {
+          for (const line of [
+            `export ${redirectVars}; ${transition}`,
+            `export ${redirectVars} && ${transition}`,
+            `HOME=${files}/home; ${transition}`,
+            `declare HOME=${files}/home; ${transition}`,
+          ]) {
+            const gh = live(inPlan())
+            expectUnknownTransition(
+              await guard(line, { repo: elsewhere, env: gh.env, mode }),
+              mode,
+              gh.calls,
+            )
+          }
+        } finally {
+          rmSync(files, { recursive: true, force: true })
+        }
+      },
+    )
+
+    test.for(modes)(
+      'env that takes the config’s variables out of the command: the target is unknown, in %s',
+      async (mode, { live }) => {
+        for (const wrapper of [
+          'env -u HOME',
+          'env --unset=GIT_CONFIG_GLOBAL',
+          'env -i PATH=/usr/bin:/bin',
+          'env - PATH=/usr/bin:/bin',
+        ]) {
+          const gh = live(inPlan())
+          expectUnknownTransition(
+            await guard(`${wrapper} ${transition}`, {
+              repo: elsewhere,
+              env: gh.env,
+              mode,
+            }),
+            mode,
+            gh.calls,
+            /fica vazia ou deixa de existir/,
+          )
+        }
+      },
+    )
+
+    test.for(modes)(
+      'env with a lone -, read as -i, still runs the gh the rules judge, in %s',
+      async (mode) => {
+        expectDeny(
+          await guard('env - gh issue reopen 5', { mode }),
+          /reabrir uma issue/,
+        )
+        expectDeny(
+          await guard('env - PATH=/usr/bin gh issue reopen 5', { mode }),
+          /reabrir uma issue/,
+        )
+      },
+    )
+
+    test.for(modes)(
+      'a value it cannot read, or a config git refuses: the target is unknown, in %s',
+      async (mode, { live }) => {
+        for (const [vars, why] of [
+          [
+            'GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=remote.origin.url GIT_CONFIG_VALUE_0=$URL',
+            /GIT_CONFIG_VALUE_0 traz uma expansão/,
+          ],
+          [
+            'GIT_CONFIG_GLOBAL="$(mktemp)"',
+            /GIT_CONFIG_GLOBAL traz uma expansão/,
+          ],
+          ['export HOME;', /HOME traz uma expansão/],
+          ['unset HOME;', /não sei se HOME fica vazia ou deixa de existir/],
+          [
+            'GIT_CONFIG_COUNT=2 GIT_CONFIG_KEY_0=user.name GIT_CONFIG_VALUE_0=Outro',
+            /o git recusou essa configuração/,
+          ],
+        ] as const) {
+          const gh = live(inPlan())
+          expectUnknownTransition(
+            await guard(`${vars} ${transition}`, {
+              repo: elsewhere,
+              env: gh.env,
+              mode,
+            }),
+            mode,
+            gh.calls,
+            why,
+          )
+        }
+      },
+    )
+
+    test.for(modes)(
+      'a config it reads in full, that leaves the other repository, still passes there, in %s',
+      async (mode) => {
+        for (const vars of [
+          'GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=user.name GIT_CONFIG_VALUE_0=Outro',
+          `GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=remote.origin.url GIT_CONFIG_VALUE_0=${other}`,
+          `HOME=${elsewhere.env().HOME}`,
+        ])
+          expectPass(
+            await guard(`${vars} gh issue edit 5 --add-label ready-for-agent`, {
+              repo: elsewhere,
+              mode,
+            }),
+          )
+      },
+    )
+
+    test.for(modes)(
+      'a gh api placeholder filled from such a config is not filled with the other repository, in %s',
+      async (mode) => {
+        const line = `gh api -X POST 'repos/{owner}/{repo}/issues/5/labels' -f 'labels[]=ready-for-agent'`
+        expectPass(await guard(line, { repo: elsewhere, mode }))
+        expectDeny(
+          await guard(`${redirectVars} ${line}`, { repo: elsewhere, mode }),
+          /o agente não escreve label de estado por gh api/,
+        )
+      },
+    )
+
+    test.for(modes)(
+      'a remote an earlier command of the line changed is not read again from the disk, in %s',
+      async (mode, { live }) => {
+        const gh = live(inPlan())
+        expectUnknownTransition(
+          await guard(
+            `git remote set-url origin ${other} && GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=user.name GIT_CONFIG_VALUE_0=Outro ${transition}`,
+            { repo: elsewhere, env: gh.env, mode },
+          ),
+          mode,
+          gh.calls,
+          /um comando anterior da linha mudou os remotes/,
+        )
+      },
+    )
+  },
+)

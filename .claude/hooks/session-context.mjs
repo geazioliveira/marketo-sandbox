@@ -10,6 +10,11 @@
 //
 // Neither event can block, and neither should fail loudly: an error here
 // prints nothing and exits 0, and the PreToolUse hooks still guard the acts.
+// Only a git that did not answer in time is said (Copilot review of #26,
+// seventh round): the run has its own budget (lib/budget.mjs), well below
+// the 30 s Claude Code gives each event, and once it or a git's own timeout
+// runs out the context says the state could not be read, instead of the
+// hook being killed with nothing said.
 import path from 'node:path'
 import {
   gateStatus,
@@ -18,6 +23,7 @@ import {
   parseBranch,
   readyLabel,
 } from '../../scripts/loop-sections.mjs'
+import { BudgetExhausted, startBudget } from './lib/budget.mjs'
 import { contextOutput, readInput } from './lib/io.mjs'
 import {
   isProject,
@@ -84,13 +90,43 @@ function sessionStart(input) {
   return [branchLine(repo.branch), gateLine(status), ownerRule].join('\n')
 }
 
+/**
+ * Whether an error means git did not answer in time: the run's budget ran
+ * out, or one git reached its own timeout (repo.mjs keeps the spawn's error
+ * as the cause).
+ */
+function outOfTime(error) {
+  return error instanceof BudgetExhausted || error?.cause?.code === 'ETIMEDOUT'
+}
+
+/** What SessionStart says when the state could not be read in time. */
+function lateText(error) {
+  const within =
+    error instanceof BudgetExhausted
+      ? `dentro do prazo de ${error.budgetMs / 1000} s do hook`
+      : 'a tempo'
+  return [
+    `Não consegui ler a branch e o gate: o git não respondeu ${within}. Conte o gate como fechado e rode npm run gate na branch antes de editar.`,
+    ownerRule,
+  ].join('\n')
+}
+
 async function main() {
+  // Every git this run starts shares one budget, so the run ends before
+  // Claude Code's timeout whatever git does.
+  startBudget('session-context')
   const input = await readInput()
   if (input === null) return null
   const event = input.hook_event_name
   if (event === 'UserPromptSubmit') return contextOutput(event, reminder)
   if (event === 'SessionStart') {
-    const text = sessionStart(input)
+    let text
+    try {
+      text = sessionStart(input)
+    } catch (error) {
+      if (!outOfTime(error)) throw error
+      text = lateText(error)
+    }
     return text === null ? null : contextOutput(event, text)
   }
   return null

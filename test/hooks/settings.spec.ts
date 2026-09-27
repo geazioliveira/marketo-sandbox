@@ -106,7 +106,14 @@ describe('.claude/settings.json (#5)', () => {
     }>('budget')
     const margin = 10_000
     const names = Object.keys(budget.hookBudgetsMs).sort()
-    expect(names).toEqual(['build-guard', 'guard-bash', 'plan-to-issue'])
+    // session-context too (seventh round): it reads git on SessionStart,
+    // and a killed hook says nothing at all.
+    expect(names).toEqual([
+      'build-guard',
+      'guard-bash',
+      'plan-to-issue',
+      'session-context',
+    ])
     for (const name of names) {
       const timeouts = registered
         .filter((entry) => entry.name === name)

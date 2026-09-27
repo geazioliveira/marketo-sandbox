@@ -86,7 +86,9 @@ const shells = new Set(['bash', 'sh', 'zsh', 'dash', 'ksh'])
  * Programs that run the command after their own options, and how to skip
  * those options: letters that take a value (`valued`), long options that
  * take one (`long`), operands before the command (`operands`), and whether
- * `-<digits>` is an option (`numeric`).
+ * `-<digits>` is an option (`numeric`). For env, the options that take
+ * variables out of the command's environment: `unsets` one (`-u NAME`),
+ * `clears` all of them (`-i`, and a lone `-`, which env reads as `-i`).
  */
 const wrappers = new Map([
   ['command', { stopIf: ['-v', '-V'] }],
@@ -126,6 +128,8 @@ const wrappers = new Map([
       long: ['--unset', '--chdir', '--split-string'],
       chdir: ['-C', '--chdir'],
       split: ['-S', '--split-string'],
+      unsets: ['-u', '--unset'],
+      clears: ['-i', '--ignore-environment', '-'],
       assignments: true,
     },
   ],
@@ -930,6 +934,11 @@ function skipOptions(list, spec) {
       k += 1
       break
     }
+    if (arg === '-' && spec.clears?.includes('-')) {
+      found.push({ name: '-', value: null })
+      k += 1
+      continue
+    }
     if (!arg.startsWith('-') || arg === '-') break
     if (spec.numeric && /^-\d+$/.test(arg)) {
       k += 1
@@ -990,6 +999,18 @@ function unwrap(list, context) {
   let dir = context.dir
   const env = { ...context.env }
   for (const option of found) {
+    // A variable env takes out is unset for the command: the parser writes
+    // that as empty, as `unset` is (recordExports). Of what `-i` takes out,
+    // only the variables the rules read are known by name (Copilot review
+    // of #26, seventh round: the git config gh reads, and its repository).
+    if (spec.clears?.includes(option.name))
+      for (const name of clearedByEnv) env[name] = ''
+    if (
+      spec.unsets?.includes(option.name) &&
+      option.value !== null &&
+      watchedVariable.test(option.value)
+    )
+      env[option.value] = ''
     if (spec.chdir?.includes(option.name) && option.value !== null)
       dir = path.isAbsolute(option.value)
         ? path.normalize(option.value)
@@ -2184,6 +2205,9 @@ function build(unit, context) {
   const later = []
   const scopes = []
   const stack = []
+  // Standalone assignments (`HOME=/x;`) since the last command: the next
+  // command carries them as assignedBefore, for recordAssignments.
+  let assignedSince = []
   let cwd = context.cwd
   let previous
   let next = 0
@@ -2353,7 +2377,18 @@ function build(unit, context) {
         trusted: context.trusted,
       },
     )
-    if (result.command !== null) out.push(result.command)
+    if (result.command !== null) {
+      // Not enumerable: a copy of the command ({ ...command }) is a command
+      // of its own, and only the caller that reads the line in order, before
+      // judging each command, applies it.
+      if (assignedSince.length > 0)
+        Object.defineProperty(result.command, 'assignedBefore', {
+          value: assignedSince,
+          enumerable: false,
+        })
+      assignedSince = []
+      out.push(result.command)
+    } else assignedSince = [...assignedSince, ...result.assigned]
     later.push(...result.extra)
     if (active) {
       if (current.recheck && result.risk !== null)
@@ -2602,6 +2637,47 @@ export function readBody(
 const watchedVariable = /^(?:GH_|GIT_|XDG_CONFIG_HOME$|HOME$)/
 
 /**
+ * The variables the rules read that `env -i` takes away from the command:
+ * those that decide which git config gh reads (repo.mjs' gitConfigVariable,
+ * but the numbered keys, which count only with GIT_CONFIG_COUNT) and those
+ * that decide gh's host and repository.
+ */
+const clearedByEnv = [
+  'HOME',
+  'XDG_CONFIG_HOME',
+  'GIT_CONFIG',
+  'GIT_CONFIG_COUNT',
+  'GIT_CONFIG_PARAMETERS',
+  'GIT_CONFIG_GLOBAL',
+  'GIT_CONFIG_SYSTEM',
+  'GIT_CONFIG_NOSYSTEM',
+  'GH_HOST',
+  'GH_REPO',
+  'GIT_DIR',
+]
+
+/**
+ * Records in `exported` what the standalone assignments before a command
+ * (`HOME=/x; gh …`, parseCommand's assignedBefore) may have left in its
+ * environment. Such an assignment changes the environment only for a
+ * variable the shell already exports (HOME always is), and which ones it
+ * exports the hook cannot know: Claude Code's shell sources the person's
+ * profile. So a watched variable assigned that way is kept as an expansion
+ * (`${ATRIBUIDO}`), which every rule takes as unknown (Copilot review of
+ * #26, seventh round: HOME moves the global git config gh reads). Called
+ * before the command is judged, as recordExports is after.
+ * @param {{ assignedBefore?: { name: string }[] }} command
+ * @param {Record<string, string>} exported
+ */
+export function recordAssignments(command, exported) {
+  for (const { name } of command.assignedBefore ?? [])
+    if (watchedVariable.test(name)) exported[name] = '${ATRIBUIDO}'
+}
+
+/** Builtins that assign a variable in place without exporting it. */
+const inPlaceDeclarers = new Set(['declare', 'typeset', 'local', 'readonly'])
+
+/**
  * Records in `exported` what a command leaves in the environment of the
  * commands after it on the line: `export`, `declare -x`/`typeset -x` and
  * `unset` of a variable the rules read (GH_HOST, GH_REPO, GIT_DIR…). A value
@@ -2623,6 +2699,16 @@ export function recordExports(command, exported) {
   if (program === 'unset') {
     for (const name of argv.slice(1))
       if (watchedVariable.test(name)) exported[name] = ''
+    return
+  }
+  if (!exporting && inPlaceDeclarers.has(program)) {
+    // `declare HOME=/x` changes HOME in place, and so its exported value
+    // when the shell exports it: unknown, as a standalone assignment is.
+    for (const arg of argv.slice(1)) {
+      const eq = arg.indexOf('=')
+      if (eq > 0 && watchedVariable.test(arg.slice(0, eq)))
+        exported[arg.slice(0, eq)] = '${ATRIBUIDO}'
+    }
     return
   }
   if (!exporting) return

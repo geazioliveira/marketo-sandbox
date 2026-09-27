@@ -35,7 +35,14 @@ import {
 import { afterSpawn, spawnTimeout } from './budget.mjs'
 import { readSource, skipTokenIn, wordKnown } from './git-rules.mjs'
 import { ask, combine, deny, pass } from './io.mjs'
-import { isProject, projectRepo, repoFromArg, trunk } from './repo.mjs'
+import {
+  commandGitConfig,
+  configuredRemote,
+  isProject,
+  projectRepo,
+  repoFromArg,
+  trunk,
+} from './repo.mjs'
 import { findOptions, parseCommand, readBody } from './shell.mjs'
 
 // ---------------------------------------------------------------------------
@@ -816,10 +823,12 @@ export function ghRepoDir(env, cwd) {
  * never this project (Copilot review of #26), and `host` names it. A value
  * that holds an expansion, a directory that could not be read, or a GH_HOST
  * that could not be read may be this project: the target is then unknown,
- * judged as this project for a refusal and never for a pass.
+ * judged as this project for a refusal and never for a pass. The remotes
+ * are read with the git config the command gives git (remotesRepo; seventh
+ * round), and `why` says why they could not be.
  *
  * plan-to-issue reads a publication's target here too (fourth round), with
- * ctx = { env, repo, cwdKnown } of the place its gh runs.
+ * ctx = { env, repo, cwdKnown, cwd } of the place its gh runs.
  * @returns {{ repo: string | null, unknown: boolean, host?: string }}
  */
 export function targetOf(command, ctx, operands = []) {
@@ -839,8 +848,48 @@ export function targetOf(command, ctx, operands = []) {
   if (host.unknown) return { repo: null, unknown: true }
   if (host.host !== 'github.com')
     return { repo: null, unknown: false, host: host.host }
+  return remotesRepo(command, ctx)
+}
+
+/**
+ * The repository gh picks from the remotes where the command runs, for
+ * targetOf and gh api's placeholders (Copilot review of #26, seventh round).
+ *
+ * ctx.repo is repoAt of that place, read once per directory with the
+ * environment the hook inherited. That is the environment gh inherits as
+ * well, so for a command that gives git no config of its own the reading
+ * stays what it was: origin as repoAt reads it. A command that sets a
+ * variable of repo.mjs' gitConfigVariable (on itself, or exported earlier
+ * on the line: command.env holds both) gives gh a config repoAt did not
+ * read, and is read again with exactly its environment (configuredRemote).
+ * Unknown, judged as this project for a refusal and never for a pass, when
+ * any of those variables cannot be read, when that config is not one the
+ * hook reads in full, or when an earlier command of the line changed the
+ * remotes (ctx.repo.remotesChanged, from guard-bash): the config on disk is
+ * then not the one gh reads. `why` says which.
+ * @returns {{ repo: string | null, unknown: boolean, why?: string }}
+ */
+function remotesRepo(command, ctx) {
   if (!remotesKnown(ctx)) return { repo: null, unknown: true }
-  return { repo: ctx.repo?.repo ?? null, unknown: false }
+  const config = commandGitConfig(
+    command.env ?? {},
+    ctx.env ?? process.env,
+    ctx.cwd,
+  )
+  if (!config.set) return { repo: ctx.repo?.repo ?? null, unknown: false }
+  if (!config.known) return { repo: null, unknown: true, why: config.why }
+  // No repository there: gh finds no remote to pick, whatever the config.
+  if (ctx.repo == null) return { repo: null, unknown: false }
+  if (ctx.repo.remotesChanged === true || typeof ctx.repo.gitDir !== 'string')
+    return {
+      repo: null,
+      unknown: true,
+      why: `${config.what}, e um comando anterior da linha mudou os remotes que ela lê`,
+    }
+  const found = configuredRemote(ctx.repo, config.env)
+  return found.known
+    ? { repo: found.repo, unknown: false }
+    : { repo: null, unknown: true, why: `${config.what}, e ${found.why}` }
 }
 
 // ---------------------------------------------------------------------------
@@ -1157,7 +1206,7 @@ function issueEdit(command, ctx) {
         ? deny(labelRule)
         : ctx.targetKnown === false
           ? unread(
-              `não consegui ler em que repositório o comando troca ${planFrom} por ${planTo}: confira que a issue #${refs[0].number} é deste projeto, está em ${planFrom} e tem um # Plano como último comentário`,
+              `não consegui ler em que repositório o comando troca ${planFrom} por ${planTo}${ctx.targetWhy ? ` (${ctx.targetWhy})` : ''}: confira que a issue #${refs[0].number} é deste projeto, está em ${planFrom} e tem um # Plano como último comentário`,
             )
           : planTransition(ctx.github, ctx.target, refs[0].number),
     )
@@ -1388,7 +1437,11 @@ function prMerge(command, ctx) {
   // (Copilot review of #26): it asks, critical, as a failed read does.
   if (ctx.targetKnown === false)
     return judged(
-      mergeDecision(failed('o repositório da PR não pôde ser lido')),
+      mergeDecision(
+        failed(
+          `o repositório da PR não pôde ser lido${ctx.targetWhy ? ` (${ctx.targetWhy})` : ''}`,
+        ),
+      ),
     )
   return judged(mergeDecision(ctx.github.prMergeState(ctx.target, prRef)))
 }
@@ -2692,12 +2745,14 @@ const placeholder = /:(?:owner|repo|branch)\b|\{[a-z]+\}/
 
 /**
  * The repository gh fills `{owner}` and `{repo}` with: GH_REPO, else the one
- * around the command's directory. null when neither can be read.
+ * around the command's directory, with the git config the command gives it
+ * (remotesRepo). null when neither can be read.
  */
 function placeholderRepo(command, ctx) {
   const env = ghRepoEnv(command, ctx)
   if (env !== null) return env.repo
-  return remotesKnown(ctx) ? (ctx.repo?.repo ?? null) : null
+  const remote = remotesRepo(command, ctx)
+  return remote.unknown ? null : remote.repo
 }
 
 function apiDecision(command, base, from) {
@@ -2779,10 +2834,10 @@ const handlers = {
  * (githubClients()), or github: one client for every read }.
  * A handler also gets `target`, the repository the command acts on, this
  * project when it cannot be read, and `targetKnown`, false then: a rule
- * that would pass on a live read of this project asks instead. Its
- * `github` reads the host the command goes to (Copilot review of #26,
- * fifth round): github.com for this project, nothing when the target
- * cannot be read.
+ * that would pass on a live read of this project asks instead, naming
+ * `targetWhy` when there is one (seventh round). Its `github` reads the
+ * host the command goes to (Copilot review of #26, fifth round): github.com
+ * for this project, nothing when the target cannot be read.
  */
 export async function ghDecision(command, ctx) {
   const [group, verb] = leadingWords(command)
@@ -2826,6 +2881,7 @@ export async function ghDecision(command, ctx) {
       operands,
       target: target.repo ?? projectRepo,
       targetKnown: !target.unknown,
+      targetWhy: target.why ?? null,
       // This project is on github.com: a target that could be read as it is
       // there, whatever GH_HOST the hook inherits; one that could not, read
       // nowhere.

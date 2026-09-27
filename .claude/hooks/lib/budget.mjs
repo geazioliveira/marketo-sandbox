@@ -8,8 +8,9 @@
 // run has one deadline, shared by every process it starts: each one's timeout
 // is its own or what is left of the budget, whichever is shorter, and once
 // the budget is spent no process starts. The hook then answers with the
-// budget's reason (guard-bash and build-guard ask, critical), before Claude
-// Code would kill it.
+// budget's reason (guard-bash and build-guard ask, critical; session-context
+// says the state could not be read in time), before Claude Code would kill
+// it.
 //
 // The budgets sit well below each hook's timeout in settings.json, so Node's
 // start and the final answer fit after the deadline; test/hooks/settings.spec.ts
@@ -22,6 +23,10 @@ export const hookBudgetsMs = Object.freeze({
   'guard-bash': 45_000,
   'build-guard': 30_000,
   'plan-to-issue': 20_000,
+  // SessionStart and UserPromptSubmit, 30 s each (Copilot review of #26,
+  // seventh round): past it, session-context says the state could not be
+  // read in time, before Claude Code would kill it with nothing said.
+  'session-context': 15_000,
 })
 
 /** Lowers the budget of any hook, for the specs; a higher value is ignored. */

@@ -2631,3 +2631,154 @@ describe.concurrent(
     })
   },
 )
+
+// ---------------------------------------------------------------------------
+// Seventh round of Copilot's review of #26
+
+describe.concurrent(
+  'the git config a publication gives git (Copilot review of #26, seventh round)',
+  () => {
+    const comment = 'gh issue comment 5 --body-file plano.md'
+    const url = `${ISSUE_URL}/5#issuecomment-40\n`
+    const project = 'https://github.com/geazioliveira/marketo-sandbox.git'
+    const other = 'https://github.com/alguem/outro.git'
+    /** Adds the other repository to origin's URLs: which one gh takes is not read. */
+    const addOther = `GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=remote.origin.url GIT_CONFIG_VALUE_0=${other}`
+    /** Rewrites this project's origin to the other repository. */
+    const rewrite = `GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=url.${other}.insteadOf GIT_CONFIG_VALUE_0=${project}`
+    /** A config the hook reads in full, which leaves origin alone. */
+    const harmless =
+      'GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=user.name GIT_CONFIG_VALUE_0=Outro'
+    const posted = () => ({
+      comments: {
+        5: {
+          comments: [
+            { body: planComment, createdAt: later(), viewerDidAuthor: true },
+          ],
+        },
+      },
+    })
+
+    test('Bash: a config that may send the comment elsewhere keeps the marker, even with the issue URL, and says why', async ({
+      fresh,
+      expect,
+    }) => {
+      for (const [vars, why] of [
+        [addOther, 'o origin aponta para mais de um repositório'],
+        [rewrite, 'ela reescreve URLs'],
+        ['GIT_CONFIG_GLOBAL="$OUTRO"', 'GIT_CONFIG_GLOBAL traz uma expansão'],
+      ] as const) {
+        const repo = await pending(fresh)
+        repo.write({ 'plano.md': planComment })
+        const run = await bash(repo, `${vars} ${comment}`, url)
+        expect(run.status).toBe(0)
+        expect(existsSync(repo.markerPath(SESSION))).toBe(true)
+        expect(cacheExists(repo)).toBe(true)
+        expect(contextOf(run)).toContain(
+          'o comando dá ao git uma configuração própria',
+        )
+        expect(contextOf(run)).toContain(why)
+        expect(contextOf(run)).toContain('o marcador continua')
+        expect(contextOf(run)).toContain('sem dar ao git uma configuração')
+      }
+    })
+
+    test('Bash: a config it reads in full, that leaves origin on this project, counts as today', async ({
+      fresh,
+      expect,
+    }) => {
+      const repo = await pending(fresh)
+      repo.write({ 'plano.md': planComment })
+      const run = await bash(repo, `${harmless} ${comment}`, url)
+      expect(run.status).toBe(0)
+      expect(existsSync(repo.markerPath(SESSION))).toBe(false)
+      expect(contextOf(run)).toContain(`plano publicado em ${ISSUE_URL}/5`)
+    })
+
+    test('Bash: a config path relative to the directory the command runs in is read from there', async ({
+      fresh,
+      expect,
+    }) => {
+      const files = {
+        'plano.md': planComment,
+        'casa.gitconfig': '[user]\n\tname = Outro\n',
+        'docs/plano.md': planComment,
+        'docs/casa.gitconfig': `[url "${other}"]\n\tinsteadOf = ${project}\n`,
+      }
+      // From the repository's root, the file leaves origin on this project:
+      // it counts as today.
+      const root = await pending(fresh)
+      mkdirSync(path.join(root.dir, 'docs'))
+      root.write(files)
+      const run = await bash(
+        root,
+        `GIT_CONFIG_GLOBAL=casa.gitconfig ${comment}`,
+        url,
+      )
+      expect(run.status).toBe(0)
+      expect(existsSync(root.markerPath(SESSION))).toBe(false)
+      expect(contextOf(run)).toContain(`plano publicado em ${ISSUE_URL}/5`)
+      // After cd, the same name is the file of docs/, which rewrites origin.
+      const sub = await pending(fresh)
+      mkdirSync(path.join(sub.dir, 'docs'))
+      sub.write(files)
+      const moved = await bash(
+        sub,
+        `cd docs && GIT_CONFIG_GLOBAL=casa.gitconfig ${comment}`,
+        url,
+      )
+      expect(moved.status).toBe(0)
+      expect(existsSync(sub.markerPath(SESSION))).toBe(true)
+      expect(contextOf(moved)).toContain('ela reescreve URLs')
+      expect(contextOf(moved)).toContain('o marcador continua')
+    })
+
+    test('Monitor: such a config, on the command, exported before it or assigned before it, keeps the marker and reads nothing live', async ({
+      fresh,
+      expect,
+    }) => {
+      for (const line of [
+        `${addOther} ${comment}`,
+        `${rewrite} ${comment}`,
+        `export ${rewrite}; ${comment}`,
+        `HOME=/tmp/outra-casa; ${comment}`,
+      ]) {
+        const repo = await pending(fresh)
+        repo.write({ 'plano.md': planComment })
+        repo.setFixture(posted())
+        const run = await otherTool(repo, 'Monitor', line, {
+          taskId: 'b1',
+          status: 'running',
+        })
+        expect(run.status).toBe(0)
+        expect(existsSync(repo.markerPath(SESSION))).toBe(true)
+        expect(contextOf(run)).toContain('o marcador continua')
+        expect(repo.calls()).toEqual([])
+      }
+    })
+
+    test('Monitor: a config it reads in full, that leaves origin on this project, confirms live, as today', async ({
+      fresh,
+      expect,
+    }) => {
+      for (const line of [
+        `${harmless} ${comment}`,
+        `export ${harmless}; ${comment}`,
+      ]) {
+        const repo = await pending(fresh)
+        repo.write({ 'plano.md': planComment })
+        repo.setFixture(posted())
+        const run = await otherTool(repo, 'Monitor', line, {
+          taskId: 'b1',
+          status: 'running',
+        })
+        expect(run.status).toBe(0)
+        expect(existsSync(repo.markerPath(SESSION))).toBe(false)
+        expect(contextOf(run)).toContain('plano publicado na issue #5')
+        expect(repo.calls()).toEqual([
+          expect.objectContaining({ call: 'issueComments', key: '5' }),
+        ])
+      }
+    })
+  },
+)

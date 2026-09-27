@@ -32,6 +32,26 @@ beforeAll(async () => {
 }, setupTimeout)
 
 const parse = (text: string): ParsedCommand => shell.parseCommand(text)
+
+/**
+ * What `env -i` takes away that the rules read, written empty as `unset` is
+ * (Copilot review of #26, seventh round).
+ */
+const clearedByEnvI = Object.fromEntries(
+  [
+    'HOME',
+    'XDG_CONFIG_HOME',
+    'GIT_CONFIG',
+    'GIT_CONFIG_COUNT',
+    'GIT_CONFIG_PARAMETERS',
+    'GIT_CONFIG_GLOBAL',
+    'GIT_CONFIG_SYSTEM',
+    'GIT_CONFIG_NOSYSTEM',
+    'GH_HOST',
+    'GH_REPO',
+    'GIT_DIR',
+  ].map((name) => [name, '']),
+)
 const argvs = (text: string): string[][] =>
   parse(text).commands.map((command) => command.argv)
 /** The one command whose argv starts with these words. */
@@ -599,7 +619,7 @@ describe('assignments and wrappers', () => {
     [
       'env -i with assignments',
       'env -i A=1 B=2 gh issue reopen 5',
-      { A: '1', B: '2' },
+      { ...clearedByEnvI, A: '1', B: '2' },
     ],
     ['env -u', 'env -u X -- gh issue reopen 5', {}],
     ['command', 'command gh issue reopen 5', {}],
@@ -1530,5 +1550,86 @@ describe('a for loop over values written in full (Copilot review of #26, third r
         ['$n', false],
       ],
     ])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Seventh round of Copilot's review of #26
+
+describe('standalone assignments before a command (Copilot review of #26, seventh round)', () => {
+  it('carries them to the next command, not enumerable, and only once', () => {
+    const parsed = parse('HOME=/x A=1; gh issue view 5; gh pr view')
+    const [first, second] = parsed.commands
+    expect(first.argv).toEqual(['gh', 'issue', 'view', '5'])
+    expect(first.assignedBefore?.map((entry) => entry.name)).toEqual([
+      'HOME',
+      'A',
+    ])
+    expect(Object.keys(first)).not.toContain('assignedBefore')
+    expect(second.assignedBefore).toBeUndefined()
+  })
+
+  it('does not count an assignment on the command itself', () => {
+    const [command] = parse('HOME=/x gh issue view 5').commands
+    expect(command.env).toEqual({ HOME: '/x' })
+    expect(command.assignedBefore).toBeUndefined()
+  })
+
+  it('keeps a watched variable so assigned as unknown, and leaves the others', () => {
+    const exported: Record<string, string> = {}
+    for (const command of parse('HOME=/x; A=1; GH_REPO=a/b; gh issue view 5')
+      .commands)
+      shell.recordAssignments(command, exported)
+    expect(exported).toEqual({
+      HOME: '${ATRIBUIDO}',
+      GH_REPO: '${ATRIBUIDO}',
+    })
+  })
+
+  it('keeps a watched variable a declaring builtin sets in place as unknown, and exports as they are', () => {
+    const exported: Record<string, string> = {}
+    for (const text of [
+      'declare HOME=/x',
+      'readonly XDG_CONFIG_HOME=/y',
+      'export GIT_CONFIG_GLOBAL=/z',
+      'declare -x GIT_CONFIG_COUNT=1',
+    ])
+      for (const command of parse(text).commands)
+        shell.recordExports(command, exported)
+    expect(exported).toEqual({
+      HOME: '${ATRIBUIDO}',
+      XDG_CONFIG_HOME: '${ATRIBUIDO}',
+      GIT_CONFIG_GLOBAL: '/z',
+      GIT_CONFIG_COUNT: '1',
+    })
+  })
+})
+
+describe('what env takes out of a command’s environment (Copilot review of #26, seventh round)', () => {
+  it('reads a lone - as -i, instead of as the program', () => {
+    const [command] = parse('env - gh issue reopen 5').commands
+    expect(command.argv).toEqual(['gh', 'issue', 'reopen', '5'])
+    expect(command.env).toEqual(clearedByEnvI)
+    expect(parse('env -i gh issue reopen 5').commands[0].env).toEqual(
+      clearedByEnvI,
+    )
+    expect(
+      parse('env --ignore-environment HOME=/x gh issue reopen 5').commands[0]
+        .env,
+    ).toEqual({ ...clearedByEnvI, HOME: '/x' })
+  })
+
+  it('writes a watched variable env -u takes out as empty, and leaves the others', () => {
+    for (const text of [
+      'env -u HOME -u X gh issue view 5',
+      'env -uHOME gh issue view 5',
+      'env --unset=HOME gh issue view 5',
+      'env --unset HOME gh issue view 5',
+    ])
+      expect(parse(text).commands[0]).toMatchObject({
+        argv: ['gh', 'issue', 'view', '5'],
+        env: { HOME: '' },
+      })
+    expect(parse('env -u X gh issue view 5').commands[0].env).toEqual({})
   })
 })

@@ -42,6 +42,7 @@ import {
   optionValues,
   parseCommand,
   readBody,
+  recordAssignments,
   recordExports,
 } from './shell.mjs'
 
@@ -200,11 +201,15 @@ function placeOf(command, baseCwd, repoOf) {
  * when the command sees one, as guard-bash reads it (ghRepoDir; Copilot
  * review of #26, sixth round). A GIT_DIR that holds an expansion, or names
  * no repository the hook can read, leaves it unknown, and `why` says so.
+ * So does a git config the command gives git (GIT_CONFIG_*, HOME,
+ * XDG_CONFIG_HOME, on the command or exported before it) that gh-rules
+ * cannot read in full (remotesRepo; seventh round). `advice` is how to
+ * publish so that the target can be read.
  *
  * `readHost` is the GitHub a publication to this project goes to, where
  * confirmLive asks whether it went through (Copilot review of #26, fifth
  * round): github.com, whatever GH_HOST the hook itself inherits.
- * @returns {{ project: boolean, issue: number | null, unknown: boolean, why?: string, host?: string, readHost?: string }}
+ * @returns {{ project: boolean, issue: number | null, unknown: boolean, why?: string, advice?: string, host?: string, readHost?: string }}
  */
 function targetOf(command, kind, place, exported, repoOf) {
   const unknown = { project: false, issue: null, unknown: true }
@@ -227,12 +232,16 @@ function targetOf(command, kind, place, exported, repoOf) {
     else return unknown
   }
 
-  const env = { ...process.env, ...exported }
+  // What the command sees over what the hook inherited, as guard-bash hands
+  // it to gh-rules: the line's exports under the command's own assignments,
+  // so gh-rules can tell both from the inherited environment (seventh round).
+  const seenBy = { ...command, env: { ...exported, ...command.env } }
   let repo = place.known ? place.repo : null
   let reposKnown = place.known
   let why
+  let advice = 'sem GIT_DIR, de dentro da worktree da issue'
   if (place.known) {
-    const seen = ghRepoDir({ ...env, ...command.env }, place.dir)
+    const seen = ghRepoDir({ ...process.env, ...seenBy.env }, place.dir)
     if (seen.gitDir !== null) {
       repo = seen.known ? repoOfGitDir(seen.dir, repoOf) : null
       if (repo === null) {
@@ -243,8 +252,19 @@ function targetOf(command, kind, place, exported, repoOf) {
       }
     }
   }
-  const found = ghTarget(command, { env, repo, cwdKnown: reposKnown })
-  if (found.unknown) return why === undefined ? unknown : { ...unknown, why }
+  const found = ghTarget(seenBy, {
+    env: process.env,
+    repo,
+    cwdKnown: reposKnown,
+    cwd: place.known ? place.dir : undefined,
+  })
+  if (found.unknown && why === undefined && typeof found.why === 'string') {
+    why = found.why
+    advice =
+      'sem dar ao git uma configuração própria (GIT_CONFIG_*, HOME, XDG_CONFIG_HOME), de dentro da worktree da issue'
+  }
+  if (found.unknown)
+    return why === undefined ? unknown : { ...unknown, why, advice }
   if (typeof found.host === 'string')
     return { project: false, issue, unknown: false, host: found.host }
   return {
@@ -497,6 +517,7 @@ function onCommand(input, baseCwd, sessionId, { live }) {
   const exported = {}
   const attempts = []
   for (const command of parsed.commands) {
+    recordAssignments(command, exported)
     const kind = publicationKind(command)
     if (kind !== null)
       attempts.push({ command, kind, exported: { ...exported } })
@@ -548,7 +569,7 @@ function onCommand(input, baseCwd, sessionId, { live }) {
       notes.push(
         target.why === undefined
           ? `não consegui ler em que issue, repositório ou host \`${shortText(command)}\` publica; se era o plano, o marcador continua: publique-o com o número da issue escrito no comando.`
-          : `não consegui ler em que repositório \`${shortText(command)}\` publica: ${target.why}; se era o plano, o marcador continua: publique-o sem GIT_DIR, de dentro da worktree da issue.`,
+          : `não consegui ler em que repositório \`${shortText(command)}\` publica: ${target.why}; se era o plano, o marcador continua: publique-o ${target.advice}.`,
       )
     if (target.host !== undefined)
       notes.push(
