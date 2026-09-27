@@ -28,7 +28,7 @@ Os mesmos do plano vigente, o `# Plano` de 2026-09-26 na #5.
     - uma tripwire de texto cru para indireções (`node -e`, `python -c`, aliases) que citem label de estado, o Approve ou o cache.
 - [x] `.claude/hooks/build-guard.mjs` (Edit|Write|NotebookEdit) libera escrita no repositório fora de `context/intent/**` só com o cache do gate aberto para a branch atual. Em `main`, nega. Com plano pendente, pede `ask`.
 - [x] `.claude/hooks/plan-to-issue.mjs`:
-  - no PostToolUse de `ExitPlanMode`, grava `loop-plan-pending-<sessão>.json` no git dir do worktree e injeta os headings obrigatórios;
+  - no PostToolUse de `ExitPlanMode`, grava `loop-plan-pending-<sessão>.json` no diretório git comum do repositório, visível de todo worktree, e injeta os headings obrigatórios;
   - enquanto o marcador existir, `gateStatus()` devolve `pending-plan`, mesmo que o gate rode depois. O contrato, o `.d.mts` e o teste mudam juntos;
   - o marcador só é limpo por um `gh issue comment` ou `gh issue create` que publique o plano;
   - o `ExitPlanMode` **não** é bloqueado.
@@ -91,7 +91,7 @@ As respostas do Approve de 2026-09-25 continuam: em `auto`, os `ask` críticos v
 
 ## Resultados
 
-O que foi construído está na [entrada do changelog](../evolution/changelog.md): os quatro hooks em `.claude/hooks/`, a biblioteca em `.claude/hooks/lib/`, o `run.sh`, o `.claude/settings.json` e 1.425 testes em `test/hooks/`.
+O que foi construído está na [entrada do changelog](../evolution/changelog.md): os quatro hooks em `.claude/hooks/`, a biblioteca em `.claude/hooks/lib/`, o `run.sh`, o `.claude/settings.json` e 1.602 testes em `test/hooks/`.
 
 Como foi verificado:
 
@@ -103,6 +103,7 @@ Como foi verificado:
 - **A revisão do Copilot na PR #26** achou seis brechas: um remote mudado antes do `gh` na mesma linha, a PR criada pela API sem corpo, um `-R` ilegível tratado como este projeto, a mensagem do `git merge`, a publicação feita de outro worktree e o cache do gate dos outros worktrees. Cada uma foi fechada com um teste que falha sem a correção, e uma verificação independente reverteu cada correção, em 19 mutações, todas pegas. O corpus não mudou nenhuma decisão.
 - **A segunda revisão do Copilot** achou mais seis: um programa numa variável que o hook não lê, o `gh pr create --web`, as mensagens que um commit traz de outro (`cherry-pick`, `revert`, `am`, `commit -C`), a falta de um prazo por execução, os nomes protegidos no clone de outro projeto e o `plan-to-issue` depois do `Monitor` e do terminal. Foram 62 mutações; as 17 que nenhum teste pegava ganharam teste, e um deles achou a brecha do `core.useReplaceRefs`, corrigida. O corpus passou a pedir confirmação numa linha a mais, das 902.
 - **A terceira revisão do Copilot** achou onze, quase todas um valor ilegível numa regra que nega com só uma confirmação simples. Uma varredura de todo ponto assim aplicou uma regra só: dúvida sobre uma negação é confirmação crítica. Em `auto`, as negações do corpus foram de 29 para 60, das 902 linhas. Das 31 novas, 25 já pediam confirmação, e o caminho para as outras é escrever os valores literais ou num heredoc.
+- **A quarta revisão do Copilot** achou quatro: as escritas do `git` no worktree sem o gate, o `plan-to-issue` falhando aberto quando uma biblioteca não carrega, o `plan-to-issue` sem o `GH_HOST`, e este intent dizendo que o marcador fica no git dir do worktree. As escritas do `git` passaram a receber a decisão do `build-guard`, pela mesma função. Os testes novos acharam mais duas brechas, fechadas: um glob seguido de `..` e as leituras do hook no git rodando um programa do ambiente.
 - **As sondas,** com os hooks ligados nesta sessão, em modo `auto`:
   - `gh issue edit 1 --remove-label needs-info` foi negado pelo `guard-bash`;
   - um `Edit` em `src/main.ts` numa sonda `claude/x` cortada de `origin/main` foi negado pelo `build-guard` ("o gate ainda não rodou neste worktree");
@@ -143,3 +144,4 @@ Para o dono:
 - **Atualizado**: 2026-09-26 (Fase: Learn), as seis brechas da revisão do Copilot na PR #26 foram fechadas (#5)
 - **Atualizado**: 2026-09-27 (Fase: Learn), as seis brechas da segunda revisão do Copilot na PR #26 foram fechadas (#5)
 - **Atualizado**: 2026-09-27 (Fase: Learn), as onze brechas da terceira revisão do Copilot na PR #26 foram fechadas por uma varredura (#5)
+- **Atualizado**: 2026-09-27 (Fase: Learn), os quatro achados da quarta revisão do Copilot na PR #26 foram fechados, e o critério do marcador passou a dizer o diretório git comum (#5)

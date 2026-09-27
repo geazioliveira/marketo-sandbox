@@ -38,16 +38,23 @@ Uma entrada por mudança mergeada, da mais nova para a mais antiga, escrita no p
   - o `GH_HOST` e o host do `-R` no alvo do `gh`;
   - as duas leituras do `git push --repo`;
   - a leitura de `"$(cat <<'EOF' … EOF)"` e de um `for` com valores literais, para as formas de sempre continuarem passando.
+- **A quarta revisão achou quatro:**
+  - as escritas do `git` no worktree (`checkout -- arquivo`, `restore`, `reset --hard`, `apply`, `merge`, `pull` e as demais) passavam pelo Bash sem o gate. Agora recebem a decisão do `build-guard`, pela função que os dois compartilham em `lib/edit-gate.mjs`;
+  - o `plan-to-issue` falhava aberto quando uma biblioteca não carregava. Agora grava o marcador mesmo assim no `ExitPlanMode` e avisa o Claude;
+  - o `plan-to-issue` ignorava o `GH_HOST`. Agora usa a resolução de host do `gh-rules`;
+  - um critério do intent dizia que o marcador fica no git dir do worktree, e ele fica no diretório git comum.
+- **Os testes da quarta rodada acharam duas brechas a mais,** já fechadas: um glob seguido de `..` que contava como `context/intent/`, e as leituras do próprio hook no git, que rodavam um programa definido em `GIT_CONFIG_*` no ambiente.
 
 ### Números medidos
 
-- `npm run check`: 2.830 testes, com os da #7, dos quais 1.425 são dos hooks, em 11 arquivos de `test/hooks/`. Os dos hooks eram 1.022 antes das revisões do Copilot, 1.111 depois da primeira e 1.213 depois da segunda.
-- O código dos hooks tem 11 mil linhas; os testes e o suporte deles, 13,5 mil.
+- `npm run check`: 3.007 testes, com os da #7, dos quais 1.602 são dos hooks, em 11 arquivos de `test/hooks/`. Os dos hooks eram 1.022 antes das revisões do Copilot, e 1.111, 1.213 e 1.425 depois de cada uma das três primeiras.
+- O código dos hooks tem 11,8 mil linhas; os testes e o suporte deles, 14,5 mil.
 - Corpus de 902 comandos Bash reais das sessões deste projeto: 816, 75 e 11 (passa, confirma, nega) na primeira rodada; 847, 44 e 11 depois das correções, com as mesmas 11 recusas certas. Mediana de 93 ms e máximo de 1,5 s.
 - As duas sondas do plano foram negadas com os hooks ativos, em modo `auto`.
 - As correções da primeira revisão: 19 mutações, cada uma revertendo uma parte de uma correção, e todas pegas por um teste. O corpus deu de novo 847, 44 e 11, sem nenhuma decisão mudada.
 - As da segunda: 62 mutações, das quais 17 passaram na primeira verificação e ganharam teste. Um desses testes achou uma brecha real, o `core.useReplaceRefs` do próprio comando, corrigida com teste. O corpus deu 846, 45 e 11: uma linha com um programa numa variável que o hook não lê passou a pedir confirmação simples, e as 11 recusas são as mesmas.
 - As da terceira: 105 mutações na verificação e 51 na rodada final, todas pegas no fim. O corpus, com os caminhos de worktrees apagados apontados para cópias, deu 842, 49 e 11 no modo padrão, com as mesmas 11 recusas, e 842, 0 e 60 em `auto`, contra 846, 27 e 29 antes. Das 31 negações novas em `auto`, 25 já pediam confirmação, e 6 passavam: 4 commits por uma função de shell e 2 escritas por `xargs` ou por um laço sobre um arquivo.
+- As da quarta: 49 mutações na verificação e 13 na rodada final, todas pegas no fim. No corpus, uma decisão mudou: um `git checkout origin/main -- … scripts/loop-sections.mjs` passou a pedir confirmação crítica, como pede um `Edit` do mesmo arquivo do harness. As 11 recusas do modo padrão são as mesmas.
 
 ### Decisões tomadas
 
