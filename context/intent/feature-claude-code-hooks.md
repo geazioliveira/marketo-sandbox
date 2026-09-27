@@ -91,7 +91,7 @@ As respostas do Approve de 2026-09-25 continuam: em `auto`, os `ask` críticos v
 
 ## Resultados
 
-O que foi construído está na [entrada do changelog](../evolution/changelog.md): os quatro hooks em `.claude/hooks/`, a biblioteca em `.claude/hooks/lib/`, o `run.sh`, o `.claude/settings.json` e 1.964 testes em `test/hooks/`.
+O que foi construído está na [entrada do changelog](../evolution/changelog.md): os quatro hooks em `.claude/hooks/`, a biblioteca em `.claude/hooks/lib/`, o `run.sh`, o `.claude/settings.json` e 2.215 testes em `test/hooks/`.
 
 Como foi verificado:
 
@@ -108,6 +108,7 @@ Como foi verificado:
 - **A sexta revisão do Copilot** achou três: os campos que o `gh api` põe na query string ao lado de `--input`, o `git update-ref` e os outros jeitos de mover a ref de `main`, e o `GIT_DIR` no `plan-to-issue`. O corpus não mudou nenhuma decisão.
 - **A sétima revisão do Copilot** achou duas: a configuração do `git` posta no comando (`GIT_CONFIG_*`, `HOME` e as demais) e a falta de prazo no `session-context`. Veio junto o `env - gh …`, que passava por todas as regras.
 - **A oitava revisão do Copilot** achou uma: uma escrita pelo shell por um link simbólico era julgada pelo diretório do link. O `guard-bash` passou a seguir os links do disco e os criados na mesma linha, com o `placeOf` do `build-guard`.
+- **A nona revisão do Copilot** achou uma: as leituras ao vivo usavam a conta herdada do `gh` enquanto o comando podia rodar com outra. Um comando assim não é mais lido ao vivo e pede confirmação crítica onde o caso certo nega.
 - **As sondas,** com os hooks ligados nesta sessão, em modo `auto`:
   - `gh issue edit 1 --remove-label needs-info` foi negado pelo `guard-bash`;
   - um `Edit` em `src/main.ts` numa sonda `claude/x` cortada de `origin/main` foi negado pelo `build-guard` ("o gate ainda não rodou neste worktree");
@@ -153,3 +154,4 @@ Para o dono:
 - **Atualizado**: 2026-09-27 (Fase: Learn), os três achados da sexta revisão do Copilot na PR #26 foram fechados (#5)
 - **Atualizado**: 2026-09-27 (Fase: Learn), os dois achados da sétima revisão do Copilot na PR #26 foram fechados (#5)
 - **Atualizado**: 2026-09-27 (Fase: Learn), o achado da oitava revisão do Copilot na PR #26 foi fechado (#5)
+- **Atualizado**: 2026-09-27 (Fase: Learn), o achado da nona revisão do Copilot na PR #26 foi fechado, e um teste deixou de supor o macOS (#5)
