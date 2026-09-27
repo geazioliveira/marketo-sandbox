@@ -91,7 +91,7 @@ As respostas do Approve de 2026-09-25 continuam: em `auto`, os `ask` críticos v
 
 ## Resultados
 
-O que foi construído está na [entrada do changelog](../evolution/changelog.md): os quatro hooks em `.claude/hooks/`, a biblioteca em `.claude/hooks/lib/`, o `run.sh`, o `.claude/settings.json` e 1.111 testes em `test/hooks/`.
+O que foi construído está na [entrada do changelog](../evolution/changelog.md): os quatro hooks em `.claude/hooks/`, a biblioteca em `.claude/hooks/lib/`, o `run.sh`, o `.claude/settings.json` e 1.213 testes em `test/hooks/`.
 
 Como foi verificado:
 
@@ -101,6 +101,7 @@ Como foi verificado:
   - As 11 recusas são as mesmas, e todas certas: merges de PRs já mergeadas, trocas de label em issues que mudaram de estado, um `gh label create` de label de estado e um `PATCH` nas configurações do repositório.
   - A mediana ficou em 93 ms, e o máximo, em 1,5 s.
 - **A revisão do Copilot na PR #26** achou seis brechas: um remote mudado antes do `gh` na mesma linha, a PR criada pela API sem corpo, um `-R` ilegível tratado como este projeto, a mensagem do `git merge`, a publicação feita de outro worktree e o cache do gate dos outros worktrees. Cada uma foi fechada com um teste que falha sem a correção, e uma verificação independente reverteu cada correção, em 19 mutações, todas pegas. O corpus não mudou nenhuma decisão.
+- **A segunda revisão do Copilot** achou mais seis: um programa numa variável que o hook não lê, o `gh pr create --web`, as mensagens que um commit traz de outro (`cherry-pick`, `revert`, `am`, `commit -C`), a falta de um prazo por execução, os nomes protegidos no clone de outro projeto e o `plan-to-issue` depois do `Monitor` e do terminal. Foram 62 mutações; as 17 que nenhum teste pegava ganharam teste, e um deles achou a brecha do `core.useReplaceRefs`, corrigida. O corpus passou a pedir confirmação numa linha a mais, das 902.
 - **As sondas,** com os hooks ligados nesta sessão, em modo `auto`:
   - `gh issue edit 1 --remove-label needs-info` foi negado pelo `guard-bash`;
   - um `Edit` em `src/main.ts` numa sonda `claude/x` cortada de `origin/main` foi negado pelo `build-guard` ("o gate ainda não rodou neste worktree");
@@ -139,3 +140,4 @@ Para o dono:
 - **Status**: Completed
 - **Atualizado**: 2026-09-26 (Fase: Learn), os hooks existem, ligados pelo `.claude/settings.json`, e as duas sondas foram negadas com eles ativos (#5)
 - **Atualizado**: 2026-09-26 (Fase: Learn), as seis brechas da revisão do Copilot na PR #26 foram fechadas (#5)
+- **Atualizado**: 2026-09-27 (Fase: Learn), as seis brechas da segunda revisão do Copilot na PR #26 foram fechadas (#5)
