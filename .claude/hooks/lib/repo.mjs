@@ -9,8 +9,10 @@
 import { spawnSync } from 'node:child_process'
 import {
   existsSync,
+  lstatSync,
   readdirSync,
   readFileSync,
+  readlinkSync,
   realpathSync,
   renameSync,
   rmSync,
@@ -146,6 +148,96 @@ export function realPathOf(target) {
       existing = parent
     }
   }
+}
+
+// ---------------------------------------------------------------------------
+// Where a write lands, through links
+//
+// build-guard places the file an edit writes, and guard-bash the files a
+// shell command writes (Copilot review of #26, eighth round): one reading of
+// the links for both.
+
+/** Links followed while placing one path, as Linux's MAXSYMLINKS. */
+const maxLinks = 40
+
+/** A path that could not be placed; the message is the reason. */
+export class Unplaceable extends Error {}
+
+/**
+ * Where an absolute path lands, resolved the way the kernel resolves it for
+ * an open: name by name, `..` taken from the directory reached so far (so
+ * `link/..` is the link target's parent, not the link's), every symlink
+ * followed, dangling ones included, since opening a dangling link to write
+ * creates its target. Names that do not exist yet are kept as written.
+ * With `followLast` false the last name is not followed: that is the entry
+ * a program replaces or removes, which counts as itself when it is a link.
+ *
+ * `lineLink`, when given, answers first for each name reached: the
+ * destination of a link a command line made before the command being judged
+ * (guard-bash), which is not on disk while the hook reads it, or null to
+ * read the disk. A relative destination is read from the link's own
+ * directory, as a symlink's is. It may throw, for a link whose destination
+ * is not known.
+ *
+ * git reports real paths, so the part that exists is then written the way
+ * the disk has it (on macOS, /tmp is /private/tmp and case is the disk's).
+ * @throws {Unplaceable} for a name it cannot read, or more than maxLinks links
+ */
+export function placeOf(start, { followLast = true, lineLink = null } = {}) {
+  const pending = String(start).split('/').reverse()
+  let current = '/'
+  let links = 0
+  while (pending.length > 0) {
+    const name = pending.pop()
+    if (name === '' || name === '.') continue
+    if (name === '..') {
+      current = path.dirname(current)
+      continue
+    }
+    const next = path.join(current, name)
+    const last = pending.every((rest) => rest === '' || rest === '.')
+    let destination = typeof lineLink === 'function' ? lineLink(next) : null
+    if (destination === null) {
+      let stats
+      try {
+        stats = lstatSync(next)
+      } catch (error) {
+        const code = error?.code
+        if (code === 'ENOENT' || code === 'ENOTDIR') {
+          current = next
+          continue
+        }
+        throw new Unplaceable(
+          `não consegui ler ${next} (${code ?? String(error)}) para saber onde a escrita cai`,
+        )
+      }
+      if (!stats.isSymbolicLink() || (last && !followLast)) {
+        current = next
+        continue
+      }
+      try {
+        destination = readlinkSync(next)
+      } catch (error) {
+        throw new Unplaceable(
+          `link simbólico que não consegui seguir: ${next} (${error?.code ?? String(error)})`,
+        )
+      }
+    } else if (last && !followLast) {
+      current = next
+      continue
+    }
+    links += 1
+    if (links > maxLinks)
+      throw new Unplaceable(
+        `link simbólico que não consegui seguir: mais de ${maxLinks} links a partir de ${start}`,
+      )
+    if (path.isAbsolute(destination)) current = '/'
+    pending.push(...destination.split('/').reverse())
+  }
+  if (followLast) return realPathOf(current)
+  return current === '/'
+    ? current
+    : path.join(realPathOf(path.dirname(current)), path.basename(current))
 }
 
 /**

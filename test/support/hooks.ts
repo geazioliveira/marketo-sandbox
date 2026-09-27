@@ -330,6 +330,14 @@ export interface RepoLib {
   repoAt(dir: string, options?: { env?: NodeJS.ProcessEnv }): RepoInfo | null
   existingDirOf(filePath: string): string
   realPathOf(target: string): string
+  placeOf(
+    start: string,
+    options?: {
+      followLast?: boolean
+      lineLink?: ((next: string) => string | null) | null
+    },
+  ): string
+  Unplaceable: new (message: string) => Error
   repoRelative(repo: RepoInfo, target: string): string | null
   repoFromRemote(url: string): string | null
   repoFromArg(value: string): string | null

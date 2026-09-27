@@ -23,9 +23,13 @@
 // asks as well. Plain writes to the files only the loop writes (the gate's
 // cache, the plan marker, the owner's escape hatch) are refused, and to the
 // harness they ask, in this project (any clone or worktree of it) or where
-// the hook cannot tell the repository. What such a program writes is not
-// known, so after one, a file the line reads (a body, a script) is unknown
-// unless the line itself wrote it afterwards.
+// the hook cannot tell the repository. A write is judged where it lands,
+// through every link on disk and every link an earlier command of the line
+// made (`ln`, `link`, `cp -s` and `cp -l`), or that a substitution or a
+// `bash -c` script listed after it may make first, and as the link itself;
+// and so is what the line wrote into a file a later command reads. What such
+// a program writes is not known, so after one, a file the line reads (a
+// body, a script) is unknown unless the line itself wrote it afterwards.
 //
 // The run has one time budget (lib/budget.mjs), shared by every git and gh
 // it starts: past it, the line asks, critical, before Claude Code would kill
@@ -35,7 +39,13 @@
 // fails to load would end the process with exit 1, which Claude Code reads
 // as a non-blocking error and lets the command through. When io.mjs itself
 // cannot load, there is no JSON to print, so the hook exits 2, which blocks.
-import { existsSync, readFileSync, statSync } from 'node:fs'
+import {
+  existsSync,
+  lstatSync,
+  readFileSync,
+  readlinkSync,
+  statSync,
+} from 'node:fs'
 import { homedir } from 'node:os'
 import path from 'node:path'
 
@@ -727,17 +737,119 @@ function printfText(args) {
 const unknownText = { known: false, text: null }
 
 /**
- * A file's text as the command finds it: what the line wrote there, else the
- * disk, unless a program the hook does not read ran before (state.untracked).
+ * The placing functions of lib/repo.mjs (placeOf, Unplaceable), set when the
+ * libraries load: the file readers below need them, and are called from too
+ * many places to take them as an argument.
+ */
+let places = null
+
+// ---------------------------------------------------------------------------
+// Links the line makes (Copilot review of #26, eighth round)
+
+/** A link the line made whose destination the hook could not read. */
+class UnknownLink extends Error {
+  constructor(at, text) {
+    super(
+      `não consegui ler aonde leva o link ${at} que a linha criou (${text})`,
+    )
+    this.at = at
+    this.text = text
+  }
+}
+
+/**
+ * Links of the line, as placeOf's `lineLink` reads them: by the entry's real
+ * path, compared without case, as macOS's default file system compares names
+ * (a link matched wrongly only adds a place to judge, since the disk's is
+ * judged too). A link whose destination is not known throws.
+ */
+const linkReader = (links) => (next) => {
+  const made = links.get(next.toLowerCase())
+  if (made === undefined) return null
+  if (made.to === null) throw new UnknownLink(next, made.text)
+  return made.to
+}
+
+/** The links the commands before this one made (state.links). */
+const lineLinkOf = (state) => linkReader(state.links)
+
+/**
+ * The ways the links that commands listed after this one make may leave a
+ * path (state.laterLinks): a substitution or a `bash -c` script is listed
+ * after the line's own commands, but runs before the command that holds it.
+ * Whether such a link came before or after one the earlier commands made at
+ * the same entry is not known, so both orders are read.
+ */
+function laterReadings(state) {
+  if (state.laterLinks.size === 0) return []
+  const over = linkReader(new Map([...state.links, ...state.laterLinks]))
+  if (state.links.size === 0) return [over]
+  return [over, linkReader(new Map([...state.laterLinks, ...state.links]))]
+}
+
+/**
+ * Where a file's content is kept for the commands after the one that wrote
+ * it: the place a read or a write of it lands, as a real path, every link
+ * followed, the ones the line made included. `shadowed` is where the disk
+ * alone leads, when a link of the line leads elsewhere; `maybe`, where a
+ * link a command listed later makes may lead instead (laterReadings). null
+ * when the place cannot be told: a link whose destination the line does not
+ * say, a loop, a name it cannot read.
+ */
+function contentPlace(file, state) {
+  try {
+    const onDisk = places.placeOf(file)
+    const onLine =
+      state.links.size === 0
+        ? onDisk
+        : places.placeOf(file, { lineLink: lineLinkOf(state) })
+    const maybe = new Set()
+    for (const lineLink of laterReadings(state)) {
+      const other = places.placeOf(file, { lineLink })
+      if (other !== onLine) maybe.add(other)
+    }
+    return {
+      key: onLine,
+      shadowed: onLine === onDisk ? null : onDisk,
+      maybe: [...maybe],
+    }
+  } catch (error) {
+    if (error instanceof UnknownLink || error instanceof places.Unplaceable)
+      return null
+    throw error
+  }
+}
+
+/** Whether what a read finds at a place (contentPlace) can be told. */
+const certain = (place) => place !== null && place.maybe.length === 0
+
+/**
+ * What the line wrote at a place, or undefined. When the line also wrote a
+ * name that differs from it only in case, unknown: on macOS it is the same
+ * file, and the last of the writes holds.
+ */
+function writtenAt(key, state) {
+  const folded = key.toLowerCase()
+  for (const other of state.written.keys())
+    if (other !== key && other.toLowerCase() === folded) return unknownText
+  return state.written.get(key)
+}
+
+/**
+ * A file's text as the command finds it: what the line wrote where it lands,
+ * else the disk there, unless a program the hook does not read ran before
+ * (state.untracked).
  */
 function fileText(file, state) {
-  const written = state.written.get(file)
+  const place = contentPlace(file, state)
+  if (!certain(place)) return unknownText
+  const written = writtenAt(place.key, state)
   if (written !== undefined) return written
   if (state.untracked) return unknownText
   try {
-    const info = statSync(file)
+    const info = statSync(place.key)
     if (!info.isFile() || info.size > 1024 * 1024) return unknownText
-    return { known: true, text: readFileSync(file, 'utf8') }
+    return { known: true, text: readFileSync(place.key, 'utf8') }
   } catch {
     return unknownText
   }
@@ -935,6 +1047,8 @@ const copyPrograms = {
       '--write-batch',
     ],
     target: [],
+    // Files rsync hard-links from this directory in place of copying them.
+    links: ['--link-dest'],
     writes: [
       '-T',
       '--backup-dir',
@@ -950,9 +1064,10 @@ const copyPrograms = {
 
 /**
  * A copying program's operands, and the values of its options that name
- * where it writes (`targets`, then `alsoWritten`), each as { value, known }.
- * Options may come after the operands, as GNU's tools take them; `--` ends
- * them.
+ * where it writes (`targets`, then `alsoWritten`) or what it hard-links
+ * from (`linkSources`), each as { value, known }; and `flags`, the options
+ * it took that hold no value (`-s`, `--force`). Options may come after the
+ * operands, as GNU's tools take them; `--` ends them.
  */
 function copyOperands(command, spec) {
   const argv = command.argv.map(String)
@@ -960,9 +1075,12 @@ function copyOperands(command, spec) {
   const operands = []
   const targets = []
   const alsoWritten = []
+  const linkSources = []
+  const flags = new Set()
   const found = (name, value) => {
     if (spec.target.includes(name)) targets.push(value)
     if (spec.writes?.includes(name)) alsoWritten.push(value)
+    if (spec.links?.includes(name)) linkSources.push(value)
   }
   let options = true
   for (let k = 1; k < argv.length; k += 1) {
@@ -974,7 +1092,10 @@ function copyOperands(command, spec) {
     if (options && arg.startsWith('--')) {
       const eq = arg.indexOf('=')
       const name = eq < 0 ? arg : arg.slice(0, eq)
-      if (!spec.long.includes(name)) continue
+      if (!spec.long.includes(name)) {
+        flags.add(name)
+        continue
+      }
       if (eq >= 0) found(name, { value: arg.slice(eq + 1), known: known(k) })
       else {
         found(name, { value: argv[k + 1] ?? '', known: known(k + 1) })
@@ -984,7 +1105,10 @@ function copyOperands(command, spec) {
     }
     if (options && arg.startsWith('-') && arg !== '-') {
       for (let p = 1; p < arg.length; p += 1) {
-        if (!spec.short.includes(arg[p])) continue
+        if (!spec.short.includes(arg[p])) {
+          flags.add(`-${arg[p]}`)
+          continue
+        }
         const attached = arg.slice(p + 1)
         if (attached !== '')
           found(`-${arg[p]}`, { value: attached, known: known(k) })
@@ -998,7 +1122,7 @@ function copyOperands(command, spec) {
     }
     operands.push({ value: arg, known: known(k) })
   }
-  return { operands, targets, alsoWritten }
+  return { operands, targets, alsoWritten, linkSources, flags }
 }
 
 /**
@@ -1086,11 +1210,16 @@ function writesOf(command, cwd, state) {
         },
       ])
     if (dir !== null) {
+      // What the copy lands with: what the line wrote into its one source,
+      // found where that lands (contentPlace), else unknown.
       const single = sources.length === 1 ? sources[0] : null
-      const content =
+      const from =
         single?.known && program !== 'ln'
-          ? (state.written.get(path.resolve(cwd, single.value)) ?? unknownText)
-          : unknownText
+          ? contentPlace(path.resolve(cwd, single.value), state)
+          : null
+      const content = certain(from)
+        ? (writtenAt(from.key, state) ?? unknownText)
+        : unknownText
       writes.push({ word: dir, content })
       for (const source of sources)
         writes.push({
@@ -1146,6 +1275,47 @@ const isUserSettings = (file, { realPathOf }) => {
 }
 
 /**
+ * The text of a path word the hook can resolve, or null. A word with no
+ * expansion is itself; `$$`, the shell's process id, is digits. A leading
+ * `$PWD` (`${PWD}`) is the directory the command runs in (`pwd`, when the
+ * hook knows it and the line gives PWD no value of its own; setsPwd), which
+ * the hook reads as it reads a relative path. Anything else holding `$` or
+ * a backtick is not known.
+ */
+function readablePath(word, pwd) {
+  if (word.known) return word.value
+  let text = word.value.replaceAll('$$', '0')
+  let prefix = ''
+  const reference = /^\$(?:PWD|\{PWD\})(?=\/|$)/.exec(text)
+  if (reference !== null && pwd !== null) {
+    prefix = pwd
+    text = text.slice(reference[0].length)
+  }
+  return /^[^$`]*$/.test(text) ? prefix + text : null
+}
+
+/**
+ * Whether a text may give PWD a value of its own: any mention of it but a
+ * plain `$PWD` or `${PWD}` (`PWD=`, `read PWD`, `${PWD:=x}`). An assignment
+ * shell.mjs reads is filled in already; this is for the rest.
+ */
+const setsPwd = (text) =>
+  /(?<![\w$])PWD\b/.test(
+    String(text ?? '').replace(/\$(?:PWD|\{PWD\})(?!\w)/g, ''),
+  )
+
+/** The directory `$PWD` names for a command, or null when it is not known. */
+const pwdOf = (cwd, cwdKnown, state) =>
+  cwdKnown && state.pwdKnown ? cwd : null
+
+/** The absolute path a word names for a command, or null when it is not known. */
+function pathOf(word, cwd, cwdKnown, state) {
+  const readable = readablePath(word, pwdOf(cwd, cwdKnown, state))
+  if (readable === null || !(cwdKnown || path.isAbsolute(readable))) return null
+  return path.resolve(cwd, readable)
+}
+
+/**
  * A write to a file the loop keeps: the owner's escape hatch and the files
  * only the gate and the hooks write are refused; the harness asks, as an
  * edit of it does in build-guard.
@@ -1163,34 +1333,171 @@ const isUserSettings = (file, { realPathOf }) => {
  * modes where nobody is asked refuse it (Copilot review of #26, third
  * round). `$$`, the shell's process id, is digits, and an absolute path does
  * not depend on the directory: neither leaves the place unknown.
+ *
+ * The path is judged as spelled and where it lands (Copilot review of #26,
+ * eighth round): through every symlink, the last one and dangling ones
+ * included, on disk and as the links an earlier command of the line made
+ * leave it (and those a command listed later may make first), and as the
+ * entry itself when it is a link, since which one a program opens (a
+ * shell's `>` follows the link, `sed -i` and `rm` do not) is not ours to
+ * know. The worst wins. A `write.hardLink` is a file a hard link gives a new
+ * name to, judged as written, since writing that name writes it.
  */
-function protectedWrite(write, cwd, cwdKnown, repoOf, libs) {
-  const { io, loop, repo: repoLib, budget } = libs
+function protectedWrite(write, cwd, cwdKnown, repoOf, libs, state) {
+  const { io } = libs
   const spelled = write.word.value
-  const readable = write.word.known
-    ? spelled
-    : /^[^$`]*$/.test(spelled.replaceAll('$$', ''))
-      ? spelled.replaceAll('$$', '0')
-      : null
+  const hard = write.hardLink === true ? ' (por um link físico novo)' : ''
+  const readable = readablePath(write.word, pwdOf(cwd, cwdKnown, state))
   const file =
     readable !== null && (cwdKnown || path.isAbsolute(readable))
       ? path.resolve(cwd, readable)
       : null
-  const name = file === null ? spelled : path.basename(file)
-  const names =
-    file === null
-      ? (candidate) => spelled.includes(candidate)
-      : (candidate) => name === candidate
-  const hatch = names(settingsLocal)
+  if (file === null)
+    return (
+      byNameAlone(`${spelled}${hard}`, spelled, libs) ??
+      unread(
+        io,
+        `não consegui ler onde o comando escreve (${spelled}${hard}): confira que não é um caminho do harness nem um arquivo do loop`,
+      )
+    )
+  const decisions = [
+    judgePlace(
+      { file, spelled, shown: `${spelled}${hard}`, via: hard },
+      repoOf,
+      libs,
+    ),
+  ]
+  // As written, `..` is taken from the directory a link reaches, as the
+  // kernel takes it; resolved, as text. Both are placed.
+  const written = path.isAbsolute(readable) ? readable : `${cwd}/${readable}`
+  for (const place of placesOf([written, file], state, libs)) {
+    if (place.target === file && !place.entry) continue
+    if (place.target !== undefined)
+      decisions.push(
+        judgePlace(
+          place.entry
+            ? {
+                file: place.target,
+                spelled,
+                shown: `${spelled}${hard} (o link em si, ${place.target})`,
+                via: `${hard} (o link ${spelled} em si)`,
+                entry: true,
+              }
+            : {
+                file: place.target,
+                spelled,
+                shown: `${spelled}${hard} (que leva a ${place.target})`,
+                via: `${hard} (por ${spelled})`,
+              },
+          repoOf,
+          libs,
+        ),
+      )
+    else if (place.link !== undefined)
+      decisions.push(
+        byNameAlone(
+          `${spelled}${hard} (pelo link ${place.link.at}, que leva a ${place.link.text})`,
+          place.link.text,
+          libs,
+        ) ??
+          unread(
+            io,
+            `${place.link.message}, por onde o comando escreve em ${spelled}${hard}: confira que não é um caminho do harness nem um arquivo do loop`,
+          ),
+      )
+    else
+      decisions.push(
+        unread(
+          io,
+          `${place.refusal}: confira que não é um caminho do harness nem um arquivo do loop`,
+        ),
+      )
+  }
+  return io.combine(decisions)
+}
+
+/**
+ * Where a path lands, spelled each way given: every link followed, and the
+ * entry itself where it is a link (its last name not followed), each as the
+ * disk has it and as the links of the line leave it: those the commands
+ * before made, and those a command listed later may make first
+ * (laterReadings). Each as { target, entry } (a real path, and whether it is
+ * the link itself), { link } (an UnknownLink on the way) or { refusal } (a
+ * name it could not read, a loop).
+ */
+function placesOf(spellings, state, { repo: repoLib }) {
+  const through = [
+    null,
+    ...(state.links.size > 0 ? [lineLinkOf(state)] : []),
+    ...laterReadings(state),
+  ]
+  const found = new Map()
+  for (const spelling of new Set(spellings))
+    for (const lineLink of through) {
+      let followed = null
+      for (const followLast of [true, false])
+        try {
+          const target = repoLib.placeOf(spelling, { followLast, lineLink })
+          if (followLast) followed = target
+          else if (target === followed) continue
+          found.set(`${followLast ? 'path' : 'entry'}:${target}`, {
+            target,
+            entry: !followLast,
+          })
+        } catch (error) {
+          if (error instanceof UnknownLink)
+            found.set(`link:${error.at}`, { link: error })
+          else if (error instanceof repoLib.Unplaceable)
+            found.set(`error:${error.message}`, { refusal: error.message })
+          else throw error
+        }
+    }
+  return [...found.values()]
+}
+
+/**
+ * A write whose place cannot be read, judged by the names its text spells:
+ * the owner's escape hatch and the loop's own files are refused, since the
+ * repository cannot be told. null when it names neither.
+ */
+function byNameAlone(shown, text, { io, loop }) {
+  if (text.includes(settingsLocal))
+    return io.deny(
+      `o comando escreve em ${shown}: .claude/settings.local.json é a saída de emergência do dono`,
+    )
+  if (
+    text.includes(loop.gateCacheFile) ||
+    text.includes(loop.planPendingPrefix)
+  )
+    return io.deny(
+      `o comando mexe em ${shown}, que só o gate e os hooks escrevem: rode npm run gate, e publique o plano numa issue para o marcador sair`,
+    )
+  return null
+}
+
+/**
+ * One place a write lands, judged: by its name, where it lies (placeOfWrite)
+ * and whether it is the harness. `shown` names it in the reasons, `via`
+ * says how the write reaches it, after a harness path. An `entry` is judged
+ * as itself: a link whose last name is not followed, since the program
+ * replaces or removes the link.
+ */
+function judgePlace(
+  { file, spelled, shown, via, entry = false },
+  repoOf,
+  libs,
+) {
+  const { io, loop, repo: repoLib, budget } = libs
+  const name = path.basename(file)
+  const hatch = name === settingsLocal
   const loopFile =
-    names(loop.gateCacheFile) ||
-    (file === null
-      ? spelled.includes(loop.planPendingPrefix)
-      : name.startsWith(loop.planPendingPrefix))
+    name === loop.gateCacheFile || name.startsWith(loop.planPendingPrefix)
   let ours = true
-  if (file !== null && (hatch || loopFile))
+  if (hatch || loopFile)
     try {
-      const owner = repoOf(repoLib.existingDirOf(file))
+      const owner = repoOf(
+        repoLib.existingDirOf(entry ? path.dirname(file) : file),
+      )
       ours = owner != null && repoLib.isProject(owner)
     } catch (error) {
       // git could not say whose file it is: judged by its name.
@@ -1199,31 +1506,36 @@ function protectedWrite(write, cwd, cwdKnown, repoOf, libs) {
     }
   if (hatch && (ours || isUserSettings(file, repoLib)))
     return io.deny(
-      `o comando escreve em ${spelled}: .claude/settings.local.json é a saída de emergência do dono`,
+      `o comando escreve em ${shown}: .claude/settings.local.json é a saída de emergência do dono`,
     )
   if (loopFile && ours)
     return io.deny(
-      `o comando mexe em ${spelled}, que só o gate e os hooks escrevem: rode npm run gate, e publique o plano numa issue para o marcador sair`,
+      `o comando mexe em ${shown}, que só o gate e os hooks escrevem: rode npm run gate, e publique o plano numa issue para o marcador sair`,
     )
-  if (file === null)
-    return unread(
-      io,
-      `não consegui ler onde o comando escreve (${spelled}): confira que não é um caminho do harness nem um arquivo do loop`,
-    )
-  const byPlace = placeOfWrite(spelled, file, repoOf, libs)
+  const byPlace = placeOfWrite(shown, spelled, file, repoOf, libs, entry)
   if (byPlace !== null) return byPlace
   if (!/[/\\]\.(?:claude|github)(?:[/\\]|$)|[/\\]scripts[/\\]/i.test(file))
     return io.pass()
   const repo = repoOf(path.dirname(file))
   if (repo == null || !repoLib.isProject(repo)) return io.pass()
-  const relative = repoLib.repoRelative(repo, file)
+  const relative = relativeIn(repo, file, entry, repoLib)
   if (relative === null || !repoLib.isHarnessPath(relative)) return io.pass()
   return io.ask(
-    `o comando escreve em ${relative}, caminho do harness: confira`,
-    {
-      critical: true,
-    },
+    `o comando escreve em ${relative}${via}, caminho do harness: confira`,
+    { critical: true },
   )
+}
+
+/**
+ * A path relative to the repository's top, as repoRelative gives it; for an
+ * entry, its directory's with its own name added, so a last name that is a
+ * link is not followed.
+ */
+function relativeIn(repo, file, entry, repoLib) {
+  if (!entry) return repoLib.repoRelative(repo, file)
+  const dir = repoLib.repoRelative(repo, path.dirname(file))
+  if (dir === null) return null
+  return dir === '' ? path.basename(file) : `${dir}/${path.basename(file)}`
 }
 
 /** Whether `child` is `parent` or lies under it. */
@@ -1237,42 +1549,51 @@ const isWithin = (parent, child) =>
  * holds the gate's cache and the plan markers, and .claude holds the
  * owner's escape hatch, so touching them whole is refused; inside the git
  * dir, anything else asks, and so does a directory holding harness paths.
+ * `shown` names the write in the reasons; a pattern is told by the word
+ * the line spells. An `entry` is placed as itself (judgePlace).
  */
-function placeOfWrite(spelled, file, repoOf, { io, repo: repoLib }) {
-  const repo = repoOf(repoLib.existingDirOf(file))
+function placeOfWrite(
+  shown,
+  spelled,
+  file,
+  repoOf,
+  { io, repo: repoLib },
+  entry = false,
+) {
+  const repo = repoOf(repoLib.existingDirOf(entry ? path.dirname(file) : file))
   if (repo == null || !repoLib.isProject(repo)) return null
-  const target = repoLib.realPathOf(file)
+  const target = entry ? file : repoLib.realPathOf(file)
   const gitDirs = [repo.gitDir, repo.commonDir].map((dir) =>
     repoLib.realPathOf(dir),
   )
   if (gitDirs.some((dir) => target === dir))
     return io.deny(
-      `o comando mexe em ${spelled}, o diretório git onde ficam o cache do gate e o marcador do plano`,
+      `o comando mexe em ${shown}, o diretório git onde ficam o cache do gate e o marcador do plano`,
     )
   if (gitDirs.some((dir) => isWithin(target, dir)))
     return io.ask(
-      `o comando mexe em ${spelled}, que contém o diretório git onde ficam o cache do gate e o marcador do plano: confira`,
+      `o comando mexe em ${shown}, que contém o diretório git onde ficam o cache do gate e o marcador do plano: confira`,
       { critical: true },
     )
   if (gitDirs.some((dir) => isWithin(dir, target))) {
     if (/[*?[{]/.test(path.basename(spelled)))
       return io.deny(
-        `o comando mexe em ${spelled}, um padrão dentro do diretório git, onde ficam o cache do gate e o marcador do plano`,
+        `o comando mexe em ${shown}, um padrão dentro do diretório git, onde ficam o cache do gate e o marcador do plano`,
       )
     return io.ask(
-      `o comando escreve dentro do diretório git (${spelled}): confira`,
+      `o comando escreve dentro do diretório git (${shown}): confira`,
       {
         critical: true,
       },
     )
   }
-  const relative = repoLib.repoRelative(repo, target)
+  const relative = relativeIn(repo, target, entry, repoLib)
   if (relative === null) return null
   const holds = (inner) =>
     relative === '' || inner === relative || inner.startsWith(`${relative}/`)
   if (holds(`.claude/${settingsLocal}`) && relative !== '')
     return io.deny(
-      `o comando mexe em ${spelled}, que contém .claude/settings.local.json, a saída de emergência do dono`,
+      `o comando mexe em ${shown}, que contém .claude/settings.local.json, a saída de emergência do dono`,
     )
   if (
     !repoLib.isHarnessPath(relative) &&
@@ -1285,11 +1606,23 @@ function placeOfWrite(spelled, file, repoOf, { io, repo: repoLib }) {
   return null
 }
 
-/** Records what the command leaves in each file it writes, for the commands after it. */
+/**
+ * Records what the command leaves in each file it writes, for the commands
+ * after it, where the write lands (contentPlace). A write through a link of
+ * the line whose destination is not known may have changed any file, so the
+ * files the line did not write become unknown; the place the disk alone
+ * gives, when a link of the line hides it, and the places a link a command
+ * listed later makes may lead to instead, become unknown too.
+ */
 function recordWrites(writes, cwd, cwdKnown, state) {
   for (const write of writes) {
-    if (!write.word.known || !cwdKnown) continue
-    const file = path.resolve(cwd, write.word.value)
+    const file = pathOf(write.word, cwd, cwdKnown, state)
+    if (file === null) continue
+    const place = contentPlace(file, state)
+    if (place === null) {
+      state.untracked = true
+      continue
+    }
     let content = write.content
     if (write.append) {
       const before = fileText(file, state)
@@ -1298,9 +1631,216 @@ function recordWrites(writes, cwd, cwdKnown, state) {
           ? { known: true, text: `${before.text}${content.text}` }
           : unknownText
     }
-    state.written.set(file, content)
+    state.written.set(place.key, content)
+    for (const other of [place.shadowed, ...place.maybe])
+      if (other !== null) state.written.set(other, unknownText)
   }
 }
+
+/** The programs that make a link where they would copy, and how they say so. */
+const linkMakers = {
+  ln: { symbolic: ['-s', '--symbolic'], hard: null },
+  cp: { symbolic: ['-s', '--symbolic-link'], hard: ['-l', '--link'] },
+  link: null,
+}
+
+/** The programs that carry a link they copy or move, as a link. */
+const linkCarriers = new Set(['cp', 'mv', 'rsync', 'ditto'])
+
+/**
+ * What an entry is when a command runs: 'dir', 'other', 'missing', or
+ * 'unknown' when it cannot be told. `follow` follows a last link, as a
+ * program that takes a directory through a link does.
+ */
+function entryKind(file, follow, state) {
+  try {
+    const placed = places.placeOf(file, {
+      followLast: follow,
+      lineLink: lineLinkOf(state),
+    })
+    if (state.links.has(placed.toLowerCase())) return 'other'
+    return (follow ? statSync : lstatSync)(placed).isDirectory()
+      ? 'dir'
+      : 'other'
+  } catch (error) {
+    if (error?.code === 'ENOENT' || error?.code === 'ENOTDIR') return 'missing'
+    if (
+      error instanceof UnknownLink ||
+      error instanceof places.Unplaceable ||
+      typeof error?.code === 'string'
+    )
+      return 'unknown'
+    throw error
+  }
+}
+
+/**
+ * The links a command makes, for the commands after it on the line (Copilot
+ * review of #26, eighth round), and the files it gives a new name to by a
+ * hard link:
+ * - `ln` (symbolic with -s, hard without), `link`, and `cp -s` and `cp -l`,
+ *   which link in place of copying;
+ * - `cp`, `mv`, `rsync` and `ditto` carry a link they copy or move, and the
+ *   links the line made inside a directory they copy or move;
+ * - `rsync --link-dest` hard-links from its directory.
+ * mklink is cmd.exe's own, not a program a shell line runs.
+ *
+ * Each link is { at, to, text }: `at` where the new entry lies, `to` where
+ * it leads as placeOf reads it (a symlink's text, read from its own
+ * directory; for a hard link, the source's absolute path, since it is the
+ * same file under another name), null when the source holds an expansion,
+ * and `text` the source as spelled. Where the program would put the link is
+ * placed as it places it: in a directory named last, under the source's
+ * name, or as the last name itself; when the hook cannot tell which, both.
+ * A link over an existing entry is made only with the options that replace
+ * it. A link whose place cannot be read is not recorded: the write that makes
+ * it already asks, since its place is unknown.
+ * @returns {{ links: { at: string, to: string | null, text: string }[], hardSources: { value: string, known: boolean }[] }}
+ */
+function linksMadeBy(command, cwd, cwdKnown, state) {
+  const program = programOf(command)
+  const made = { links: [], hardSources: [] }
+  if (!Object.hasOwn(linkMakers, program) && !linkCarriers.has(program))
+    return made
+  const spec = copyPrograms[program] ?? { short: '', long: [], target: [] }
+  const { operands, targets, flags, linkSources } = copyOperands(command, spec)
+  const has = (names) => names?.some((name) => flags.has(name)) ?? false
+  const maker = linkMakers[program]
+  let kind = 'carry'
+  if (program === 'link') kind = 'hard'
+  else if (program === 'ln') kind = has(maker.symbolic) ? 'symbolic' : 'hard'
+  else if (program === 'cp' && has(maker.symbolic)) kind = 'symbolic'
+  else if (program === 'cp' && has(maker.hard)) kind = 'hard'
+  // ln, cp -s and cp -l refuse an existing entry without these (a backup
+  // moves it aside first); a copy or a move replaces it, which is the side
+  // that keeps the link.
+  const replaces =
+    kind === 'carry' ||
+    has([
+      '-f',
+      '--force',
+      '--remove-destination',
+      '-i',
+      '--interactive',
+      '-b',
+      '--backup',
+    ])
+  const noDereference = has(['-n', '-h', '--no-dereference'])
+  const lineLink = lineLinkOf(state)
+
+  // Where the links go: into `dir` under each source's name, or at `last`
+  // for a single source (into it, when it is a directory).
+  let dir = targets.at(-1) ?? null
+  let sources = operands
+  let last = null
+  if (program === 'link') {
+    sources = operands.slice(0, 1)
+    last = operands[1] ?? null
+  } else if (dir === null && operands.length === 1 && program === 'ln')
+    dir = { value: '.', known: true }
+  else if (dir === null && operands.length > 1) {
+    sources = operands.slice(0, -1)
+    if (sources.length === 1) last = operands.at(-1)
+    else dir = operands.at(-1)
+  }
+  const placesFor = (source) => {
+    const base = path.basename(source.value)
+    if (dir !== null) {
+      const at = pathOf(dir, cwd, cwdKnown, state)
+      return at === null ? [] : [path.join(at, base)]
+    }
+    const at = last === null ? null : pathOf(last, cwd, cwdKnown, state)
+    if (at === null) return []
+    // -T takes the last name as the link itself, never as a directory to put
+    // it in (with -t or a single operand, the program refuses the line).
+    if (has(['-T', '--no-target-directory']) || program === 'link') return [at]
+    const found = entryKind(at, !noDereference, state)
+    if (found === 'dir') return [path.join(at, base)]
+    if (found === 'other') return [at]
+    return [at, path.join(at, base)]
+  }
+
+  const record = (at, to, text) => {
+    let entry
+    try {
+      entry = places.placeOf(at, { followLast: false, lineLink })
+    } catch (error) {
+      if (error instanceof UnknownLink || error instanceof places.Unplaceable)
+        return
+      throw error
+    }
+    if (!replaces && entryKind(at, false, state) !== 'missing') return
+    made.links.push({ at: entry, to, text })
+  }
+
+  for (const source of sources) {
+    const text = source.value
+    if (kind === 'symbolic' || kind === 'hard') {
+      let to
+      if (kind === 'hard' || has(['-r', '--relative']))
+        to = pathOf(source, cwd, cwdKnown, state)
+      else to = readablePath(source, pwdOf(cwd, cwdKnown, state))
+      if (kind === 'hard') made.hardSources.push(source)
+      for (const at of placesFor(source)) record(at, to, text)
+      continue
+    }
+    // A copy or a move: the links it carries.
+    const from = pathOf(source, cwd, cwdKnown, state)
+    if (from === null) continue
+    let entry
+    try {
+      entry = places.placeOf(from, { followLast: false, lineLink })
+    } catch (error) {
+      if (error instanceof UnknownLink || error instanceof places.Unplaceable)
+        continue
+      throw error
+    }
+    const key = entry.toLowerCase()
+    const within = (links) =>
+      [...links]
+        .filter(([at]) => at === key || at.startsWith(`${key}/`))
+        .map(([at, link]) => ({ suffix: at.slice(key.length), link }))
+    const carried = within(state.links)
+    if (carried.length === 0)
+      try {
+        if (lstatSync(entry).isSymbolicLink()) {
+          const to = readlinkSync(entry)
+          carried.push({ suffix: '', link: { to, text: to } })
+        }
+      } catch {
+        // Not there, or not readable: nothing to carry.
+      }
+    // A link a command listed later makes there may be what the copy
+    // carries instead (state.laterLinks): where each carried link leads is
+    // then not known.
+    const later = within(state.laterLinks)
+    carried.push(...later)
+    for (const at of placesFor(source))
+      for (const { suffix, link } of carried)
+        record(`${at}${suffix}`, later.length > 0 ? null : link.to, link.text)
+  }
+
+  // rsync --link-dest: a relative directory is read from the destination.
+  const destination = operands.length > 1 ? operands.at(-1) : null
+  for (const source of linkSources) {
+    made.hardSources.push(source)
+    if (destination !== null && !path.isAbsolute(source.value))
+      made.hardSources.push({
+        value: path.join(destination.value, source.value),
+        known: source.known && destination.known,
+      })
+  }
+  return made
+}
+
+/** Records the links a command made, for the commands after it. */
+function recordLinks(made, state) {
+  for (const [key, link] of linkMap(made.links)) state.links.set(key, link)
+}
+
+/** Links as state.links keeps them: by the entry, lowercased. */
+const linkMap = (links) =>
+  new Map(links.map(({ at, to, text }) => [at.toLowerCase(), { to, text }]))
 
 // ---------------------------------------------------------------------------
 // Commands inside commands
@@ -1429,6 +1969,8 @@ function cloneState(from) {
     lineConfig: [...from.lineConfig],
     ghAliases: new Map(from.ghAliases),
     written: new Map(from.written),
+    links: new Map(from.links),
+    laterLinks: new Map(from.laterLinks),
     remotes: new Map(
       [...from.remotes].map(([key, seen]) => [
         key,
@@ -1576,6 +2118,17 @@ async function decide(input, libs) {
     return repos.get(dir)
   }
 
+  // The repository around a place a write lands, once per real directory: a
+  // write is judged where it is spelled and where its links lead, which
+  // mostly share a directory under two spellings (/tmp and /private/tmp on
+  // macOS), and git answers from the real one.
+  const placed = new Map()
+  const repoOfPlace = (dir) => {
+    const key = repo.realPathOf(repo.existingDirOf(dir))
+    if (!placed.has(key)) placed.set(key, repoOf(dir))
+    return placed.get(key)
+  }
+
   // What the commands already judged leave for the ones after them. A
   // program the hook cannot name is judged on copies of it (judgeUnresolved).
   let state = {
@@ -1585,6 +2138,15 @@ async function decide(input, libs) {
     lineConfig: [],
     ghAliases: new Map(),
     written: new Map(),
+    // The links earlier commands made (linksMadeBy), by the real path of
+    // the entry, lowercased: { to, text }, `to` null when not known.
+    links: new Map(),
+    // The same for the links the commands listed after the one being judged
+    // make, which may run first (judgeLine).
+    laterLinks: new Map(),
+    // Whether `$PWD` is the directory a command runs in: false once the
+    // line may give PWD a value of its own.
+    pwdKnown: !setsPwd(text),
     // What earlier commands did to the remotes gh picks its repository from:
     // per common git dir, whether the change can be followed, and the
     // repositories origin may name now (the disk's, then each new URL). Lost
@@ -1598,9 +2160,17 @@ async function decide(input, libs) {
     untracked: false,
     cache: new Map(),
   }
-  const files = (file) =>
-    state.written.get(path.resolve(file)) ??
-    (state.untracked ? unknownText : undefined)
+  // What a rule finds in a file: what the line wrote where it lands, else
+  // undefined for the rule to read the disk; where a link of the line leads
+  // elsewhere than the disk's, what the disk holds there.
+  const files = (file) => {
+    const place = contentPlace(path.resolve(file), state)
+    if (!certain(place)) return unknownText
+    const written = writtenAt(place.key, state)
+    if (written !== undefined) return written
+    if (state.untracked) return unknownText
+    return place.shadowed === null ? undefined : fileText(place.key, state)
+  }
   const adjust = (info) => {
     if (info == null) return info
     if (state.headsLost) return { ...info, branch: null, branchKnown: false }
@@ -1674,6 +2244,7 @@ async function decide(input, libs) {
   }
 
   const parseScript = async (script, cwd, cwdKnown, depth) => {
+    if (setsPwd(script)) state.pwdKnown = false
     const inner = shell.parseCommand(script)
     const decisions = []
     if (inner.unparsable && mentionsGhOrGit(script))
@@ -1936,8 +2507,28 @@ async function decide(input, libs) {
       state.untracked = true
     const writes = writesOf(command, cwd, state)
     for (const write of writes)
-      decisions.push(protectedWrite(write, cwd, cwdSpelled, repoOf, libs))
+      decisions.push(
+        protectedWrite(write, cwd, cwdSpelled, repoOfPlace, libs, state),
+      )
+    // A hard link is the same file under a new name: making one to a file
+    // of the loop is judged as writing that file.
+    const made = linksMadeBy(command, cwd, cwdSpelled, state)
+    for (const word of made.hardSources)
+      decisions.push(
+        protectedWrite(
+          { word, content: unknownText, hardLink: true },
+          cwd,
+          cwdSpelled,
+          repoOfPlace,
+          libs,
+          state,
+        ),
+      )
     recordWrites(writes, cwd, cwdSpelled, state)
+    recordLinks(made, state)
+    // `read PWD`, `export PWD=…`: a word that gives PWD a value, however the
+    // line quotes it, leaves `$PWD` unknown for the commands after it.
+    if (command.argv.some((word) => setsPwd(word))) state.pwdKnown = false
     return decisions
   }
 
@@ -1973,8 +2564,28 @@ async function decide(input, libs) {
     )
       state.remotesLost = true
 
-    for (const command of parsed.commands)
+    // The same for the links (Copilot review of #26, eighth round): a link a
+    // substitution or a `bash -c` script makes may be there before a command
+    // listed ahead of it writes or reads through it. The links each command
+    // makes are read first, in order, on a copy of the state; each command is
+    // then judged with those the commands listed after it make as links that
+    // may be there (state.laterLinks).
+    const ahead = cloneState(state)
+    const made = parsed.commands.map((command) => {
+      const { links } = linksMadeBy(
+        throughXargs(command),
+        path.resolve(base, command.cwd ?? '.'),
+        !/[$`]/.test(command.cwd ?? ''),
+        ahead,
+      )
+      recordLinks({ links }, ahead)
+      return links
+    })
+
+    for (const [index, command] of parsed.commands.entries()) {
+      state.laterLinks = linkMap(made.slice(index + 1).flat())
       decisions.push(...(await judge(command, base, true, 0)))
+    }
   }
 
   // A budget spent halfway keeps what the commands judged so far decided: a
@@ -2020,6 +2631,7 @@ try {
     import('../../scripts/loop-sections.mjs'),
     import('./lib/budget.mjs'),
   ])
+  places = repo
   const input = await io.readInput()
   const decision =
     input === null

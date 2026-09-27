@@ -10,7 +10,8 @@
 // this session is still unpublished: then only the intent goes through
 // without a person looking. main is never edited, and
 // neither is the git dir or the owner's emergency exit. A path is judged
-// where the write lands, through every symlink, dangling ones included.
+// where the write lands, through every symlink, dangling ones included
+// (lib/repo.mjs's placeOf, which guard-bash reads shell writes with too).
 //
 // The repository is the one around the file, never ${CLAUDE_PROJECT_DIR}: a
 // session opened in the main checkout edits files in worktrees, and each
@@ -24,7 +25,6 @@
 // fails to load would end the process with exit 1, which Claude Code reads
 // as a non-blocking error and lets the edit through. When io.mjs itself
 // cannot load, there is no JSON to print, so the hook exits 2, which blocks.
-import { lstatSync, readlinkSync } from 'node:fs'
 import { homedir } from 'node:os'
 import path from 'node:path'
 
@@ -34,9 +34,6 @@ import path from 'node:path'
 // a budget too (budget.mjs), shared by every git it starts, repoAt's
 // included: each one's timeout is what is left of it at most. Past it, the
 // hook asks, critical, instead of racing the kill (Copilot review of #26).
-
-/** Links followed while placing one path, as Linux's MAXSYMLINKS. */
-const maxLinks = 40
 
 /**
  * The paths the tool call names. Edit and Write take file_path, NotebookEdit
@@ -49,73 +46,6 @@ function namedPaths(input) {
   return ['file_path', 'notebook_path']
     .map((key) => toolInput[key])
     .filter((value) => typeof value === 'string' && value.trim() !== '')
-}
-
-/** A path that could not be placed; the reason is the refusal. */
-class Unplaceable extends Error {}
-
-/**
- * Where an absolute path lands, resolved the way the kernel resolves it for
- * an open: name by name, `..` taken from the directory reached so far (so
- * `link/..` is the link target's parent, not the link's), every symlink
- * followed, dangling ones included, since opening a dangling link to write
- * creates its target. Names that do not exist yet are kept as written.
- * With `followLast` false the last name is not followed: that is the entry
- * the tool edits, which counts as itself when it is a link.
- *
- * git reports real paths, so the part that exists is then written the way
- * the disk has it (on macOS, /tmp is /private/tmp and case is the disk's).
- */
-function placeOf(start, { followLast, realPathOf }) {
-  const pending = start.split('/').reverse()
-  let current = '/'
-  let links = 0
-  while (pending.length > 0) {
-    const name = pending.pop()
-    if (name === '' || name === '.') continue
-    if (name === '..') {
-      current = path.dirname(current)
-      continue
-    }
-    const next = path.join(current, name)
-    let stats
-    try {
-      stats = lstatSync(next)
-    } catch (error) {
-      const code = error?.code
-      if (code === 'ENOENT' || code === 'ENOTDIR') {
-        current = next
-        continue
-      }
-      throw new Unplaceable(
-        `não consegui ler ${next} (${code ?? String(error)}) para saber onde a escrita cai`,
-      )
-    }
-    const last = pending.every((rest) => rest === '' || rest === '.')
-    if (!stats.isSymbolicLink() || (last && !followLast)) {
-      current = next
-      continue
-    }
-    links += 1
-    if (links > maxLinks)
-      throw new Unplaceable(
-        `link simbólico que não consegui seguir: mais de ${maxLinks} links a partir de ${start}`,
-      )
-    let destination
-    try {
-      destination = readlinkSync(next)
-    } catch (error) {
-      throw new Unplaceable(
-        `link simbólico que não consegui seguir: ${next} (${error?.code ?? String(error)})`,
-      )
-    }
-    if (path.isAbsolute(destination)) current = '/'
-    pending.push(...destination.split('/').reverse())
-  }
-  if (followLast) return realPathOf(current)
-  return current === '/'
-    ? current
-    : path.join(realPathOf(path.dirname(current)), path.basename(current))
 }
 
 /**
@@ -133,7 +63,7 @@ function placeOf(start, { followLast, realPathOf }) {
  * where the bytes land, so a link outside the repository that points into
  * it, dangling or not, is judged inside.
  */
-function targetsOf(named, cwd, realPathOf) {
+function targetsOf(named, cwd, repo) {
   const spellings = []
   for (const raw of named) {
     const written = path.isAbsolute(raw) ? raw : `${cwd}/${raw}`
@@ -147,10 +77,10 @@ function targetsOf(named, cwd, realPathOf) {
   for (const spelling of new Set(spellings))
     for (const followLast of [false, true]) {
       try {
-        const target = placeOf(spelling, { followLast, realPathOf })
+        const target = repo.placeOf(spelling, { followLast })
         targets.set(`path:${target}`, { target })
       } catch (error) {
-        if (!(error instanceof Unplaceable)) throw error
+        if (!(error instanceof repo.Unplaceable)) throw error
         targets.set(`error:${error.message}`, { refusal: error.message })
       }
     }
@@ -205,7 +135,7 @@ function decide(input, { io, repo, gate, budget }) {
   // deny among them still wins over the budget's ask.
   const decisions = []
   try {
-    for (const place of targetsOf(named, cwd, repo.realPathOf))
+    for (const place of targetsOf(named, cwd, repo))
       decisions.push(
         place.refusal === undefined
           ? judge(place.target, input, libs)

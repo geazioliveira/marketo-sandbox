@@ -401,6 +401,66 @@ describe.concurrent('real paths', () => {
   })
 })
 
+describe.concurrent('where a path lands (placeOf)', () => {
+  test('follows every link, the last one and dangling ones included', ({
+    expect,
+    scratch,
+  }) => {
+    const dir = scratch()
+    mkdirSync(path.join(dir, 'real'))
+    symlinkSync(path.join(dir, 'real'), path.join(dir, 'dirlink'))
+    // Relative to its own directory, and dangling: alvo.txt does not exist.
+    symlinkSync('real/alvo.txt', path.join(dir, 'dangling'))
+    symlinkSync(path.join(dir, 'dangling'), path.join(dir, 'chain'))
+    expect(lib.placeOf(path.join(dir, 'chain'))).toBe(
+      path.join(dir, 'real', 'alvo.txt'),
+    )
+    expect(lib.placeOf(path.join(dir, 'chain'), { followLast: false })).toBe(
+      path.join(dir, 'chain'),
+    )
+    // `..` is taken from the directory the link reaches, as the kernel does.
+    expect(lib.placeOf(`${dir}/dirlink/x/../y`)).toBe(
+      path.join(dir, 'real', 'y'),
+    )
+  })
+
+  test('reads the links a command line made before the disk', ({
+    expect,
+    scratch,
+  }) => {
+    const dir = scratch()
+    mkdirSync(path.join(dir, 'real'))
+    const made = new Map([
+      [path.join(dir, 'novo'), path.join(dir, 'real')],
+      [path.join(dir, 'relativo'), 'real/z'],
+    ])
+    const lineLink = (next: string) => made.get(next) ?? null
+    expect(lib.placeOf(path.join(dir, 'novo', 'a'), { lineLink })).toBe(
+      path.join(dir, 'real', 'a'),
+    )
+    expect(lib.placeOf(path.join(dir, 'relativo'), { lineLink })).toBe(
+      path.join(dir, 'real', 'z'),
+    )
+    expect(
+      lib.placeOf(path.join(dir, 'relativo'), { lineLink, followLast: false }),
+    ).toBe(path.join(dir, 'relativo'))
+  })
+
+  test('refuses a loop of links', ({ expect, scratch }) => {
+    const dir = scratch()
+    symlinkSync(path.join(dir, 'b'), path.join(dir, 'a'))
+    symlinkSync(path.join(dir, 'a'), path.join(dir, 'b'))
+    let error: unknown = null
+    try {
+      lib.placeOf(path.join(dir, 'a'))
+    } catch (caught) {
+      error = caught
+    }
+    expect(error).toBeInstanceOf(lib.Unplaceable)
+    expect(String(error)).toMatch(/mais de 40 links/)
+  })
+})
+
 describe.concurrent('the gate cache', () => {
   test('reads the cache the gate wrote', async ({ expect, fresh }) => {
     const repo = await fresh({ branch: BRANCH, cache: true })
