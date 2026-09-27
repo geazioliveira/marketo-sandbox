@@ -8,7 +8,7 @@ Todo plano de issue e toda PR declaram o risco, `HIGH` ou `NORMAL`, com o racioc
 
 - Os dois forms de issue e o template de PR pedem o risco, `HIGH` ou `NORMAL`, e o raciocínio (`.github/ISSUE_TEMPLATE/feature.yml:76-83`, `.github/ISSUE_TEMPLATE/bug.yml:86-93`, `.github/pull_request_template.md:10-12`). O form de funcionalidade e o template dizem que o risco decide a profundidade da revisão, e o passo 8 do loop diz o mesmo ([o loop](../../../docs/development/workflow.md#o-loop)).
 - Até este pattern, só uma regra dizia o que é HIGH: uma PR que toca `.github/workflows/**` ([Pull requests e merge](../../../docs/development/workflow.md#pull-requests-e-merge), [ADR 0002](../../decisions/0002-soft-enforcement-on-github-free.md)). Nada dizia o que HIGH pede a mais.
-- Nenhum script lê o token. O gate só exige que a seção Riscos (ou Risco) exista e não esteja vazia (`scripts/loop-sections.mjs:95-98,124,135,398-401`). A classificação é conferida na leitura.
+- Nenhum script lê o token. O gate só exige que a seção Riscos (ou Risco) exista e não esteja vazia (`scripts/loop-sections.mjs:103-106,132,143,406-409`). A classificação é conferida na leitura.
 - As PRs do harness mostram o que uma revisão mais funda acha:
   - na #2, três rodadas de revisão e verificação adversariais acharam mais de 30 defeitos reais e distintos num gate que já passava em todos os testes ([changelog](../../evolution/changelog.md));
   - uma revisão adversarial da #3 achou o limite da auditoria tirado do evento ([anti-pattern](../anti-patterns/audit-bound-from-the-event.md)).
@@ -25,7 +25,7 @@ Todo plano de issue e toda PR declaram o risco, `HIGH` ou `NORMAL`, com o racioc
 
 Uma mudança é HIGH quando toca pelo menos um destes:
 
-- **Os contratos Swagger e o envelope.** Os cinco `docs/marketo-swagger-*.json` ([ADR 0004](../../decisions/0004-swagger-as-single-source-with-committed-generated-code.md)) e o envelope `{errors, requestId, result, success, warnings}` das respostas `ResponseOf*`, com os valores fixos de `ENVELOPE_VALUES` (`scripts/generate-marketo-factories.py:31-37`).
+- **Os contratos Swagger e o envelope.** Os cinco `docs/marketo-swagger-*.json` ([ADR 0004](../../decisions/0004-swagger-as-single-source-with-committed-generated-code.md)) e o envelope `{errors, requestId, result, success, warnings}` das respostas `ResponseOf*`, com os valores fixos de `ENVELOPE_VALUES` (`scripts/generate-marketo-factories.py:32-38`).
 - **O código gerado.** As pastas geradas das cinco áreas de `src/` e `src/mocks/` ([a fronteira do código gerado](generated-code-boundary.md)).
 - **Os geradores.** `scripts/*.py` ([gerar e conferir](generate-and-check.md)).
 - **O CI.** `.github/workflows/**`. O `check.yml` roda o YAML da própria PR, que consegue afrouxá-lo ([ADR 0002](../../decisions/0002-soft-enforcement-on-github-free.md)).
@@ -56,7 +56,7 @@ As issues já seguem isso. A #6 e a #7 são HIGH porque mexem nos geradores e em
   - **Cada linha escrita à mão é lida**, não só a descrição, os testes e o CI. A saída regenerada é provada pelo `check:*`, não lida linha a linha ([gerar e conferir](generate-and-check.md)).
   - **Uma verificação adversarial.** Uma rodada tenta quebrar a mudança: um caso legítimo que ela bloqueia, um desvio que ela deixa passar, uma mudança no que o consumidor vê. Outra rodada verifica as correções. As PRs da #2 e da #3 fizeram isso, e a da #13 também passou por uma verificação adversarial das últimas correções (#1).
   - **Uma mitigação por risco**, nomeada no plano e na PR, e a revisão confere cada uma.
-  - **A prova do contrato.** Numa mudança no código gerado, a saída do `check:*` vai na Verificação; o `check:all` passa desde a #6, mas o CI ainda não o roda (#7). Numa mudança no que o lite-campaign consome, a PR diz o que muda para ele.
+  - **A prova do contrato.** Numa mudança no código gerado, a saída do `check:*` vai na Verificação; o `check:all` passa desde a #6 e roda no CI desde a #7. Numa mudança no que o lite-campaign consome, a PR diz o que muda para ele.
   - **A leitura do dono antes do merge** (inferido; confirmar). Hoje a autorização permanente de merge da #2 não distingue risco ([Pull requests e merge](../../../docs/development/workflow.md#pull-requests-e-merge)), e esta regra a restringiria nas PRs HIGH.
 
 ## Quando usar
@@ -80,4 +80,5 @@ As issues já seguem isso. A #6 e a #7 são HIGH porque mexem nos geradores e em
 
 - **Criado**: 2026-09-25 (Fase: Build), do que o loop das #2, #3 e #13 já pratica, registrado na #4 (#4)
 - **Status**: Active
+- **Atualizado**: 2026-09-26 (Fase: Build), o `check:all` passou a rodar no CI, e as citações dos geradores seguiram as linhas novas (#7)
 - **Atualizado**: 2026-09-26 (Fase: Build), os hooks do Claude Code entraram na lista do harness como existentes, depois de a #6 fazer o HIGH cobrir os cinco documentos Swagger, as pastas geradas das cinco áreas, `src/mocks/` e os status HTTP que o consumidor vê (#5)

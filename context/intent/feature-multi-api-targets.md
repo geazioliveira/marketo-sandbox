@@ -92,7 +92,7 @@ Esta feature leva a reescrita para `main` pelo loop. Cada operação dos cinco d
 - **A verificação adversarial**, feita por um revisor independente: as 388 operações respondem um 2xx declarado, e só as 13 rotas sombreadas caem no handler errado. Ela achou três formas de schema que o código gerado não segue (#24) e o limite de 100 KiB no corpo, que já existia (#25). As duas ficaram registradas como limites nas ADRs 0004, 0005 e 0006.
 - **Medido**: os 604 arquivos gerados batem por sha256 com os que o dono gerou; num clone limpo, o `check:all` sai com 0, e o `generate:all` não muda nenhum arquivo; o app registra as 388 rotas, das quais 13 são sombreadas (#8); depois do merge de `main` com a #9, o `npm run check` passa com 1.345 testes, e o e2e com 14. Os números completos estão no [changelog](../evolution/changelog.md).
 - **Fica para depois**:
-  - a #7: o `check:all` no CI, o cabeçalho de gerado, a falha sem o Prettier e o comentário de `.github/workflows/check.yml:10-11`;
+  - a #7: o `check:all` no CI, o cabeçalho de gerado, a falha sem o Prettier e o comentário de `3ddceb4:.github/workflows/check.yml:10-11`;
   - a #8: as 13 rotas sombreadas;
   - a #9: as sobras do starter;
   - a #23: o timeout de 5 s dos testes que disparam processos;
