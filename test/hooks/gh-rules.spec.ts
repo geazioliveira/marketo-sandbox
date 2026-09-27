@@ -3252,3 +3252,322 @@ describe('the host each live read goes to (Copilot review of #26, fifth round)',
     expect(setting.hosts).toEqual([])
   })
 })
+
+// ---------------------------------------------------------------------------
+// Sixth round of Copilot's review of #26
+
+describe('gh api parameters on the query string (Copilot review of #26, sixth round)', () => {
+  const repoPath = `repos/${PROJECT}`
+  const addComment =
+    'mutation($body: String!) { addComment(input: {subjectId: "I_1", body: $body}) { clientMutationId } }'
+  /** The request bodies the cases send with --input, by file name. */
+  const inputs: Record<string, unknown> = {
+    'body.json': { title: 'Novo título' },
+    'comentario.json': { body: 'Recado.' },
+    'labels.json': { labels: ['bug'] },
+    'lista.json': ['bug'],
+    'label.json': { name: 'area/hooks', color: 'ffffff' },
+    'pr.json': {
+      head: BRANCH,
+      base: 'main',
+      title: 'Hooks',
+      body: 'Closes #5.\n\nTexto.',
+    },
+    'pr-edit.json': { title: 'Hooks' },
+    'merge.json': { base: BRANCH, head: 'outra' },
+    'ref.json': { ref: `refs/heads/${BRANCH}`, sha: HEAD },
+    'conteudo.json': { message: 'm', content: 'eA==', branch: BRANCH },
+    'addcomment.json': { query: addComment, variables: { body: 'Recado.' } },
+    // A mutation whose variable is not in the body: gh sends the fields
+    // beside it as the variables.
+    'mutacao.json': { query: addComment },
+    'consulta.json': { query: 'query { viewer { login } }' },
+  }
+
+  /** The decision in each permission mode: auto refuses a critical ask. */
+  async function inModes(
+    text: string,
+    dir: string,
+  ): Promise<{ default: Decision; auto: Decision }> {
+    const decision = await judge(text, { cwd: dir })
+    return {
+      default: io.resolve(decision, 'default'),
+      auto: io.resolve(decision, 'auto'),
+    }
+  }
+
+  function writeInputs(dir: string) {
+    for (const [name, value] of Object.entries(inputs))
+      writeFileSync(path.join(dir, name), JSON.stringify(value))
+  }
+
+  const reopen = /reabrir uma issue/
+  const onQuery = /query string/
+
+  it.each<[string, string, 'deny' | 'ask', 'deny' | 'ask', RegExp]>([
+    [
+      'state=open next to --input (the example of the review)',
+      `gh api -X PATCH ${repoPath}/issues/5 --input body.json -f state=open`,
+      'deny',
+      'deny',
+      reopen,
+    ],
+    [
+      'a typed state next to --input',
+      `gh api -X PATCH ${repoPath}/issues/5 --input body.json -F state=open`,
+      'deny',
+      'deny',
+      reopen,
+    ],
+    [
+      'a nested key gh flattens to state',
+      `gh api -X PATCH ${repoPath}/issues/5 --input body.json -f 'x[state]=open'`,
+      'deny',
+      'deny',
+      reopen,
+    ],
+    [
+      'two nested keys that both become state',
+      `gh api -X PATCH ${repoPath}/issues/5 --input body.json -f 'x[state]=open' -f 'y[state]=closed'`,
+      'deny',
+      'deny',
+      reopen,
+    ],
+    [
+      // GitHub may read either value, or both at once: the body is unknown,
+      // a critical ask, not an edit of a plain body.
+      'two nested keys that both become body, with different values',
+      `gh api -X PATCH ${repoPath}/issues/5 --input body.json -f 'x[body]=Um' -f 'y[body]=Dois'`,
+      'ask',
+      'deny',
+      /não consegui ler o corpo/,
+    ],
+    [
+      'labels next to --input on the issue',
+      `gh api -X PATCH ${repoPath}/issues/5 --input body.json -f 'labels[]=bug'`,
+      'deny',
+      'deny',
+      /o campo labels troca todas as labels/,
+    ],
+    [
+      'an Approve body next to --input on the issue',
+      `gh api -X PATCH ${repoPath}/issues/5 --input body.json -f body='# Owner Approve'`,
+      'deny',
+      'deny',
+      opening,
+    ],
+    [
+      'a plain body next to --input on the issue',
+      `gh api -X PATCH ${repoPath}/issues/5 --input body.json -f body=Recado`,
+      'ask',
+      'ask',
+      /editar o corpo da issue depois do Approve o revoga/,
+    ],
+    [
+      'a state it cannot read next to --input',
+      `gh api -X PATCH ${repoPath}/issues/5 --input body.json -F state=@nao-existe.txt`,
+      'ask',
+      'deny',
+      /não consegui ler o estado que o gh api põe na issue/,
+    ],
+    [
+      'a field whose key it cannot read next to --input',
+      `gh api -X PATCH ${repoPath}/issues/5 --input body.json -f "$K"=open`,
+      'ask',
+      'deny',
+      /não consegui ler o que o gh api muda na issue/,
+    ],
+    [
+      'state=open on the endpoint itself, with --input',
+      `gh api -X PATCH '${repoPath}/issues/5?state=open' --input body.json`,
+      'deny',
+      'deny',
+      reopen,
+    ],
+    [
+      'state=open on the endpoint itself, with fields',
+      `gh api -X PATCH '${repoPath}/issues/5?state=open' -f title=Outro`,
+      'deny',
+      'deny',
+      reopen,
+    ],
+    [
+      'a state label next to --input on the labels endpoint',
+      `gh api ${repoPath}/issues/5/labels --input labels.json -f 'labels[]=ready-for-agent'`,
+      'deny',
+      'deny',
+      /não escreve label de estado por gh api/,
+    ],
+    [
+      'a state label next to a list --input on the labels endpoint',
+      `gh api ${repoPath}/issues/5/labels --input lista.json -f 'labels[]=ready-for-agent'`,
+      'deny',
+      'deny',
+      /não escreve label de estado por gh api/,
+    ],
+    [
+      'an Approve body next to --input on a new comment',
+      `gh api ${repoPath}/issues/5/comments --input comentario.json -f body='# Owner Approve'`,
+      'deny',
+      'deny',
+      opening,
+    ],
+    [
+      'a withdrawal next to --input on a comment edit',
+      `gh api -X PATCH ${repoPath}/issues/comments/9 --input comentario.json -f body='# Approve retirado'`,
+      'deny',
+      'deny',
+      opening,
+    ],
+    [
+      'ready-for-agent next to --input on a new issue',
+      `gh api ${repoPath}/issues --input body.json -f 'labels[]=ready-for-agent'`,
+      'deny',
+      'deny',
+      /ready-for-agent é do dono/,
+    ],
+    [
+      'a state label name next to --input on a new label',
+      `gh api ${repoPath}/labels --input label.json -f name=ready-for-agent`,
+      'deny',
+      'deny',
+      /as labels de estado são do contrato do loop/,
+    ],
+    [
+      'a state label new_name next to --input on a label edit',
+      `gh api -X PATCH ${repoPath}/labels/bug --input label.json -f new_name=ready-for-agent`,
+      'deny',
+      'deny',
+      /as labels de estado são do contrato do loop/,
+    ],
+    [
+      'a skip string in the title next to --input on a new PR',
+      `gh api ${repoPath}/pulls --input pr.json -f title='Hooks [skip ci]'`,
+      'deny',
+      'deny',
+      /a PR traz "\[skip ci\]"/,
+    ],
+    [
+      'a body with no Closes line next to --input on a PR edit',
+      `gh api -X PATCH ${repoPath}/pulls/7 --input pr-edit.json -f body=Resumo`,
+      'deny',
+      'deny',
+      /Closes/,
+    ],
+    [
+      'base=main next to --input on a merge',
+      `gh api ${repoPath}/merges --input merge.json -f base=main`,
+      'deny',
+      'deny',
+      /merge em main pela API/,
+    ],
+    [
+      'ref=refs/heads/main next to --input on a new ref',
+      `gh api ${repoPath}/git/refs --input ref.json -f ref=refs/heads/main`,
+      'deny',
+      'deny',
+      /escrever em main pela API/,
+    ],
+    [
+      'branch=main next to --input on a contents write',
+      `gh api -X PUT ${repoPath}/contents/a.md --input conteudo.json -f branch=main`,
+      'deny',
+      'deny',
+      /sem branch cai em main/,
+    ],
+    [
+      'an Approve variable next to a GraphQL --input',
+      `gh api graphql --input addcomment.json -f body='# Owner Approve'`,
+      'deny',
+      'deny',
+      opening,
+    ],
+    [
+      // Read with the query string over the body, the query only reads; read
+      // with the body over it, the body's mutation takes the Approve from
+      // the query string as its variable.
+      'an Approve variable next to a GraphQL --input, with a query there that only reads',
+      `gh api graphql --input mutacao.json -f query='query { viewer { login } }' -f body='# Owner Approve'`,
+      'deny',
+      'deny',
+      opening,
+    ],
+    [
+      'a mutation query next to a GraphQL --input that only reads',
+      `gh api graphql --input consulta.json -f query='mutation { reopenIssue(input: {issueId: "I_1"}) { clientMutationId } }'`,
+      'deny',
+      'deny',
+      reopen,
+    ],
+  ])(
+    'judges %s as a body field, in default and auto',
+    async (_, text, inDefault, inAuto, reason) => {
+      const dir = realpathSync.native(
+        mkdtempSync(path.join(tmpdir(), 'gh-query-')),
+      )
+      try {
+        writeInputs(dir)
+        const { default: normal, auto } = await inModes(text, dir)
+        expect(normal.decision).toBe(inDefault)
+        expect(auto.decision).toBe(inAuto)
+        expect(normal.reason).toMatch(reason)
+        expect(normal.reason).toMatch(onQuery)
+      } finally {
+        rmSync(dir, { recursive: true, force: true })
+      }
+    },
+  )
+
+  it.each([
+    [
+      'a GET, whatever it sends',
+      `gh api -X GET ${repoPath}/issues/5 --input body.json -f state=open`,
+    ],
+    [
+      'a route no rule reads',
+      `gh api ${repoPath}/milestones --input body.json -f state=open`,
+    ],
+    [
+      'a field the issue rule does not read',
+      `gh api -X PATCH ${repoPath}/issues/5 --input body.json -f title=Outro`,
+    ],
+    [
+      'a plain comment body',
+      `gh api ${repoPath}/issues/5/comments --input comentario.json -f body=Outro`,
+    ],
+    [
+      'a label that is no state label',
+      `gh api ${repoPath}/issues/5/labels --input labels.json -f 'labels[]=enhancement'`,
+    ],
+    [
+      // gh sends them as labels[]=bug&labels[]=enhancement, one list: no
+      // repeated key whose value is unknown.
+      'two labels that are no state labels',
+      `gh api ${repoPath}/issues/5/labels --input labels.json -f 'labels[]=bug' -f 'labels[]=enhancement'`,
+    ],
+    [
+      'a GraphQL query with a variable',
+      'gh api graphql --input consulta.json -f login=alguem',
+    ],
+    [
+      'another repository',
+      'gh api -X PATCH repos/alguem/outro/issues/5 --input body.json -f state=open',
+    ],
+    [
+      'a read-only query string on the endpoint',
+      `gh api '${repoPath}/issues?state=open&per_page=5'`,
+    ],
+  ])('passes %s, in default and auto', async (_, text) => {
+    const dir = realpathSync.native(
+      mkdtempSync(path.join(tmpdir(), 'gh-query-')),
+    )
+    try {
+      writeInputs(dir)
+      const { default: normal, auto } = await inModes(text, dir)
+      expectPass(normal)
+      expectPass(auto)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+})

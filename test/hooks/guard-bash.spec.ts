@@ -2378,3 +2378,91 @@ describe.concurrent(
     })
   },
 )
+
+// ---------------------------------------------------------------------------
+// Sixth round of Copilot's review of #26
+
+describe.concurrent(
+  'the sixth round of Copilot’s review of #26, end to end',
+  () => {
+    const modes = ['default', 'auto'] as const
+
+    it.each(modes)(
+      'denies gh api fields beside --input that reopen the issue, in %s',
+      async (mode) => {
+        feature.write({ 'body.json': '{"title": "Novo título"}\n' })
+        expectDeny(
+          await guard(
+            'gh api -X PATCH repos/geazioliveira/marketo-sandbox/issues/5 --input body.json -f state=open',
+            { mode },
+          ),
+          /reabrir uma issue.*query string/,
+        )
+      },
+    )
+
+    it.each(modes)(
+      'passes gh api fields beside --input that no rule reads, in %s',
+      async (mode) => {
+        feature.write({ 'body.json': '{"title": "Novo título"}\n' })
+        expectPass(
+          await guard(
+            'gh api -X PATCH repos/geazioliveira/marketo-sandbox/issues/5 --input body.json -f title=Outro',
+            { mode },
+          ),
+        )
+      },
+    )
+
+    it.each(modes)('denies git update-ref of main, in %s', async (mode) => {
+      expectDeny(
+        await guard(`git update-ref refs/heads/main ${feature.headSha}`, {
+          mode,
+        }),
+        /mover main fora de uma PR/,
+      )
+    })
+
+    it.each(modes)(
+      'passes git update-ref of a branch of the issue, in %s',
+      async (mode) => {
+        expectPass(
+          await guard(
+            `git update-ref refs/heads/feature/9-outra ${feature.headSha}`,
+            { mode },
+          ),
+        )
+      },
+    )
+
+    // In a clone of another repository the command would pass; a GIT_DIR it
+    // cannot read may name this project, whose state labels are the owner's.
+    it.each(modes)(
+      'judges gh with a GIT_DIR it cannot read as this project, from a clone of another repository, in %s',
+      async (mode) => {
+        expectPass(
+          await guard('gh issue edit 5 --add-label ready-for-agent', {
+            repo: elsewhere,
+            mode,
+          }),
+        )
+        expectDeny(
+          await guard(
+            'GIT_DIR=$X gh issue edit 5 --add-label ready-for-agent',
+            { repo: elsewhere, mode },
+          ),
+          /ready-for-agent são do dono/,
+        )
+      },
+    )
+
+    it('asks for update-ref --stdin fed by a pipe, and denies it in auto', async () => {
+      const line = `printf 'update refs/heads/main ${feature.headSha}\\n' | git update-ref --stdin`
+      expectAsk(await guard(line), /update-ref --stdin lê as refs do stdin/)
+      expectDeny(
+        await guard(line, { mode: 'auto' }),
+        /Em auto, a confirmação vira negação/,
+      )
+    })
+  },
+)

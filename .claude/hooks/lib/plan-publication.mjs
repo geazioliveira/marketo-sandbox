@@ -6,7 +6,7 @@
 // failure: it reaches the entry, whose fallback marks the plan all the same
 // or, failing that, removes the gate's caches (fifth round). The entry's
 // header says what the hook does and why.
-import { readFileSync, statSync } from 'node:fs'
+import { existsSync, readFileSync, statSync } from 'node:fs'
 import path from 'node:path'
 import {
   agentPlanLabelTransition,
@@ -25,7 +25,7 @@ import {
   releaseHeld,
   startBudget,
 } from './budget.mjs'
-import { githubClients, targetOf as ghTarget } from './gh-rules.mjs'
+import { ghRepoDir, githubClients, targetOf as ghTarget } from './gh-rules.mjs'
 import { autonomousModes, contextOutput, readInput } from './io.mjs'
 import {
   clearGateCaches,
@@ -196,12 +196,17 @@ function placeOf(command, baseCwd, repoOf) {
  * is `unknown` and counts as another repository: the marker stays, the
  * restrictive side, and the hook says why.
  *
+ * The repository of the place is the one gh finds there: through GIT_DIR
+ * when the command sees one, as guard-bash reads it (ghRepoDir; Copilot
+ * review of #26, sixth round). A GIT_DIR that holds an expansion, or names
+ * no repository the hook can read, leaves it unknown, and `why` says so.
+ *
  * `readHost` is the GitHub a publication to this project goes to, where
  * confirmLive asks whether it went through (Copilot review of #26, fifth
  * round): github.com, whatever GH_HOST the hook itself inherits.
- * @returns {{ project: boolean, issue: number | null, unknown: boolean, host?: string, readHost?: string }}
+ * @returns {{ project: boolean, issue: number | null, unknown: boolean, why?: string, host?: string, readHost?: string }}
  */
-function targetOf(command, kind, place, exported) {
+function targetOf(command, kind, place, exported, repoOf) {
   const unknown = { project: false, issue: null, unknown: true }
   let issue = null
   if (kind === 'comment') {
@@ -222,12 +227,24 @@ function targetOf(command, kind, place, exported) {
     else return unknown
   }
 
-  const found = ghTarget(command, {
-    env: { ...process.env, ...exported },
-    repo: place.known ? place.repo : null,
-    cwdKnown: place.known,
-  })
-  if (found.unknown) return unknown
+  const env = { ...process.env, ...exported }
+  let repo = place.known ? place.repo : null
+  let reposKnown = place.known
+  let why
+  if (place.known) {
+    const seen = ghRepoDir({ ...env, ...command.env }, place.dir)
+    if (seen.gitDir !== null) {
+      repo = seen.known ? repoOfGitDir(seen.dir, repoOf) : null
+      if (repo === null) {
+        reposKnown = false
+        why = seen.known
+          ? `o gh acha o repositório pelo GIT_DIR, e ${seen.gitDir} não é um repositório que eu consiga ler`
+          : `o gh acha o repositório pelo GIT_DIR, e "${seen.gitDir}" traz uma expansão`
+      }
+    }
+  }
+  const found = ghTarget(command, { env, repo, cwdKnown: reposKnown })
+  if (found.unknown) return why === undefined ? unknown : { ...unknown, why }
   if (typeof found.host === 'string')
     return { project: false, issue, unknown: false, host: found.host }
   return {
@@ -235,6 +252,16 @@ function targetOf(command, kind, place, exported) {
     issue,
     unknown: false,
     readHost: 'github.com',
+  }
+}
+
+/** The repository a GIT_DIR names, or null when there is none the hook can read. */
+function repoOfGitDir(dir, repoOf) {
+  if (!existsSync(dir)) return null
+  try {
+    return repoOf(dir)
+  } catch {
+    return null
   }
 }
 
@@ -516,10 +543,12 @@ function onCommand(input, baseCwd, sessionId, { live }) {
   const githubFor = githubClients()
   const notes = []
   for (const { command, kind, place, exported: before } of placed) {
-    const target = targetOf(command, kind, place, before)
+    const target = targetOf(command, kind, place, before, repoOf)
     if (target.unknown)
       notes.push(
-        `não consegui ler em que issue, repositório ou host \`${shortText(command)}\` publica; se era o plano, o marcador continua: publique-o com o número da issue escrito no comando.`,
+        target.why === undefined
+          ? `não consegui ler em que issue, repositório ou host \`${shortText(command)}\` publica; se era o plano, o marcador continua: publique-o com o número da issue escrito no comando.`
+          : `não consegui ler em que repositório \`${shortText(command)}\` publica: ${target.why}; se era o plano, o marcador continua: publique-o sem GIT_DIR, de dentro da worktree da issue.`,
       )
     if (target.host !== undefined)
       notes.push(

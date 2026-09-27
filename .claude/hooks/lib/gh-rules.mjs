@@ -788,6 +788,26 @@ function ghRepoEnv(command, ctx) {
 }
 
 /**
+ * The directory gh finds its repository from: gh asks git, so a GIT_DIR the
+ * command sees (on the command, exported earlier on the line, or inherited)
+ * moves it, relative to the command's directory. GIT_WORK_TREE does not:
+ * git reads the remotes of the repository GIT_DIR names, or of the one
+ * around the directory, whatever the work tree (measured on git 2.50, and
+ * gh 2.101 posts to the repository GIT_DIR names; Copilot review of #26,
+ * sixth round). guard-bash judges a gh command there, and plan-to-issue
+ * reads there where a publication goes. `known` is false when GIT_DIR holds
+ * an expansion; `gitDir` is the value, null when unset.
+ * @returns {{ dir: string, known: boolean, gitDir: string | null }}
+ */
+export function ghRepoDir(env, cwd) {
+  const gitDir = env?.GIT_DIR
+  if (typeof gitDir !== 'string' || gitDir === '')
+    return { dir: cwd, known: true, gitDir: null }
+  if (/[$`]/.test(gitDir)) return { dir: cwd, known: false, gitDir }
+  return { dir: path.resolve(cwd, gitDir), known: true, gitDir }
+}
+
+/**
  * The repository a gh command acts on, as gh picks it: the repository of a
  * URL operand, else the last `-R/--repo`, else GH_REPO (set on the command,
  * exported earlier on the line, or inherited), else the repository around
@@ -1873,9 +1893,44 @@ function typedValue(command, ctx, raw, known) {
 }
 
 /**
- * What a `gh api` call sends: its method, endpoint and body. The body is the
- * `--input` JSON when there is one (the fields then go to the query string),
- * else the fields, `-f` raw and `-F` typed, nested as gh nests `a[b][]`.
+ * The query string gh puts the fields on when `--input` carries the body,
+ * as gh 2.101 flattens them (measured through a local proxy, Copilot review
+ * of #26, sixth round): a nested field goes by its innermost key
+ * (`x[state]=open` is sent as `state=open`, `a[b][]=c` as `b[]=c`), a list
+ * of plain values as `key[]`, one value per entry. [[key, value]] pairs.
+ */
+function flatQuery(params, pairs = []) {
+  for (const [key, value] of Object.entries(params)) {
+    if (Array.isArray(value)) {
+      for (const entry of value)
+        if (entry !== null && typeof entry === 'object')
+          if (Array.isArray(entry)) pairs.push([`${key}[]`, unknown])
+          else flatQuery(entry, pairs)
+        else pairs.push([`${key}[]`, entry])
+    } else if (value !== null && typeof value === 'object')
+      flatQuery(value, pairs)
+    else pairs.push([key, value])
+  }
+  return pairs
+}
+
+/** The pairs of a query string written into the endpoint itself (`issues/5?state=open`). */
+function endpointQuery(endpoint) {
+  if (endpoint === null || !endpoint.known) return []
+  const at = endpoint.value.indexOf('?')
+  if (at < 0) return []
+  const text = endpoint.value.slice(at + 1).replace(/#.*$/, '')
+  return [...new URLSearchParams(text)]
+}
+
+/**
+ * What a `gh api` call sends: its method, endpoint, body and query string.
+ * The body is the `--input` JSON when there is one, else the fields, `-f`
+ * raw and `-F` typed, nested as gh nests `a[b][]`. The query string holds
+ * what the endpoint spells after `?` and, with `--input`, every field
+ * (gh's help: "any parameters specified via field flags are added to the
+ * query string"): `query` is those [[key, value]] pairs, null when there are
+ * none, and `unknown` when a field's key cannot be read.
  */
 function apiRequest(command, ctx, from) {
   const argv = command.argv.map(String)
@@ -1905,6 +1960,15 @@ function apiRequest(command, ctx, from) {
   }
   const inputs = findOptions(argv, ['--input'])
   let body = keysKnown ? params : unknown
+  const endpoint = operandsOf(command, from, valuedFlags.api)[0] ?? null
+  const pairs = endpointQuery(endpoint)
+  let query = pairs.length > 0 ? pairs : null
+  if (inputs.length > 0 && found.length > 0) {
+    // The fields leave the body for the query string: kept, not dropped.
+    if (!keysKnown) query = unknown
+    else if (Object.keys(params).length > 0)
+      query = [...pairs, ...flatQuery(params)]
+  }
   if (inputs.length > 0) {
     const last = inputs.at(-1)
     const read = readSource(
@@ -1932,13 +1996,121 @@ function apiRequest(command, ctx, from) {
       : 'UNKNOWN'
   }
   const hosts = findOptions(argv, ['--hostname'])
-  const endpoint = operandsOf(command, from, valuedFlags.api)[0] ?? null
   return {
     method,
     body,
+    query,
     endpoint,
     host: hosts.length > 0 ? hosts.at(-1).value : null,
   }
+}
+
+const isPlainObject = (value) =>
+  value !== null && typeof value === 'object' && !Array.isArray(value)
+
+/**
+ * The query string as the fields GitHub could read from it, one object per
+ * reading. A key given once is its value; `key[]` collects a list; a key
+ * given more than once with different values (two nested fields gh flattens
+ * to the same key) may be read as any of them, or none: one reading per
+ * value, and one where it is unknown. A deeper key spelled in the endpoint
+ * (`labels[][name]=x`) is nested as a Rails-like reader would nest it.
+ */
+function queryReadings(pairs) {
+  const tops = new Map()
+  for (const [key, value] of pairs) {
+    const parts = keyPath(key)
+    const top = parts[0]
+    const entry = tops.get(top) ?? { plain: [], nested: {}, deep: false }
+    if (parts.length === 1) entry.plain.push(value)
+    else {
+      entry.deep = true
+      setParam(entry.nested, key, value)
+    }
+    tops.set(top, entry)
+  }
+  const fixed = {}
+  const choices = []
+  for (const [top, entry] of tops) {
+    const seen = new Map()
+    for (const value of entry.plain)
+      seen.set(typeof value === 'symbol' ? value : String(value), value)
+    const values = [...seen.values()]
+    if (entry.deep) values.push(entry.nested[top])
+    if (values.length === 1) fixed[top] = values[0]
+    else choices.push([top, values])
+  }
+  if (choices.length === 0) return [fixed]
+  const widest = Math.max(...choices.map(([, values]) => values.length))
+  const readings = []
+  for (let k = 0; k < widest; k += 1) {
+    const reading = { ...fixed }
+    for (const [top, values] of choices)
+      reading[top] = values[Math.min(k, values.length - 1)]
+    readings.push(reading)
+  }
+  const blind = { ...fixed }
+  for (const [top] of choices) blind[top] = unknown
+  readings.push(blind)
+  return readings
+}
+
+/**
+ * The bodies a call is judged as (Copilot review of #26, sixth round): the
+ * one it sends, and, when parameters ride on the query string, that body
+ * with them over it and under it, since which one GitHub reads, if it
+ * reads the query string at all, cannot be known. A GraphQL body also gets
+ * them as its variables. A query string that cannot be read is an unknown
+ * body; a body that is no object (a list of labels) is read beside it.
+ */
+function bodiesOf(request, { graphql = false } = {}) {
+  const { body, query } = request
+  if (query === null || body === unknown) return [body]
+  if (query === unknown) return [body, unknown]
+  const bodies = [body]
+  for (const reading of queryReadings(query)) {
+    if (!isPlainObject(body)) {
+      bodies.push(reading)
+      continue
+    }
+    bodies.push({ ...reading, ...body }, { ...body, ...reading })
+    if (graphql && isPlainObject(body.variables))
+      bodies.push(
+        { ...body, variables: { ...reading, ...body.variables } },
+        { ...body, variables: { ...body.variables, ...reading } },
+      )
+  }
+  // The same body twice would judge twice, and a thread's live read would
+  // run twice.
+  const seen = new Set()
+  return bodies.filter((candidate) => {
+    const key = JSON.stringify(candidate, (_, value) =>
+      value === unknown ? '\u0000unknown' : value,
+    )
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+}
+
+const queryNote =
+  'Os parâmetros na query string da URL (os de -f/-F quando há --input, e os escritos no endpoint depois de ?) contam como campos do corpo: o GitHub pode lê-los.'
+
+/**
+ * The decision for every body a call is judged as, saying so when the query
+ * string is what made it stricter than the body alone.
+ */
+function judgeBodies(bodies, judgeOne) {
+  const alone = combine([judgeOne(bodies[0])])
+  if (bodies.length === 1) return alone
+  const all = combine(bodies.map(judgeOne))
+  if (
+    all.decision === alone.decision &&
+    all.critical === alone.critical &&
+    all.reason === alone.reason
+  )
+    return all
+  return { ...all, reason: `${all.reason} ${queryNote}` }
 }
 
 /** A field of the body, as { present, known, value }. */
@@ -2554,7 +2726,10 @@ function apiDecision(command, base, from) {
     .replace(/[?#].*$/, '')
   // GraphQL names no repository: its node ids are global, so a mutation is
   // judged wherever the command runs.
-  if (raw.split('/')[0] === 'graphql') return graphqlDecision(request.body, ctx)
+  if (raw.split('/')[0] === 'graphql')
+    return judgeBodies(bodiesOf(request, { graphql: true }), (body) =>
+      graphqlDecision(body, ctx),
+    )
   // The repository around the command is read only when a placeholder
   // needs it. A placeholder left unfilled could be this project.
   let segments = raw.split('/').filter((segment) => segment !== '')
@@ -2570,9 +2745,9 @@ function apiDecision(command, base, from) {
   const pair = `${segments[1]}/${segments[2]}`
   if (!placeholder.test(pair) && !isProject(pair)) return pass()
   const methods = request.method === 'UNKNOWN' ? writeMethods : [request.method]
-  return combine(
-    methods.map((method) =>
-      restDecision(method, segments.slice(3), request.body),
+  return judgeBodies(bodiesOf(request), (body) =>
+    combine(
+      methods.map((method) => restDecision(method, segments.slice(3), body)),
     ),
   )
 }

@@ -427,7 +427,7 @@ function configOf(g, env) {
     })
   const all = (key) =>
     entries.filter(([name]) => name === key).map(([, value]) => value)
-  return { known: true, all, get: (key) => all(key).at(-1) }
+  return { known: true, all, get: (key) => all(key).at(-1), entries }
 }
 
 // ---------------------------------------------------------------------------
@@ -1154,10 +1154,17 @@ const trunkRefs = new Set([trunk, `heads/${trunk}`, `refs/heads/${trunk}`])
 
 /**
  * Whether a push destination can be main: main itself in any of the forms
- * git resolves to it, the remote's HEAD (which is main), or a pattern.
+ * git resolves to it, the remote's HEAD (which is main), or a pattern. With
+ * `fold`, case is folded: a push to a repository on disk (`git push .
+ * HEAD:MAIN`) lands on a filesystem that may not tell MAIN from main (see
+ * isTrunkRef). GitHub tells them apart, so over the network MAIN is another
+ * branch and the case counts (verification of the sixth round of Copilot's
+ * review of #26).
  */
-const reachesTrunk = (ref) =>
-  trunkRefs.has(ref) || ref === 'HEAD' || ref.includes('*')
+const reachesTrunk = (ref, fold = false) =>
+  trunkRefs.has(fold ? ref.toLowerCase() : ref) ||
+  ref === 'HEAD' ||
+  ref.includes('*')
 
 /**
  * Where a refspec pushes to: after the last `:`, or the source itself when
@@ -1177,13 +1184,23 @@ function destinationOf(refspec, branch) {
   return { target: named, viaHead: false }
 }
 
-function refspecDecision(value, known, repo, deleting, where = '') {
+/**
+ * A refspec of a push. `fold` when the remote may be a repository on disk,
+ * where MAIN can be main (reachesTrunk).
+ */
+function refspecDecision(
+  value,
+  known,
+  repo,
+  deleting,
+  { where = '', fold = false } = {},
+) {
   if (!known)
     return unread(
       `não consegui ler o destino do push em "${value}": confira que não é ${trunk}`,
     )
   if (deleting)
-    return reachesTrunk(value.replace(/^\+/, ''))
+    return reachesTrunk(value.replace(/^\+/, ''), fold)
       ? deny(`${pushToTrunk} (--delete apaga ${trunk})`)
       : pass()
   const destination = destinationOf(value, repo.branch)
@@ -1195,7 +1212,7 @@ function refspecDecision(value, known, repo, deleting, where = '') {
     return unread(
       `não consegui saber qual branch o refspec "${value}" empurra: ${headMoved}; confira que não é ${trunk}`,
     )
-  if (destination.target !== null && reachesTrunk(destination.target))
+  if (destination.target !== null && reachesTrunk(destination.target, fold))
     return deny(
       `${pushToTrunk} (o refspec "${value}"${where} chega a ${trunk})`,
     )
@@ -1203,11 +1220,35 @@ function refspecDecision(value, known, repo, deleting, where = '') {
 }
 
 /**
+ * The repository on disk a URL names, a path or a file:// URL (git's rule:
+ * no scheme, and no `:` before the first `/`), as repoAt reads it: `git
+ * push . HEAD:main` writes this repository's own main (Copilot review of
+ * #26, sixth round). null for a URL of the network, or a path that holds
+ * no repository; { repo: null, unknown: true } when git could not say.
+ */
+function localRepo(url, g, repoAt) {
+  if (typeof repoAt !== 'function') return null
+  let where = null
+  if (/^file:\/\//i.test(url)) where = url.replace(/^file:\/\//i, '')
+  else if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(url) && !/^[^/]*:/.test(url))
+    where = url
+  if (where === null) return null
+  const dir = path.resolve(g.dir, where)
+  if (!existsSync(dir)) return null
+  try {
+    return repoAt(dir)
+  } catch {
+    return { repo: null, unknown: true }
+  }
+}
+
+/**
  * The repositories a remote pushes to: its push URLs, as `git remote
  * get-url --push` gives them, or, for a word that names no remote, the URL
- * itself after git's insteadOf rewriting.
+ * itself after git's insteadOf rewriting. A URL on disk is the repository
+ * there, and `local` says one of them is this project on disk.
  */
-function remoteTarget(g, name, env) {
+function remoteTarget(g, name, env, repoAt) {
   if (name.startsWith('-')) return { known: false }
   const named = gitRead(g, ['remote', 'get-url', '--push', '--all', name], env)
   let urls = null
@@ -1217,9 +1258,14 @@ function remoteTarget(g, name, env) {
     if (url.status === 0) urls = url.out.split('\n').filter(Boolean)
   }
   if (urls === null) return { known: false }
+  const local = urls.map((url) => localRepo(url, g, repoAt))
+  if (local.some((found) => found?.unknown === true)) return { known: false }
   return {
     known: true,
-    project: urls.some((url) => isProject(repoFromRemote(url))),
+    project: urls.some(
+      (url, index) => isProject(repoFromRemote(url)) || isProject(local[index]),
+    ),
+    local: local.some((found) => isProject(found)),
   }
 }
 
@@ -1246,7 +1292,7 @@ const isTrue = (value) =>
  * the worst wins: the first is what runs, and the second is what the line
  * says, so neither can let a push to main through.
  */
-function pushDecision(command, g, repo, env) {
+function pushDecision(command, g, repo, env, repoAt) {
   const { options, operands } = readGitArgs(g.argv, g.at + 1, pushSpec)
   let config = null
   const readConfig = () => {
@@ -1267,7 +1313,7 @@ function pushDecision(command, g, repo, env) {
     readings.push({ remoteWord: named, refspecs: operands })
   return combine(
     readings.map((reading) =>
-      pushReading(command, g, repo, env, options, reading, readConfig),
+      pushReading(command, g, repo, env, options, reading, readConfig, repoAt),
     ),
   )
 }
@@ -1280,6 +1326,7 @@ function pushReading(
   options,
   { remoteWord, refspecs },
   readConfig,
+  repoAt,
 ) {
   const has = (name) => options.some((option) => option.name === name)
 
@@ -1290,16 +1337,18 @@ function pushReading(
   if (remoteWord !== undefined) {
     if (wordKnown(command, remoteWord.index)) {
       remote = remoteWord.value
-      target = remoteTarget(g, remote, env)
+      target = remoteTarget(g, remote, env, repoAt)
     }
   } else {
     const read = readConfig()
     if (read.known) {
       remote = defaultRemote(read, repo.branch)
-      target = remoteTarget(g, remote, env)
+      target = remoteTarget(g, remote, env, repoAt)
     }
   }
   if (target.known && !target.project) return pass()
+  // A remote that cannot be read may be this repository on disk.
+  const fold = !target.known || target.local === true
 
   if (has('--all') || has('--branches'))
     return deny(
@@ -1317,6 +1366,7 @@ function pushReading(
           wordKnown(command, refspec.index),
           repo,
           deleting,
+          { fold },
         ),
       ),
     )
@@ -1335,13 +1385,10 @@ function pushReading(
   if (configured.length > 0)
     return combine(
       configured.map((refspec) =>
-        refspecDecision(
-          refspec,
-          true,
-          repo,
-          deleting,
-          ` de remote.${remote}.push`,
-        ),
+        refspecDecision(refspec, true, repo, deleting, {
+          where: ` de remote.${remote}.push`,
+          fold,
+        }),
       ),
     )
   if (repo.branchKnown === false)
@@ -1360,7 +1407,7 @@ function pushReading(
   if (mode === 'upstream' || mode === 'tracking') {
     const merge =
       repo.branch === null ? undefined : read.get(`branch.${repo.branch}.merge`)
-    return merge !== undefined && reachesTrunk(merge)
+    return merge !== undefined && reachesTrunk(merge, fold)
       ? deny(
           `${pushToTrunk} (push.default=${mode} leva a branch ao upstream dela, ${trunk})`,
         )
@@ -1971,6 +2018,940 @@ function writeDecision(write, g, sub, found, ctx, env) {
 }
 
 // ---------------------------------------------------------------------------
+// Writes to main's ref (Copilot review of #26, sixth round)
+//
+// A commit on main and a push to it are refused above, and a write to the
+// worktree goes through the gate; main's ref also moves with neither. `git
+// update-ref refs/heads/main <sha>` sets it outright, and with it the branch
+// of the owner's main checkout, where git's own guard (a branch checked out
+// elsewhere is not forced) does not reach. So every subcommand that writes
+// refs is read for a write to main:
+// - update-ref, on its argv and in a --stdin batch (-z too): main in any
+//   form git writes it under (`main` and `heads/main` shadow the branch for
+//   every name git resolves, `refs/heads/main` is it), a symbolic ref
+//   followed to what it points at, and HEAD read as the branch of the
+//   checkout it names, unless --no-deref, where it is that checkout's HEAD;
+// - branch -f/-m/-M/-c/-C/-d/-D, and a plain create, onto or of main;
+// - symbolic-ref turning main into a symbolic ref, pointing another ref at
+//   main (or at HEAD), or moving the HEAD of the checkout of main;
+// - fetch and pull whose refspec, --refmap, or remote.*.fetch set by the
+//   command's own `-c` (or an earlier `git config` of the line), lands on
+//   main (the repository's config is not read: see fetchSpecsOf);
+// - replace of a commit of main's history, which every read of main then
+//   sees replaced;
+// - checkout -B, switch -C, worktree add -B and subtree --branch onto main,
+//   reset of the checkout of main to a commit, rebase of main,
+//   filter-branch of main, and fast-import of a commit on main;
+// - push to a repository on disk that is this project (`git push .
+//   HEAD:main`), in the push rule above.
+// A tag named main moves no branch and is left alone; a write to any other
+// ref is judged as before. A ref, a batch or a refspec the hook cannot read
+// asks, critical.
+
+const trunkMoves = `mover ${trunk} fora de uma PR: a mudança entra em ${trunk} por PR`
+
+/** A ref name as git stores it: runs of `/` folded, a leading `./` dropped. */
+const refName = (name) =>
+  String(name)
+    .replace(/\/{2,}/g, '/')
+    .replace(/^\.\//, '')
+
+/**
+ * Whether a ref name is main, in any form git writes or resolves it under.
+ * Case is folded: on a filesystem that does not tell case apart (macOS's by
+ * default), a loose refs/heads/MAIN is main's own file (measured on git
+ * 2.50: `git update-ref refs/heads/MAIN <sha>`, and `Refs/Heads/Main`, move
+ * main).
+ */
+const isTrunkRef = (name) => trunkRefs.has(refName(name).toLowerCase())
+
+/** A word of the command: its value, and whether it holds no expansion. */
+const wordOf = (command, operand) => ({
+  value: operand.value,
+  known: wordKnown(command, operand.index),
+})
+
+const unreadRef = (value, what) =>
+  unread(
+    `não consegui ler a ref que ${what} escreve ("${value}"): confira que não é ${trunk}`,
+  )
+
+/**
+ * Where a symbolic ref leads, followed to its end as git follows it:
+ * { known: true, target } (target null for a ref that is not symbolic, or
+ * none), or { known: false }.
+ */
+function symbolicTarget(g, ref, env) {
+  const run = gitRead(
+    g,
+    ['symbolic-ref', '-q', '--end-of-options', ref],
+    inertEnv(env),
+    { configArgs: inertConfig },
+  )
+  if (run.status === 0) return { known: true, target: run.out.trim() }
+  if (run.status === 1) return { known: true, target: null }
+  return { known: false }
+}
+
+/** HEAD, or `@`, as the branch of the checkout the command runs in. */
+function headDecision(repo, what, deref) {
+  if (repo.branchKnown === false)
+    return unread(
+      `não consegui saber em que branch está o HEAD que ${what} escreve: ${headMoved}; confira que não é ${trunk}`,
+    )
+  if (repo.branch !== trunk) return pass()
+  return deny(
+    deref
+      ? `${trunkMoves} (${what} escreve o HEAD do checkout de ${trunk}, que é ${trunk})`
+      : `${trunkMoves} (${what} tira do lugar o HEAD do checkout de ${trunk})`,
+  )
+}
+
+/**
+ * The decision for a write of `ref`: main in any form, HEAD as the branch
+ * of the checkout, and, where git follows a symbolic ref (`deref`), what
+ * it points at.
+ */
+function refDecision(g, repo, { value, known }, { what, deref = true }, env) {
+  if (!known) return unreadRef(value, what)
+  if (isTrunkRef(value)) return deny(`${trunkMoves} (${what} escreve ${value})`)
+  if (value === 'HEAD' || value === '@') return headDecision(repo, what, deref)
+  if (!deref) return pass()
+  const followed = symbolicTarget(g, value, env)
+  if (!followed.known)
+    return unread(
+      `não consegui ler para onde a ref ${value} aponta: confira que ${what} não escreve em ${trunk}`,
+    )
+  if (followed.target !== null && isTrunkRef(followed.target))
+    return deny(
+      `${trunkMoves} (${value} aponta para ${followed.target}, e ${what} escreve nela)`,
+    )
+  return pass()
+}
+
+/**
+ * The decision for making `name` a symbolic ref to `target`: a write through
+ * it later lands where the target leads, and one later on the same line
+ * would be judged before the symbolic ref exists. So a symbolic ref that
+ * leads to main (main itself, or a symbolic ref to it) is refused where it
+ * is made, and so is one to HEAD: the ref is shared by every worktree, and
+ * read from the checkout of main, HEAD is main.
+ */
+function symrefTargetDecision(g, name, target, what, env) {
+  if (!target.known)
+    return unread(
+      `não consegui ler para onde ${what} aponta ${name} ("${target.value}"): confira que não é ${trunk}`,
+    )
+  const leads = `${what} faz ${name} apontar para ${target.value}, e uma escrita nela cai em ${trunk}`
+  if (isTrunkRef(target.value)) return deny(`${trunkMoves} (${leads})`)
+  if (target.value === 'HEAD' || target.value === '@')
+    return deny(
+      `${trunkMoves} (${what} faz ${name} apontar para ${target.value}, que no checkout de ${trunk} é ${trunk})`,
+    )
+  const followed = symbolicTarget(g, target.value, env)
+  if (!followed.known)
+    return unread(
+      `não consegui ler para onde a ref ${target.value} aponta: confira que ${what} não faz ${name} levar a ${trunk}`,
+    )
+  return followed.target !== null && isTrunkRef(followed.target)
+    ? deny(`${trunkMoves} (${leads}, que aponta para ${followed.target})`)
+    : pass()
+}
+
+// update-ref
+
+/** The words of an update-ref --stdin batch, and the ones that write. */
+const batchVerbs = new Set([
+  'update',
+  'create',
+  'delete',
+  'verify',
+  'symref-update',
+  'symref-create',
+  'symref-delete',
+  'symref-verify',
+  'option',
+  'start',
+  'prepare',
+  'commit',
+  'abort',
+])
+const batchWrites = new Set([
+  'update',
+  'create',
+  'delete',
+  'symref-update',
+  'symref-create',
+  'symref-delete',
+])
+const batchBare = new Set(['start', 'prepare', 'commit', 'abort'])
+
+/** How many NUL-ended fields each verb takes after its ref, with -z. */
+const batchFields = {
+  update: 2,
+  create: 1,
+  delete: 1,
+  verify: 1,
+  'symref-update': 1,
+  'symref-create': 1,
+  'symref-delete': 1,
+  'symref-verify': 1,
+}
+
+const cEscapes = {
+  a: 7,
+  b: 8,
+  f: 12,
+  n: 10,
+  r: 13,
+  t: 9,
+  v: 11,
+  '\\': 92,
+  '"': 34,
+}
+
+/**
+ * A C-quoted word at the start of `text`, as update-ref unquotes a ref:
+ * { value, rest }, or null when the quoting cannot be read.
+ */
+function unquoteC(text) {
+  const bytes = []
+  for (let k = 1; k < text.length;) {
+    const ch = text[k]
+    if (ch === '"')
+      return {
+        value: Buffer.from(bytes).toString('utf8'),
+        rest: text.slice(k + 1),
+      }
+    if (ch !== '\\') {
+      bytes.push(...Buffer.from(ch, 'utf8'))
+      k += ch.length
+      continue
+    }
+    const next = text[k + 1]
+    if (next !== undefined && Object.hasOwn(cEscapes, next)) {
+      bytes.push(cEscapes[next])
+      k += 2
+      continue
+    }
+    const octal = text.slice(k + 1, k + 4)
+    if (!/^[0-3][0-7]{2}$/.test(octal)) return null
+    bytes.push(Number.parseInt(octal, 8))
+    k += 4
+  }
+  return null
+}
+
+/**
+ * The refs an update-ref --stdin batch writes, as [{ value, known, deref }],
+ * or null when a command of it cannot be read. `option no-deref` holds for
+ * the next command only; a symref-* command writes the symbolic ref itself.
+ */
+function batchRefs(text, nul) {
+  const writes = []
+  let noDeref = false
+  const take = (verb, ref, target) => {
+    if (batchWrites.has(verb))
+      writes.push({
+        value: ref,
+        known: true,
+        deref: !noDeref && !verb.startsWith('symref-'),
+        ...(['symref-create', 'symref-update'].includes(verb)
+          ? { target: { value: target ?? '', known: target != null } }
+          : {}),
+      })
+    noDeref = false
+  }
+  if (nul) {
+    const fields = text.split('\0')
+    for (let k = 0; k < fields.length;) {
+      const field = fields[k]
+      k += 1
+      if (field === '' && k === fields.length) break
+      const match = /^([a-z-]+)(?: ([\s\S]*))?$/.exec(field)
+      if (match === null || !batchVerbs.has(match[1])) return null
+      const [, verb, rest] = match
+      if (batchBare.has(verb)) continue
+      if (verb === 'option') {
+        if (rest !== 'no-deref') return null
+        noDeref = true
+        continue
+      }
+      if (rest === undefined || rest === '') return null
+      const target = fields[k]
+      k += batchFields[verb]
+      if (verb === 'symref-update' && ['ref', 'oid'].includes(fields[k])) k += 2
+      take(verb, rest, target)
+    }
+    return writes
+  }
+  for (const line of text.split('\n')) {
+    if (line === '') continue
+    const match = /^([a-z-]+)(?: (.*))?$/.exec(line)
+    if (match === null || !batchVerbs.has(match[1])) return null
+    const [, verb, rest] = match
+    if (batchBare.has(verb)) continue
+    if (verb === 'option') {
+      if (rest !== 'no-deref') return null
+      noDeref = true
+      continue
+    }
+    if (rest === undefined || rest === '') return null
+    const words = []
+    let left = rest
+    while (left !== '' && words.length < 2) {
+      if (left.startsWith('"')) {
+        const quoted = unquoteC(left)
+        if (quoted === null) return null
+        words.push(quoted.value)
+        left = quoted.rest.replace(/^ /, '')
+      } else {
+        const space = left.indexOf(' ')
+        words.push(space < 0 ? left : left.slice(0, space))
+        left = space < 0 ? '' : left.slice(space + 1)
+      }
+    }
+    take(verb, words[0], words[1])
+  }
+  return writes
+}
+
+function updateRefPlan(command, g, ctx) {
+  const { options, operands } = readGitArgs(g.argv, g.at + 1, { short: 'm' })
+  const has = (name) => options.some((entry) => entry.name === name)
+  const what = 'o git update-ref'
+  if (has('--stdin'))
+    return (repo, env) => {
+      const read = readSource(command, ctx.cwd, '-', true, ctx.files)
+      if (!read.known)
+        return unread(
+          `o git update-ref --stdin lê as refs do stdin, que o hook não leu: confira que nenhuma é ${trunk}`,
+        )
+      const refs = batchRefs(read.text, has('-z'))
+      if (refs === null)
+        return unread(
+          `não consegui ler inteiro o lote do git update-ref --stdin: confira que ele não escreve em ${trunk}`,
+        )
+      return combine(
+        refs.flatMap((ref) => [
+          refDecision(g, repo, ref, { what, deref: ref.deref }, env),
+          ref.target === undefined
+            ? pass()
+            : symrefTargetDecision(g, ref.value, ref.target, what, env),
+        ]),
+      )
+    }
+  if (operands.length === 0) return null
+  const ref = wordOf(command, operands[0])
+  return (repo, env) =>
+    refDecision(g, repo, ref, { what, deref: !has('--no-deref') }, env)
+}
+
+// branch
+
+/** git branch's options that take a separate value. */
+const branchSpec = {
+  short: 'u',
+  long: [
+    '--set-upstream-to',
+    '--points-at',
+    '--format',
+    '--sort',
+    '--merged',
+    '--no-merged',
+    '--contains',
+    '--no-contains',
+  ],
+}
+
+/** The options with which git branch lists, or changes only config. */
+const branchReads = [
+  '-l',
+  '--list',
+  '-a',
+  '--all',
+  '-r',
+  '--remotes',
+  '-v',
+  '--verbose',
+  '--show-current',
+  '--points-at',
+  '--format',
+  '--sort',
+  '--merged',
+  '--no-merged',
+  '--contains',
+  '--no-contains',
+  '--column',
+  '--no-column',
+  '-u',
+  '--set-upstream-to',
+  '--unset-upstream',
+  '--edit-description',
+]
+
+/**
+ * The branch names a git branch command writes, as [{ value, known, role
+ * }]; `current` stands for the branch checked out, which -m/-c with one
+ * name renames or copies.
+ */
+function branchNames(command, g) {
+  const { options, operands } = readGitArgs(g.argv, g.at + 1, branchSpec)
+  const has = (...names) => options.some((entry) => names.includes(entry.name))
+  if (has('-d', '-D', '--delete'))
+    return has('-r', '--remotes')
+      ? []
+      : operands.map((operand) => ({
+          ...wordOf(command, operand),
+          role: `o git branch apaga ${operand.value}`,
+        }))
+  const moving = has('-m', '-M', '--move')
+  if (moving || has('-c', '-C', '--copy')) {
+    const verb = moving ? 'renomeia' : 'copia'
+    if (operands.length === 0) return []
+    const from =
+      operands.length === 1
+        ? { current: true, role: `o git branch ${verb} a branch do checkout` }
+        : {
+            ...wordOf(command, operands[0]),
+            role: `o git branch ${verb} ${operands[0].value}`,
+          }
+    const onto = operands.length === 1 ? operands[0] : operands[1]
+    return [
+      from,
+      {
+        ...wordOf(command, onto),
+        role: `o git branch ${verb} para ${onto.value}`,
+      },
+    ]
+  }
+  if (has(...branchReads) || operands.length === 0) return []
+  return [
+    {
+      ...wordOf(command, operands[0]),
+      role: `o git branch ${has('-f', '--force') ? 'força' : 'cria'} ${operands[0].value}`,
+    },
+  ]
+}
+
+function branchPlan(command, g) {
+  const names = branchNames(command, g)
+  if (
+    !names.some((name) => name.current || !name.known || isTrunkRef(name.value))
+  )
+    return null
+  return (repo) =>
+    combine(
+      names.map((name) => {
+        if (name.current) {
+          if (repo.branchKnown === false)
+            return unread(
+              `não consegui saber qual branch ${name.role.replace(' a branch do checkout', '')}: ${headMoved}; confira que não é ${trunk}`,
+            )
+          return repo.branch === trunk
+            ? deny(`${trunkMoves} (${name.role}, ${trunk})`)
+            : pass()
+        }
+        if (!name.known) return unreadRef(name.value, 'o git branch')
+        return isTrunkRef(name.value)
+          ? deny(`${trunkMoves} (${name.role})`)
+          : pass()
+      }),
+    )
+}
+
+// symbolic-ref
+
+function symbolicRefPlan(command, g) {
+  const { options, operands } = readGitArgs(g.argv, g.at + 1, { short: 'm' })
+  const deleting = options.some((entry) =>
+    ['-d', '--delete'].includes(entry.name),
+  )
+  if (operands.length === 0 || (!deleting && operands.length < 2)) return null
+  const name = wordOf(command, operands[0])
+  const target = deleting ? null : wordOf(command, operands[1])
+  if (
+    deleting &&
+    name.known &&
+    !isTrunkRef(name.value) &&
+    name.value !== 'HEAD'
+  )
+    return null
+  const what = 'o git symbolic-ref'
+  return (repo, env) => {
+    if (!name.known) return unreadRef(name.value, what)
+    if (isTrunkRef(name.value))
+      return deny(
+        `${trunkMoves} (${what} ${deleting ? 'apaga' : 'faz uma ref simbólica de'} ${name.value})`,
+      )
+    // HEAD pointed at main is a checkout of main, which guard-bash follows
+    // for the rest of the line; any other name pointed at main is not.
+    if (name.value !== 'HEAD')
+      return symrefTargetDecision(g, name.value, target, what, env)
+    if (repo.branchKnown === false)
+      return unread(
+        `não consegui saber em que branch está o HEAD que ${what} muda: ${headMoved}; confira que não é o checkout de ${trunk}`,
+      )
+    if (repo.branch !== trunk) return pass()
+    if (deleting)
+      return deny(
+        `${trunkMoves} (${what} apaga o HEAD do checkout de ${trunk})`,
+      )
+    if (!target.known)
+      return unread(
+        `não consegui ler para onde ${what} aponta o HEAD do checkout de ${trunk} ("${target.value}"): confira`,
+      )
+    return isTrunkRef(target.value)
+      ? pass()
+      : deny(
+          `${trunkMoves} (${what} aponta o HEAD do checkout de ${trunk} para ${target.value})`,
+        )
+  }
+}
+
+// fetch and pull
+
+/** The options of git fetch, and of git pull, that take a separate value. */
+const fetchLong = [
+  '--depth',
+  '--deepen',
+  '--shallow-since',
+  '--shallow-exclude',
+  '--refmap',
+  '--server-option',
+  '--upload-pack',
+  '--negotiation-tip',
+  '--jobs',
+  '--filter',
+  '--submodule-prefix',
+  '--recurse-submodules-default',
+]
+const fetchSpecs = {
+  fetch: { short: 'oj', long: fetchLong },
+  pull: {
+    short: 'sXoj',
+    optional: 'S',
+    long: [...fetchLong, '--strategy', '--strategy-option'],
+  },
+}
+
+/**
+ * Whether a local destination is main: main in any form, a pattern that
+ * covers it, or HEAD, the branch of the checkout.
+ */
+function fetchLands(dst, repo) {
+  if (dst === 'HEAD' || dst === '@')
+    return repo.branchKnown === false ? null : repo.branch === trunk
+  if (dst.includes('*')) {
+    const pattern = new RegExp(
+      `^${dst.split('*').map(escapeRegExp).join('.*')}$`,
+      'i',
+    )
+    return [...trunkRefs].some((name) => pattern.test(name))
+  }
+  return isTrunkRef(dst)
+}
+
+/** Where a fetch refspec stores what it fetches, or null for nowhere named. */
+function fetchDestination(refspec) {
+  const spec = refspec.replace(/^\+/, '')
+  if (spec.startsWith('^')) return null
+  const colon = spec.indexOf(':')
+  if (colon < 0) return null
+  return spec.slice(colon + 1) || null
+}
+
+function fetchSpecDecision(value, where, repo, sub) {
+  const dst = fetchDestination(value)
+  if (dst === null) return pass()
+  const lands = fetchLands(dst, repo)
+  if (lands === null)
+    return unread(
+      `não consegui saber em que branch o refspec "${value}"${where} do git ${sub} escreve: ${headMoved}; confira que não é ${trunk}`,
+    )
+  return lands
+    ? deny(
+        `${trunkMoves} (o refspec "${value}"${where} do git ${sub} escreve em ${trunk})`,
+      )
+    : pass()
+}
+
+/**
+ * The refspecs a fetch or a pull stores through, as [{ value, known, where
+ * }]: the ones it names, and, for a refspec with no destination (or none at
+ * all), the --refmap given, else the remote.*.fetch its own `-c` (or an
+ * earlier `git config` of the line) sets. The repository's own config is not
+ * read: `git fetch origin` stays free of any git call of the hook's, and
+ * git itself refuses to fetch into a branch checked out in any worktree,
+ * as main is in the owner's checkout.
+ */
+function fetchSpecsOf(command, g, sub, options, operands) {
+  const has = (...names) => options.some((entry) => names.includes(entry.name))
+  const specs = []
+  const rest = has('--all', '--multiple') ? [] : operands.slice(1)
+  for (let k = 0; k < rest.length; k += 1) {
+    const word = wordOf(command, rest[k])
+    // `tag <name>` fetches refs/tags/<name> into itself.
+    if (word.known && word.value === 'tag') {
+      k += 1
+      continue
+    }
+    specs.push({ ...word, where: '' })
+  }
+  const mapped =
+    specs.length === 0 ||
+    specs.some(
+      (spec) => spec.known && !spec.value.replace(/^\+/, '').includes(':'),
+    )
+  if (!mapped) return specs
+  const refmaps = options.filter((entry) => entry.name === '--refmap')
+  if (refmaps.length > 0)
+    return [
+      ...specs,
+      ...refmaps.map((entry) => ({
+        value: entry.value ?? '',
+        known: wordKnown(command, entry.index),
+        where: ' de --refmap',
+      })),
+    ]
+  for (const entry of g.config) {
+    const key = keyOf(entry.pair)
+    if (key.known && !/^remote\..+\.fetch$/.test(key.key)) continue
+    const eq = entry.pair.indexOf('=')
+    specs.push({
+      value: eq < 0 ? '' : entry.pair.slice(eq + 1),
+      known: entry.known && key.known,
+      where: key.known ? ` de ${key.key}` : ' de um -c que o hook não lê',
+    })
+  }
+  return specs
+}
+
+function fetchPlan(command, g, sub, ctx) {
+  const { options, operands } = readGitArgs(g.argv, g.at + 1, fetchSpecs[sub])
+  const has = (...names) => options.some((entry) => names.includes(entry.name))
+  if (has('--dry-run')) return null
+  const fromStdin = sub === 'fetch' && has('--stdin')
+  const specs = fetchSpecsOf(command, g, sub, options, operands)
+  // Every destination spelled, and none of them main nor HEAD: nothing to
+  // read in the repository.
+  const settled = (spec) => {
+    if (!spec.known) return false
+    const dst = fetchDestination(spec.value)
+    return (
+      dst === null ||
+      (dst !== 'HEAD' && dst !== '@' && fetchLands(dst, {}) === false)
+    )
+  }
+  if (!fromStdin && specs.every(settled)) return null
+  return (repo) => {
+    const judged = [...specs]
+    if (fromStdin) {
+      const read = readSource(command, ctx.cwd, '-', true, ctx.files)
+      if (!read.known)
+        return unread(
+          `o git fetch --stdin lê os refspecs do stdin, que o hook não leu: confira que nenhum escreve em ${trunk}`,
+        )
+      for (const line of read.text.split('\n'))
+        if (line.trim() !== '')
+          judged.push({ value: line.trim(), known: true, where: ' do stdin' })
+    }
+    return combine(
+      judged.map((spec) =>
+        spec.known
+          ? fetchSpecDecision(spec.value, spec.where, repo, sub)
+          : unread(
+              `não consegui ler o refspec "${spec.value}"${spec.where} do git ${sub}: confira que ele não escreve em ${trunk}`,
+            ),
+      ),
+    )
+  }
+}
+
+// replace
+
+function replacePlan(command, g) {
+  const { options, operands } = readGitArgs(g.argv, g.at + 1, {
+    long: ['--format'],
+  })
+  const has = (...names) => options.some((entry) => names.includes(entry.name))
+  if (has('-d', '--delete', '-l', '--list')) return null
+  if (has('--convert-graft-file'))
+    return () =>
+      unread(
+        `o git replace --convert-graft-file troca os commits do arquivo de grafts, que o hook não lê: confira que nenhum é da história de ${trunk}`,
+      )
+  if (operands.length === 0) return null
+  const object = wordOf(command, operands[0])
+  return (repo, env) => {
+    if (!object.known)
+      return unread(
+        `não consegui ler o objeto que o git replace troca ("${object.value}"): confira que não é um commit de ${trunk}`,
+      )
+    const run = gitRead(
+      g,
+      [
+        'for-each-ref',
+        '--format=%(refname)',
+        `--contains=${object.value}`,
+        `refs/heads/${trunk}`,
+        `refs/remotes/*/${trunk}`,
+      ],
+      inertEnv(env),
+      { configArgs: inertConfig },
+    )
+    if (run.status !== 0)
+      return unread(
+        `não consegui saber se ${object.value} é da história de ${trunk}: confira que o git replace não troca um commit de ${trunk}`,
+      )
+    return run.out.trim() === ''
+      ? pass()
+      : deny(
+          `${trunkMoves} (o git replace troca ${object.value}, um commit da história de ${trunk}, em toda leitura de ${trunk})`,
+        )
+  }
+}
+
+// The branch a subcommand forces, resets or rewrites
+
+/** checkout -B, switch -C, worktree add -B and subtree --branch: the branch they force. */
+function forcedBranch(command, g, sub) {
+  const pick = (from, spec, names) =>
+    readGitArgs(g.argv, from, spec)
+      .options.filter((entry) => names.includes(entry.name))
+      .at(-1)
+  let found
+  let flag
+  if (sub === 'checkout') {
+    found = pick(g.at + 1, writeSpecs.checkout, ['-B'])
+    flag = '-B'
+  } else if (sub === 'switch') {
+    found = pick(
+      g.at + 1,
+      { short: 'cC', long: ['--create', '--force-create', '--orphan'] },
+      ['-C', '--force-create'],
+    )
+    flag = '-C'
+  } else if (sub === 'worktree' && g.argv[g.at + 1] === 'add') {
+    found = pick(g.at + 2, { short: 'bB', long: ['--reason'] }, ['-B'])
+    flag = 'add -B'
+  } else if (sub === 'subtree') {
+    found = pick(
+      g.at + 1,
+      {
+        short: 'Pmb',
+        long: ['--prefix', '--message', '--branch', '--onto', '--annotate'],
+      },
+      ['-b', '--branch'],
+    )
+    flag = '--branch'
+  }
+  if (found?.value == null) return null
+  return { value: found.value, known: wordKnown(command, found.index), flag }
+}
+
+function forcedPlan(command, g, sub) {
+  const branch = forcedBranch(command, g, sub)
+  if (branch === null || (branch.known && !isTrunkRef(branch.value)))
+    return null
+  const what = `o git ${sub} ${branch.flag}`
+  return () =>
+    branch.known
+      ? deny(`${trunkMoves} (${what} ${branch.value} escreve em ${trunk})`)
+      : unreadRef(branch.value, what)
+}
+
+/** git reset <commit> in the checkout of main moves main to it. */
+function resetPlan(command, g) {
+  const { options, operands } = readGitArgs(g.argv, g.at + 1, writeSpecs.reset)
+  if (
+    options.some((entry) =>
+      ['-p', '--patch', '--pathspec-from-file'].includes(entry.name),
+    ) ||
+    operands.some((operand) => operand.afterDashes) ||
+    operands.length !== 1
+  )
+    return null
+  const word = wordOf(command, operands[0])
+  return (repo, env) => {
+    if (repo.branchKnown === false)
+      return unread(
+        `não consegui saber em que branch o git reset roda: ${headMoved}; confira que não é ${trunk}`,
+      )
+    if (repo.branch !== trunk) return pass()
+    const commit = word.known ? namesObject(g, word.value, 'commit', env) : null
+    if (commit === false) return pass()
+    return commit === true
+      ? deny(
+          `${trunkMoves} (o git reset leva ${trunk}, a branch do checkout, para ${word.value})`,
+        )
+      : unread(
+          `não consegui saber se "${word.value}" é um commit, para onde o git reset levaria ${trunk}: confira`,
+        )
+  }
+}
+
+/** git rebase <upstream> main checks main out and rewrites it. */
+function rebasePlan(command, g) {
+  const { options, operands } = readGitArgs(g.argv, g.at + 1, {
+    short: 'sXx',
+    long: ['--onto', '--strategy', '--strategy-option', '--exec'],
+  })
+  const has = (...names) => options.some((entry) => names.includes(entry.name))
+  if (
+    has(
+      '--continue',
+      '--abort',
+      '--skip',
+      '--quit',
+      '--edit-todo',
+      '--show-current-patch',
+    )
+  )
+    return null
+  const operand = has('--root') ? operands[0] : operands[1]
+  if (operand === undefined) return null
+  const branch = wordOf(command, operand)
+  if (branch.known && !isTrunkRef(branch.value)) return null
+  return () =>
+    branch.known
+      ? deny(`${trunkMoves} (o git rebase reescreve ${branch.value})`)
+      : unreadRef(branch.value, 'o git rebase')
+}
+
+/** git filter-branch's options that take a separate value. */
+const filterSpec = {
+  short: 'd',
+  long: [
+    '--setup',
+    '--subdirectory-filter',
+    '--env-filter',
+    '--tree-filter',
+    '--index-filter',
+    '--parent-filter',
+    '--msg-filter',
+    '--commit-filter',
+    '--tag-name-filter',
+    '--original',
+    '--state-branch',
+  ],
+}
+
+/** The rev-list words that name every branch, main among them. */
+const everyBranch = /^--(?:all|branches(?:=.*)?|glob=.*)$/
+
+/** git filter-branch rewrites the branches its rev-list words name. */
+function filterPlan(command, g) {
+  const { options, operands } = readGitArgs(g.argv, g.at + 1, filterSpec)
+  const words = [
+    ...options
+      .filter((entry) => !filterSpec.long.includes(entry.name))
+      .map((entry) => ({
+        value:
+          entry.value === null ? entry.name : `${entry.name}=${entry.value}`,
+        known: wordKnown(command, entry.index),
+      })),
+    ...operands.map((operand) => wordOf(command, operand)),
+  ]
+  const hits = words.filter((word) => {
+    if (!word.known) return true
+    if (everyBranch.test(word.value)) return true
+    const sides = word.value.includes('...')
+      ? word.value.split('...')
+      : word.value.includes('..')
+        ? [word.value.split('..').at(-1)]
+        : [word.value]
+    return sides.some(
+      (side) =>
+        !side.startsWith('^') && isTrunkRef(side.replace(/[~^@].*$/, '')),
+    )
+  })
+  if (hits.length === 0) return null
+  return () =>
+    combine(
+      hits.map((word) =>
+        !word.known
+          ? unreadRef(word.value, 'o git filter-branch')
+          : deny(
+              `${trunkMoves} (o git filter-branch reescreve ${everyBranch.test(word.value) ? `todas as branches com ${word.value}, ${trunk} junto` : word.value})`,
+            ),
+      ),
+    )
+}
+
+/** git fast-import writes the refs its stream names in commit and reset. */
+function fastImportPlan(command, ctx) {
+  return () => {
+    const read = readSource(command, ctx.cwd, '-', true, ctx.files)
+    if (!read.known)
+      return unread(
+        `o git fast-import lê do stdin as refs que escreve, e o hook não o leu: confira que nenhuma é ${trunk}`,
+      )
+    const refs = [...read.text.matchAll(/^(?:commit|reset) (.+)$/gm)].map(
+      (match) => match[1].trim(),
+    )
+    const hit = refs.find((ref) => isTrunkRef(ref))
+    return hit === undefined
+      ? pass()
+      : deny(`${trunkMoves} (o git fast-import escreve ${hit})`)
+  }
+}
+
+/** Subcommands that may write a ref: each is read for a write to main. */
+const refWriters = new Set([
+  'update-ref',
+  'branch',
+  'symbolic-ref',
+  'fetch',
+  'pull',
+  'replace',
+  'checkout',
+  'switch',
+  'worktree',
+  'subtree',
+  'reset',
+  'rebase',
+  'filter-branch',
+  'fast-import',
+])
+
+/**
+ * What a subcommand writes to main's ref, read from its argv alone: null
+ * when it writes none for sure, else a function of the repository (and the
+ * environment) that decides, reading git where it must.
+ */
+function trunkRefPlan(command, g, sub, ctx) {
+  switch (sub) {
+    case 'update-ref':
+      return updateRefPlan(command, g, ctx)
+    case 'branch':
+      return branchPlan(command, g)
+    case 'symbolic-ref':
+      return symbolicRefPlan(command, g)
+    case 'fetch':
+    case 'pull':
+      return fetchPlan(command, g, sub, ctx)
+    case 'replace':
+      return replacePlan(command, g)
+    case 'checkout':
+    case 'switch':
+    case 'worktree':
+    case 'subtree':
+      return forcedPlan(command, g, sub)
+    case 'reset':
+      return resetPlan(command, g)
+    case 'rebase':
+      return rebasePlan(command, g)
+    case 'filter-branch':
+      return filterPlan(command, g)
+    case 'fast-import':
+      return fastImportPlan(command, ctx)
+    default:
+      return null
+  }
+}
+
+// ---------------------------------------------------------------------------
 // The entry
 
 /**
@@ -2029,7 +3010,7 @@ function decide({ command, g, sub, alias }, ctx, env) {
       .slice(g.at + 1)
       .find(
         (word, offset) =>
-          (guarded.has(word) || writers.has(word)) &&
+          (guarded.has(word) || writers.has(word) || refWriters.has(word)) &&
           wordKnown(command, g.at + 1 + offset),
       )
     return later === undefined
@@ -2042,7 +3023,10 @@ function decide({ command, g, sub, alias }, ctx, env) {
   // looked at next, and it may not be readable.
   const mayWrite =
     writers.has(sub) && writeOf(command, g, sub, env, ctx.files, false) !== null
-  if (!guarded.has(sub) && !mayWrite) return pass()
+  const refPlan = refWriters.has(sub)
+    ? trunkRefPlan(command, g, sub, ctx)
+    : null
+  if (!guarded.has(sub) && !mayWrite && refPlan === null) return pass()
   // A directory that holds an expansion resolves to the nearest one that
   // exists, which may be another worktree on another branch, and one that
   // does not exist yet will be created by the line: either way the verdict
@@ -2059,10 +3043,11 @@ function decide({ command, g, sub, alias }, ctx, env) {
   const repo = ctx.repoAt(g.gitDir ?? g.dir)
   if (repo == null) return pass()
 
-  if (sub === 'push') return pushDecision(command, g, repo, env)
+  if (sub === 'push') return pushDecision(command, g, repo, env, ctx.repoAt)
   if (!isProject(repo)) return pass()
 
   const decisions = []
+  if (refPlan !== null) decisions.push(refPlan(repo, env))
   const write = mayWrite ? writeOf(command, g, sub, env, ctx.files, true) : null
   if (write !== null)
     decisions.push(writeDecision(write, g, sub, repo, ctx, env))

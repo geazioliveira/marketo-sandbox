@@ -1711,9 +1711,9 @@ async function decide(input, libs) {
       if (remote !== null) recordRemote(remote)
     } else if (program === 'gh') {
       // gh finds its repository through git, so GIT_DIR moves it too.
-      const gitDir = env.GIT_DIR
-      const dirKnown = cwdKnown && !/[$`]/.test(gitDir ?? '')
-      const where = gitDir ? path.resolve(cwd, gitDir) : cwd
+      const found = gh.ghRepoDir(env, cwd)
+      const dirKnown = cwdKnown && found.known
+      const where = found.dir
       const ctx = {
         cwd,
         cwdKnown: dirKnown,

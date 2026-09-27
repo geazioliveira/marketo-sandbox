@@ -1979,3 +1979,577 @@ describe('git writes to the worktree go through the gate (Copilot review of #26,
     })
   })
 })
+
+// ---------------------------------------------------------------------------
+// Sixth round of Copilot's review of #26
+
+describe('writes to main’s ref (Copilot review of #26, sixth round)', () => {
+  /**
+   * A branch of the issue with its gate open, one commit ahead of main, a
+   * symbolic ref `atalho` that points at main, and a -z batch for
+   * update-ref --stdin that moves main.
+   */
+  let refs: HookRepo
+  let mainSha = ''
+  let featureSha = ''
+
+  beforeAll(async () => {
+    refs = await hookRepo({ branch: FEATURE })
+    await refs.git('symbolic-ref', 'refs/heads/atalho', 'refs/heads/main')
+    await refs.commit({ 'feature.txt': 'Só na branch.\n' }, 'Feature')
+    featureSha = await refs.git('rev-parse', 'HEAD')
+    mainSha = await refs.git('rev-parse', 'refs/heads/main')
+    refs.headSha = featureSha
+    refs.writeCache()
+    refs.write({
+      'lote-main.bin': `update refs/heads/main\0${featureSha}\0\0`,
+      'lote-outra.bin': `update refs/heads/outra\0${featureSha}\0\0`,
+      'lote-sem-deref.bin': `option no-deref\0update refs/heads/atalho\0${featureSha}\0\0`,
+    })
+  }, setupTimeout)
+
+  afterAll(() => refs?.remove(), setupTimeout)
+
+  /** The decision in each permission mode: auto refuses a critical ask. */
+  const modes = (decision: Decision) => [
+    io.resolve(decision, 'default').decision,
+    io.resolve(decision, 'auto').decision,
+  ]
+  // A push says it as the push rule does.
+  const moves = /main fora de uma PR|^push em main: a mudança entra por PR/
+
+  it.each<[string, () => string, () => string]>([
+    [
+      'update-ref of refs/heads/main (the example of the review)',
+      () => `git update-ref refs/heads/main ${featureSha}`,
+      () => refs.dir,
+    ],
+    [
+      'update-ref of the short name main',
+      () => `git update-ref main ${featureSha}`,
+      () => refs.dir,
+    ],
+    [
+      'update-ref of heads/main',
+      () => `git update-ref heads/main ${featureSha}`,
+      () => refs.dir,
+    ],
+    [
+      'update-ref -d of main',
+      () => 'git update-ref -d refs/heads/main',
+      () => refs.dir,
+    ],
+    [
+      'update-ref of main in another case, the same file on macOS',
+      () => `git update-ref refs/heads/MAIN ${featureSha}`,
+      () => refs.dir,
+    ],
+    [
+      'update-ref of main with every word in another case',
+      () => `git update-ref Refs/Heads/Main ${featureSha}`,
+      () => refs.dir,
+    ],
+    [
+      'update-ref of a symbolic ref that points at main',
+      () => `git update-ref refs/heads/atalho ${featureSha}`,
+      () => refs.dir,
+    ],
+    [
+      'update-ref of HEAD in the checkout of main',
+      () => `git update-ref HEAD ${mainSha}`,
+      () => onMain.dir,
+    ],
+    [
+      'update-ref --no-deref of HEAD in the checkout of main',
+      () => `git update-ref --no-deref HEAD ${mainSha}`,
+      () => onMain.dir,
+    ],
+    [
+      'update-ref of HEAD in the checkout of main, through -C',
+      () => `git -C ${onMain.dir} update-ref HEAD ${mainSha}`,
+      () => refs.dir,
+    ],
+    [
+      'an update-ref --stdin batch that updates main',
+      () =>
+        `git update-ref --stdin <<'EOF'\nupdate refs/heads/main ${featureSha}\nEOF`,
+      () => refs.dir,
+    ],
+    [
+      'an update-ref --stdin batch that deletes main after another ref',
+      () =>
+        `git update-ref --stdin <<'EOF'\nstart\ncreate refs/heads/outra ${featureSha}\ndelete refs/heads/main\ncommit\nEOF`,
+      () => refs.dir,
+    ],
+    [
+      'an update-ref --stdin batch that names main quoted',
+      () =>
+        `git update-ref --stdin <<'EOF'\nupdate "refs/heads/main" ${featureSha}\nEOF`,
+      () => refs.dir,
+    ],
+    [
+      'an update-ref -z --stdin batch from a file',
+      () => 'git update-ref -z --stdin < lote-main.bin',
+      () => refs.dir,
+    ],
+    [
+      'an update-ref --stdin batch whose option no-deref ends before its write through the symbolic ref',
+      () =>
+        `git update-ref --stdin <<'EOF'\noption no-deref\nupdate refs/heads/outra ${featureSha}\nupdate refs/heads/atalho ${featureSha}\nEOF`,
+      () => refs.dir,
+    ],
+    [
+      'branch -f main',
+      () => `git branch -f main ${featureSha}`,
+      () => refs.dir,
+    ],
+    ['branch -m of main', () => 'git branch -m main velha', () => refs.dir],
+    ['branch -M onto main', () => 'git branch -M outra main', () => refs.dir],
+    [
+      'branch -m of the branch checked out, main',
+      () => 'git branch -m nova',
+      () => onMain.dir,
+    ],
+    ['branch -c of main', () => 'git branch -c main copia', () => refs.dir],
+    ['branch -C onto main', () => 'git branch -C outra main', () => refs.dir],
+    ['branch -d main', () => 'git branch -d main', () => refs.dir],
+    ['branch -D main', () => 'git branch -D main', () => refs.dir],
+    ['branch --delete main', () => 'git branch --delete main', () => refs.dir],
+    [
+      'symbolic-ref pointing HEAD of the checkout of main elsewhere',
+      () => 'git symbolic-ref HEAD refs/heads/outra',
+      () => onMain.dir,
+    ],
+    [
+      'symbolic-ref --delete of HEAD in the checkout of main',
+      () => 'git symbolic-ref --delete HEAD',
+      () => onMain.dir,
+    ],
+    [
+      'symbolic-ref that turns main into a symbolic ref',
+      () => 'git symbolic-ref refs/heads/main refs/heads/outra',
+      () => refs.dir,
+    ],
+    [
+      'symbolic-ref that points another ref at main, for a later write',
+      () =>
+        `git symbolic-ref refs/heads/nova refs/heads/main && git update-ref refs/heads/nova ${featureSha}`,
+      () => refs.dir,
+    ],
+    [
+      'symbolic-ref that points another ref at a symbolic ref to main',
+      () => 'git symbolic-ref refs/heads/nova refs/heads/atalho',
+      () => refs.dir,
+    ],
+    [
+      'symbolic-ref that points another ref at HEAD of the checkout of main',
+      () => 'git symbolic-ref refs/heads/nova HEAD',
+      () => onMain.dir,
+    ],
+    [
+      'symbolic-ref that points another ref at HEAD, main in the checkout of main',
+      () => 'git symbolic-ref refs/heads/nova HEAD',
+      () => refs.dir,
+    ],
+    [
+      'an update-ref --stdin batch that creates a symbolic ref to main',
+      () =>
+        `git update-ref --stdin <<'EOF'\nsymref-create refs/heads/nova refs/heads/main\nupdate refs/heads/nova ${featureSha}\nEOF`,
+      () => refs.dir,
+    ],
+    [
+      'fetch <src>:main',
+      () => `git fetch origin ${FEATURE}:main`,
+      () => refs.dir,
+    ],
+    [
+      'fetch +<src>:main',
+      () => `git fetch origin +${FEATURE}:main`,
+      () => refs.dir,
+    ],
+    [
+      'fetch into refs/heads/main from this repository',
+      () => 'git fetch . HEAD:refs/heads/main',
+      () => refs.dir,
+    ],
+    [
+      'fetch of a pattern into refs/heads/*',
+      () => "git fetch origin '+refs/heads/*:refs/heads/*'",
+      () => refs.dir,
+    ],
+    [
+      'fetch with a configured refspec into main',
+      () =>
+        "git -c 'remote.origin.fetch=+refs/heads/*:refs/heads/*' fetch origin",
+      () => refs.dir,
+    ],
+    [
+      'fetch whose --refmap stores into refs/heads/*',
+      () => `git fetch origin ${FEATURE} --refmap='+refs/heads/*:refs/heads/*'`,
+      () => refs.dir,
+    ],
+    [
+      'fetch --stdin with a refspec into main',
+      () =>
+        `git fetch --stdin origin <<'EOF'\n+refs/heads/${FEATURE}:refs/heads/main\nEOF`,
+      () => refs.dir,
+    ],
+    [
+      'fetch into HEAD in the checkout of main',
+      () => `git fetch origin ${FEATURE}:HEAD`,
+      () => onMain.dir,
+    ],
+    [
+      'pull <src>:main',
+      () => `git pull origin ${FEATURE}:main`,
+      () => refs.dir,
+    ],
+    [
+      'replace of main’s commit',
+      () => `git replace ${mainSha} ${featureSha}`,
+      () => refs.dir,
+    ],
+    [
+      'replace --graft of main’s commit',
+      () => `git replace --graft main`,
+      () => refs.dir,
+    ],
+    [
+      'push to main of this repository',
+      () => 'git push . HEAD:main',
+      () => refs.dir,
+    ],
+    [
+      'push to MAIN of this repository',
+      () => `git push ${refs.dir} HEAD:MAIN`,
+      () => refs.dir,
+    ],
+    [
+      'push to MAIN of a remote it cannot read, which may be on disk',
+      () => 'git push "$R" HEAD:MAIN',
+      () => refs.dir,
+    ],
+    ['branch -f MAIN', () => 'git branch -f MAIN', () => refs.dir],
+    ['checkout -B main', () => 'git checkout -B main', () => refs.dir],
+    ['switch -C main', () => 'git switch -C main origin/main', () => refs.dir],
+    [
+      'worktree add -B main',
+      () => 'git worktree add -B main ../outra-arvore',
+      () => refs.dir,
+    ],
+    [
+      'subtree split --branch main',
+      () => 'git subtree split --prefix=src --branch main',
+      () => refs.dir,
+    ],
+    [
+      'reset of the checkout of main to a commit',
+      () => `git reset --soft ${onMain.headSha}`,
+      () => onMain.dir,
+    ],
+    ['rebase of main', () => `git rebase ${FEATURE} main`, () => refs.dir],
+    [
+      'filter-branch of every branch',
+      () => 'git filter-branch -- --all',
+      () => refs.dir,
+    ],
+    [
+      'fast-import of a commit on main',
+      () =>
+        "git fast-import <<'EOF'\ncommit refs/heads/main\ncommitter A <a@b> 0 +0000\ndata 0\nEOF",
+      () => refs.dir,
+    ],
+  ])('denies %s, in default and auto', (_, text, cwd) => {
+    const decision = verdict(text(), cwd())
+    expect(modes(decision)).toEqual(['deny', 'deny'])
+    expect(decision.reason).toMatch(moves)
+  })
+
+  it.each<[string, () => string, () => string]>([
+    [
+      'update-ref of a ref it cannot read',
+      () => `git update-ref "$REF" ${featureSha}`,
+      () => refs.dir,
+    ],
+    [
+      'update-ref --stdin fed by a pipe',
+      () =>
+        `printf 'update refs/heads/main ${featureSha}\\n' | git update-ref --stdin`,
+      () => refs.dir,
+    ],
+    [
+      'update-ref --stdin with an expansion in the batch',
+      () => `git update-ref --stdin <<EOF\nupdate $REF ${featureSha}\nEOF`,
+      () => refs.dir,
+    ],
+    [
+      'update-ref --stdin with a line it cannot read',
+      () =>
+        `git update-ref --stdin <<'EOF'\nupdate "refs/heads/ma\\151n ${featureSha}\nEOF`,
+      () => refs.dir,
+    ],
+    [
+      'branch -f of a name it cannot read',
+      () => 'git branch -f "$B"',
+      () => refs.dir,
+    ],
+    [
+      'branch -m of the branch checked out, after the line moved HEAD',
+      () => 'git checkout -q main && git branch -m nova',
+      () => refs.dir,
+    ],
+    [
+      'symbolic-ref of HEAD in the checkout of main, to a target it cannot read',
+      () => 'git symbolic-ref HEAD "$T"',
+      () => onMain.dir,
+    ],
+    [
+      'fetch into a destination it cannot read',
+      () => 'git fetch origin "$SPEC"',
+      () => refs.dir,
+    ],
+    [
+      'replace of an object it cannot read',
+      () => `git replace "$OBJ" ${featureSha}`,
+      () => refs.dir,
+    ],
+    [
+      'replace --convert-graft-file, whose grafts it does not read',
+      () => 'git replace --convert-graft-file',
+      () => refs.dir,
+    ],
+    [
+      'an option it does not know, then update-ref of main',
+      () => `git --opcao-nova HEAD update-ref refs/heads/main ${featureSha}`,
+      () => refs.dir,
+    ],
+  ])('asks, critical, for %s: denied in auto', (_, text, cwd) => {
+    const line = text()
+    const decision = line.includes('checkout -q main')
+      ? judge(line, cwd(), {
+          seen: (repo) => ({ ...repo, branchKnown: false }),
+        }).decision
+      : verdict(line, cwd())
+    expect(modes(decision)).toEqual(['ask', 'deny'])
+    expect(decision.critical).toBe(true)
+  })
+
+  it.each<[string, () => string, () => string]>([
+    [
+      'update-ref of a branch of the issue',
+      () => `git update-ref refs/heads/feature/9-outra ${featureSha}`,
+      () => refs.dir,
+    ],
+    [
+      'update-ref of origin’s copy of main',
+      () => `git update-ref refs/remotes/origin/main ${mainSha}`,
+      () => refs.dir,
+    ],
+    [
+      'update-ref --no-deref of the symbolic ref itself',
+      () => `git update-ref --no-deref refs/heads/atalho ${featureSha}`,
+      () => refs.dir,
+    ],
+    [
+      'an update-ref --stdin batch that writes the symbolic ref itself, after option no-deref',
+      () =>
+        `git update-ref --stdin <<'EOF'\noption no-deref\nupdate refs/heads/atalho ${featureSha}\nEOF`,
+      () => refs.dir,
+    ],
+    [
+      'update-ref of HEAD on a branch of the issue',
+      () => `git update-ref HEAD ${featureSha}`,
+      () => refs.dir,
+    ],
+    [
+      'update-ref -d of a tag',
+      () => 'git update-ref -d refs/tags/v1',
+      () => refs.dir,
+    ],
+    [
+      'an update-ref --stdin batch that only verifies main',
+      () =>
+        `git update-ref --stdin <<'EOF'\nupdate refs/heads/outra ${featureSha}\nverify refs/heads/main ${mainSha}\nEOF`,
+      () => refs.dir,
+    ],
+    [
+      'an update-ref -z --stdin batch of another ref',
+      () => 'git update-ref -z --stdin < lote-outra.bin',
+      () => refs.dir,
+    ],
+    [
+      'an update-ref -z --stdin batch that writes the symbolic ref itself, after option no-deref',
+      () => 'git update-ref -z --stdin < lote-sem-deref.bin',
+      () => refs.dir,
+    ],
+    [
+      'update-ref of main in another repository',
+      () => `git update-ref refs/heads/main ${mainSha}`,
+      () => elsewhere.dir,
+    ],
+    [
+      'branch -f of a branch of the issue',
+      () => `git branch -f feature/9-outra ${mainSha}`,
+      () => refs.dir,
+    ],
+    [
+      'branch -D of another branch',
+      () => 'git branch -D feature/9-velha',
+      () => refs.dir,
+    ],
+    [
+      'branch -m between two branches',
+      () => 'git branch -m feature/9-a feature/9-b',
+      () => refs.dir,
+    ],
+    [
+      'branch -m of the branch of the issue',
+      () => 'git branch -m feature/5-novo',
+      () => refs.dir,
+    ],
+    ['branch --list main', () => 'git branch --list main', () => refs.dir],
+    ['branch -a', () => 'git branch -a', () => refs.dir],
+    ['branch -vv', () => 'git branch -vv', () => refs.dir],
+    [
+      'branch --contains main',
+      () => 'git branch --contains main',
+      () => refs.dir,
+    ],
+    [
+      'branch -dr of origin’s main',
+      () => 'git branch -dr origin/main',
+      () => refs.dir,
+    ],
+    [
+      'branch --set-upstream-to',
+      () => 'git branch --set-upstream-to origin/main',
+      () => refs.dir,
+    ],
+    [
+      'branch --unset-upstream',
+      () => 'git branch --unset-upstream',
+      () => refs.dir,
+    ],
+    [
+      'symbolic-ref of HEAD on a branch of the issue',
+      () => 'git symbolic-ref HEAD refs/heads/outra',
+      () => refs.dir,
+    ],
+    ['symbolic-ref read', () => 'git symbolic-ref HEAD', () => onMain.dir],
+    [
+      'symbolic-ref of another ref to a branch of the issue',
+      () => `git symbolic-ref refs/heads/nova refs/heads/${FEATURE}`,
+      () => refs.dir,
+    ],
+    [
+      'an update-ref --stdin batch that creates a symbolic ref to another branch',
+      () =>
+        `git update-ref --stdin <<'EOF'\nsymref-create refs/heads/nova refs/heads/${FEATURE}\nEOF`,
+      () => refs.dir,
+    ],
+    [
+      'symbolic-ref of HEAD in the checkout of main, to main',
+      () => 'git symbolic-ref HEAD refs/heads/main',
+      () => onMain.dir,
+    ],
+    ['fetch origin', () => 'git fetch -q origin --prune', () => refs.dir],
+    [
+      'fetch of main into origin/main',
+      () => 'git fetch origin main',
+      () => refs.dir,
+    ],
+    [
+      'fetch into refs/remotes',
+      () => `git fetch -q origin ${FEATURE}:refs/remotes/origin/${FEATURE}`,
+      () => refs.dir,
+    ],
+    [
+      'fetch of a pattern into refs/remotes',
+      () => "git fetch origin '+refs/heads/*:refs/remotes/origin/*'",
+      () => refs.dir,
+    ],
+    [
+      'fetch --dry-run into main',
+      () => `git fetch --dry-run origin ${FEATURE}:main`,
+      () => refs.dir,
+    ],
+    [
+      'fetch whose --refmap stores into refs/remotes',
+      () =>
+        `git fetch origin ${FEATURE} --refmap='+refs/heads/*:refs/remotes/origin/*'`,
+      () => refs.dir,
+    ],
+    [
+      'fetch --stdin with a refspec into refs/remotes',
+      () =>
+        `git fetch --stdin origin <<'EOF'\n+refs/heads/${FEATURE}:refs/remotes/origin/${FEATURE}\nEOF`,
+      () => refs.dir,
+    ],
+    [
+      'fetch into HEAD on a branch of the issue',
+      () => `git fetch origin ${FEATURE}:HEAD`,
+      () => refs.dir,
+    ],
+    [
+      'subtree split --branch of a branch of the issue',
+      () => 'git subtree split --prefix=src --branch feature/9-sub',
+      () => refs.dir,
+    ],
+    [
+      'an option it does not know, then a subcommand that writes no ref',
+      () => 'git --opcao-nova HEAD status',
+      () => refs.dir,
+    ],
+    [
+      'replace of a commit only the branch has',
+      () => `git replace ${featureSha} ${mainSha}`,
+      () => refs.dir,
+    ],
+    ['replace -d', () => `git replace -d ${mainSha}`, () => refs.dir],
+    ['replace -l', () => 'git replace -l', () => refs.dir],
+    [
+      'tag -f main (out of scope: it moves no branch)',
+      () => 'git tag -f main',
+      () => refs.dir,
+    ],
+    [
+      'push to another branch of this repository',
+      () => 'git push . HEAD:feature/9-copia',
+      () => refs.dir,
+    ],
+    // GitHub tells MAIN from main: over the network, MAIN is another branch
+    // (the case is folded only for a repository on disk).
+    [
+      'push to MAIN of origin',
+      () => 'git push origin HEAD:MAIN',
+      () => refs.dir,
+    ],
+    [
+      'push to refs/heads/MAIN of origin',
+      () => 'git push origin HEAD:refs/heads/MAIN',
+      () => refs.dir,
+    ],
+    [
+      'push --delete of MAIN of origin',
+      () => 'git push origin --delete MAIN',
+      () => refs.dir,
+    ],
+    [
+      'checkout -B of a branch of the issue',
+      () => 'git checkout -B feature/9-outra',
+      () => refs.dir,
+    ],
+    [
+      'switch -C of a branch of the issue, from origin/main',
+      () => 'git switch -C feature/9-outra origin/main',
+      () => refs.dir,
+    ],
+    [
+      'reset --soft on a branch of the issue',
+      () => 'git reset --soft HEAD',
+      () => refs.dir,
+    ],
+  ])('passes %s, in default and auto', (_, text, cwd) => {
+    expect(modes(verdict(text(), cwd()))).toEqual(['pass', 'pass'])
+  })
+})

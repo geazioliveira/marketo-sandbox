@@ -2457,3 +2457,177 @@ describe.concurrent(
     )
   },
 )
+
+// ---------------------------------------------------------------------------
+// Sixth round of Copilot's review of #26
+
+describe.concurrent(
+  'the repository a publication goes to, through GIT_DIR (Copilot review of #26, sixth round)',
+  () => {
+    const comment = 'gh issue comment 5 --body-file plano.md'
+    const url = `${ISSUE_URL}/5#issuecomment-40\n`
+    const other = 'https://github.com/alguem/outro.git'
+    /** The account's # Plano on #5, after the marker: GitHub's clock, read in the test body. */
+    const posted = () => ({
+      comments: {
+        5: {
+          comments: [
+            { body: planComment, createdAt: later(), viewerDidAuthor: true },
+          ],
+        },
+      },
+    })
+
+    test('Bash: GIT_DIR on the command, of a clone of another repository, keeps the marker (the example of the review)', async ({
+      fresh,
+      expect,
+    }) => {
+      const repo = await pending(fresh)
+      const elsewhere = await fresh({ origin: other })
+      repo.write({ 'plano.md': planComment })
+      const run = await bash(
+        repo,
+        `GIT_DIR=${elsewhere.gitDir} ${comment}`,
+        url,
+      )
+      expect(run.status).toBe(0)
+      expect(existsSync(repo.markerPath(SESSION))).toBe(true)
+      expect(cacheExists(repo)).toBe(true)
+    })
+
+    test('Bash: GIT_DIR the hook inherits, of a clone of another repository, keeps the marker', async ({
+      fresh,
+      expect,
+    }) => {
+      const repo = await pending(fresh)
+      const elsewhere = await fresh({ origin: other })
+      repo.write({ 'plano.md': planComment })
+      const run = await bash(repo, comment, url, {
+        env: repo.env({ GIT_DIR: elsewhere.gitDir }),
+      })
+      expect(run.status).toBe(0)
+      expect(existsSync(repo.markerPath(SESSION))).toBe(true)
+    })
+
+    test('Bash: GIT_DIR of this project, absolute or relative, counts as today', async ({
+      fresh,
+      expect,
+    }) => {
+      for (const gitDir of ['absolute', '.git']) {
+        const repo = await pending(fresh)
+        repo.write({ 'plano.md': planComment })
+        const run = await bash(
+          repo,
+          `GIT_DIR=${gitDir === 'absolute' ? repo.gitDir : gitDir} ${comment}`,
+          url,
+        )
+        expect(run.status).toBe(0)
+        expect(existsSync(repo.markerPath(SESSION))).toBe(false)
+        expect(contextOf(run)).toContain(`plano publicado em ${ISSUE_URL}/5`)
+      }
+    })
+
+    test('Bash: a GIT_DIR it cannot read, or that is no repository, keeps the marker and says why', async ({
+      fresh,
+      expect,
+    }) => {
+      for (const [gitDir, why] of [
+        ['$OUTRO', '"$OUTRO" traz uma expansão'],
+        ['/nao/existe/.git', '/nao/existe/.git não é um repositório'],
+      ]) {
+        const repo = await pending(fresh)
+        repo.write({ 'plano.md': planComment })
+        const run = await bash(repo, `GIT_DIR=${gitDir} ${comment}`, url)
+        expect(run.status).toBe(0)
+        expect(existsSync(repo.markerPath(SESSION))).toBe(true)
+        expect(contextOf(run)).toContain('GIT_DIR')
+        expect(contextOf(run)).toContain(why)
+        expect(contextOf(run)).toContain('o marcador continua')
+      }
+    })
+
+    test('Monitor: GIT_DIR of another repository, on the command or exported before it, keeps the marker and reads nothing live', async ({
+      fresh,
+      expect,
+    }) => {
+      const elsewhere = await fresh({ origin: other })
+      for (const line of [
+        `GIT_DIR=${elsewhere.gitDir} ${comment}`,
+        `export GIT_DIR=${elsewhere.gitDir}; ${comment}`,
+      ]) {
+        const repo = await pending(fresh)
+        repo.write({ 'plano.md': planComment })
+        repo.setFixture(posted())
+        const run = await otherTool(repo, 'Monitor', line, {
+          taskId: 'b1',
+          status: 'running',
+        })
+        expect(run.status).toBe(0)
+        expect(existsSync(repo.markerPath(SESSION))).toBe(true)
+        expect(repo.calls()).toEqual([])
+      }
+    })
+
+    test('Monitor: GIT_DIR of this project confirms live, as today', async ({
+      fresh,
+      expect,
+    }) => {
+      const repo = await pending(fresh)
+      repo.write({ 'plano.md': planComment })
+      repo.setFixture(posted())
+      const run = await otherTool(
+        repo,
+        'Monitor',
+        `GIT_DIR=${repo.gitDir} ${comment}`,
+        { taskId: 'b1', status: 'running' },
+      )
+      expect(run.status).toBe(0)
+      expect(existsSync(repo.markerPath(SESSION))).toBe(false)
+      expect(contextOf(run)).toContain('plano publicado na issue #5')
+      expect(repo.calls()).toEqual([
+        expect.objectContaining({ call: 'issueComments', key: '5' }),
+      ])
+    })
+
+    test('Monitor and the terminal: a GIT_DIR it cannot read keeps the marker, reads nothing live, and says why', async ({
+      fresh,
+      expect,
+    }) => {
+      for (const tool of [
+        'Monitor',
+        'mcp__terminal__run_in_terminal',
+      ] as const) {
+        const repo = await pending(fresh)
+        repo.write({ 'plano.md': planComment })
+        repo.setFixture(posted())
+        const run = await otherTool(repo, tool, `GIT_DIR=$OUTRO ${comment}`, {
+          taskId: 'b1',
+          status: 'running',
+        })
+        expect(run.status).toBe(0)
+        expect(existsSync(repo.markerPath(SESSION))).toBe(true)
+        expect(contextOf(run)).toContain('GIT_DIR')
+        expect(repo.calls()).toEqual([])
+      }
+    })
+
+    test('the terminal: GIT_DIR of another repository keeps the marker, even with the issue URL', async ({
+      fresh,
+      expect,
+    }) => {
+      const repo = await pending(fresh)
+      const elsewhere = await fresh({ origin: other })
+      repo.write({ 'plano.md': planComment })
+      repo.setFixture(posted())
+      const run = await otherTool(
+        repo,
+        'mcp__terminal__run_in_terminal',
+        `GIT_DIR=${elsewhere.gitDir} ${comment}`,
+        url,
+      )
+      expect(run.status).toBe(0)
+      expect(existsSync(repo.markerPath(SESSION))).toBe(true)
+      expect(repo.calls()).toEqual([])
+    })
+  },
+)
