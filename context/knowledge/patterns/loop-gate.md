@@ -30,26 +30,26 @@ Os passos, na ordem em que o gate os imprime:
 | Passo | O que confere | Bloqueia |
 | --- | --- | --- |
 | `repo` | Existe um toplevel git. No modo local, é o repositório onde o próprio script mora, com `AGENTS.md` na raiz. No CI, o remote `origin` é o `GITHUB_REPOSITORY` | Sempre |
-| `pr-base` | A PR aponta para `main` | No CI |
+| `pr-base` | A PR aponta para `main` ou, numa fatia de stack, para a fatia logo abaixo com a PR em draft ([abaixo](#uma-fatia-de-stack)) | No CI |
 | `pr-closes` | A PR fecha a #N deste repositório | No CI |
 | `pr-closes-only` | A PR fecha exatamente uma issue | No CI |
 | `pr-first-line` | A primeira linha não vazia do corpo da PR é `Closes #N.` | No CI |
 | `copilot-review` | Uma revisão do Copilot (`Bot`, `databaseId` 175728472), `COMMENTED` ou `APPROVED`, que não falhou, cujo `commit.oid` é a cabeça da PR (abaixo). Uma que conta entre as 100 mais recentes basta; sem nenhuma entre elas, com mais revisões que isso, fica `[?]`. Com outra revisão do Copilot pedida e ainda a caminho (`copilotRequested`), fica `[ ]` mesmo com uma revisão na cabeça | No CI, fora de draft |
 | `review-threads` | Nenhuma thread de revisão não resolvida, de qualquer autor, inclusive as desatualizadas. Lista até 10 como `path:line` e link, e o total. Uma página lida pela metade fica `[?]` | No CI, fora de draft |
 | `pr-size` | As linhas alteradas da PR (adições mais remoções) e os arquivos, contra a base. Acima de 1.500 linhas (`prSizeLimit`), fica sem [x], só como aviso | Nunca (só no CI) |
-| `issue-open` | A issue existe e está aberta | Sempre |
+| `issue-open` | A issue existe e está aberta; numa fatia de stack, a mãe também | Sempre |
 | `kind` | Exatamente uma label de categoria, `bug` ou `enhancement` | Sempre |
-| `state-label` | Exatamente uma label de estado, e ela é `ready-for-agent`. As contradições são listadas | Sempre |
-| `sections` | O plano vigente tem todas as seções que o tipo da issue exige, e nenhuma vazia | Sempre |
+| `state-label` | Exatamente uma label de estado, e ela é `ready-for-agent`. As contradições são listadas. Numa fatia de stack, é a da mãe, e a fatia não leva nenhuma | Sempre |
+| `sections` | O plano vigente tem todas as seções que o tipo da issue exige, e nenhuma vazia. Numa fatia de stack, o plano é o da mãe | Sempre |
 | `criteria` | Os critérios de aceite têm pelo menos um item de checklist fora de bloco de código e de comentário HTML | Sempre |
-| `approve` | Um Approve do dono está de pé, nada o revogou, e o dono aplicou `ready-for-agent` depois dele (gramática abaixo) | Sempre |
+| `approve` | Um Approve do dono está de pé, nada o revogou, e o dono aplicou `ready-for-agent` depois dele (gramática abaixo). Numa fatia de stack, na mãe | Sempre |
 | `branch` | A branch tem um formato aceito, e a issue tem a categoria que o prefixo exige (`fix/` só com a label `bug`). No CI, é a head da PR, e o HEAD é o `headRefOid` da PR | Sempre |
-| `branch-in-plan` | A seção Plano do plano vigente (num bug, a seção Onde será corrigido) cita o nome exato da branch | Sempre |
+| `branch-in-plan` | A seção Plano do plano vigente (num bug, a seção Onde será corrigido) cita o nome exato da branch. Numa fatia de stack, a seção `Stack` do plano vigente da mãe | Sempre |
 | `stacked` | Nenhuma ref estranha compartilha história não publicada com o HEAD, e nenhum merge da branch traz commits de fora do `origin/main` (abaixo) | Sempre |
 | `size` | O tamanho do plano, em caracteres | Nunca |
 | `up-to-date` | A branch contém o `origin/main` atual | Nunca |
-| `intent-first` | O primeiro commit próprio toca só `context/intent/`, e todo merge antes dele é um merge limpo do `origin/main` (abaixo) | No CI, fora de draft |
-| `learn` | Esta branch criou um heading de entrada do changelog citando `(#N)` | No CI, fora de draft |
+| `intent-first` | O primeiro commit próprio toca só `context/intent/`, e todo merge antes dele é um merge limpo do `origin/main` (abaixo) | No CI, fora de draft; numa stack, só na primeira fatia |
+| `learn` | Esta branch criou um heading de entrada do changelog citando `(#N)`; numa stack, citando a mãe | No CI, fora de draft; numa stack, só na última fatia |
 | `commits-cite-issue` | Todo commit próprio cita `#N` | Nunca |
 | `worktree-clean` | A árvore de trabalho está limpa | Nunca (só no modo local) |
 | `pushed` | `origin/<branch>` existe e é igual ao HEAD | Nunca (só no modo local) |
@@ -75,6 +75,20 @@ O tamanho é relatado, não cobrado. Uma issue curta para uma mudança pequena e
 - **Um merge que esconde uma branch.** Um merge em qualquer ponto da linha de primeiro pai da branch, fora do `origin/main`, cujo outro pai não está no `origin/main`, também faz o `stacked` dar não, e o gate cita o merge. Um `git merge --no-ff <outra>` seguido de `git branch -D <outra>` traria a outra branch sem deixar ref nenhuma para o teste acima. Trazer o `origin/main` com um merge continua permitido. Um merge da cópia publicada da própria branch (um `git pull` que cria merge) também conta como merge de fora: traga a cópia publicada com `git pull --ff-only` ou `git pull --rebase`; nesse caso a mensagem do gate aponta o rebase.
 - **No terminal**, logo depois do corte e antes do primeiro commit, isso recusa uma branch cortada de um `main` local à frente do `origin/main`, de um `claude/*` ou de outra branch de issue, mesmo que ela ande depois do corte. A exceção é a isenção (b): quando todo commit não publicado que veio junto cita `#N` desta issue e a ref de origem não é outra branch da #N, o `stacked` deixa passar, e quem julga esses commits é o `intent-first` no CI.
 - **No CI só existem as refs publicadas.** O checkout da PR traz as branches de `origin`, não as refs locais de quem abriu a PR. Uma branch cortada de um `claude/*` não publicado ou de um `main` local passa pelo teste de refs no CI. Quem a pega lá é o `intent-first`, que passa a ler como primeiro commit próprio o primeiro commit não publicado que veio junto, e só fora de draft. Um merge que trouxe outra branch não depende de ref: o `stacked` o vê no histórico, no CI também.
+
+- **Numa fatia de stack**, as refs das fatias de baixo e de cima da mesma `Stack`, locais ou em `origin`, não são estranhas, e um merge de uma fatia de baixo não é merge de fora ([Uma fatia de stack](#uma-fatia-de-stack)).
+
+### Uma fatia de stack
+
+Uma mudança grande vem numa stack de PRs, e cada fatia é uma sub-issue da issue mãe (#31).
+
+- **Quando o gate lê a mãe.** Só para uma issue que leva a label `stack-slice` (`stackSliceLabel`). A consulta da issue traz o `parent`, e a mãe é lida com a mesma consulta. Uma sub-issue sem a label, como as filhas da #1, é julgada pelo próprio plano, como sempre, e a mãe dela nem é lida.
+- **O que vem de cada uma.** Da fatia vêm a categoria (`kind`) e o `issue-open`, que também exige a mãe aberta. Da mãe vêm a label de estado, as seções, os critérios, o Approve e o tamanho do plano. Uma fatia que leva uma label de estado, ou que não é sub-issue de nenhuma issue, bloqueia.
+- **A `Stack`.** É a seção opcional `Stack` do plano vigente da mãe (`stackOf`). Cada item de lista nomeia uma branch num code span, e um item sem branch é texto. Um item com duas branches, uma branch citada duas vezes ou uma seção sem nenhuma bloqueiam, e uma branch só dentro de um comentário HTML não conta. A ordem é de baixo para cima e dá a posição da fatia (`slicePosition`). O `branch-in-plan` exige a branch na `Stack`.
+- **A base da PR.** O `pr-base` aceita `main` ou a fatia logo abaixo, e esta só com a PR em draft: uma PR em draft não se mergeia, então nenhuma fatia é mergeada dentro de outra.
+- **O `stacked`.** As refs das fatias de baixo ficam fora do teste e fora dos commits próprios. As das fatias de cima, que contêm o HEAD inteiro, ficam fora do teste e não tiram nada dos commits próprios. Só contam as refs deste repositório, locais ou em `origin`. Um merge cujo outro pai está numa fatia de baixo é a atualização da fatia, e não conta como merge de fora. Qualquer outra ref continua estranha.
+- **O intent e o Learn.** O `intent-first` bloqueia só na primeira fatia, e o `learn` só na última, com um heading do changelog que cita a mãe. Nas outras, os dois só relatam, e o relatório diz em que fatia cada um vai.
+- **O refresh.** Um evento na mãe re-executa também o `issue-link` das PRs abertas que fecham as sub-issues dela, porque a fatia é julgada pela mãe.
 
 ### O passo `intent-first`
 
@@ -210,3 +224,4 @@ Este repositório tem uma conta só no GitHub. O dono e o agente postam com o me
 - **Criado**: 2026-09-24 (Fase: Build), do gate do lite-campaign (brunohab/lite-campaign#101), dos três defeitos dele e do plano aprovado na #2 (#2)
 - **Status**: Active
 - **Atualizado**: 2026-09-25 (Fase: Build), a regra de autoria passou a distinguir a transição `needs-triage` para `ready-for-human`, feita pelo agente ao publicar o plano, do Approve e da aplicação de `ready-for-agent`, exclusivos do dono (#17)
+- **Atualizado**: 2026-09-27 (Fase: Build), uma fatia de stack passou a ser julgada pela mãe: o estado, o plano, o Approve e a branch na seção `Stack`; o `pr-base` passou a aceitar a fatia de baixo em draft, o `stacked` a isentar as fatias da mesma stack, o `intent-first` e o `learn` a bloquear pela posição da fatia, e o `pr-size` novo a relatar o tamanho da PR (#31)

@@ -39,6 +39,7 @@ O trabalho segue Intent, Build e Learn, com Plan, Approve e Execute dentro do Bu
 | Um problema apontado pelo `npm run check:context` | Os formatos e o layout de `context/` no [guia do Context Mesh](context/README.md). Cada problema sai com `arquivo:linha`, e um arquivo fora do layout é recusado |
 | Uma issue `Mudança em main fora do loop: <sha7>` | [A auditoria de main](docs/development/workflow.md#auditoria-de-main). É um relato para o dono: um commit de `main` que não veio de uma PR mergeada que fecha issue com os checks exigidos verdes na head (e, desde `reviewRuleSince`, com a revisão do Copilot na cabeça e nenhuma thread aberta), ou um histórico de `main` reescrito. O dono registra retroativamente ou reverte |
 | Como uma branch nasce, anda e é mergeada | [O ciclo de vida de issue e branch](context/knowledge/patterns/issue-branch-lifecycle.md) |
+| Uma mudança grande em PRs menores, numa stack | [Stack de PRs](docs/development/workflow.md#stack-de-prs), com uma sub-issue por fatia e o Approve da mãe |
 | O que mudou e o que cada mudança ensinou | [O changelog](context/evolution/changelog.md) |
 | Os patterns e os anti-patterns, numa lista só | [Os padrões de código](CODING_STANDARDS.md) |
 | O sentido de uma palavra do projeto, e as palavras a evitar | [O glossário](context/knowledge/glossary.md) |
