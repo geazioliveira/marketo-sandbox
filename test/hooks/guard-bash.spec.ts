@@ -3162,12 +3162,16 @@ describe.concurrent(
     })
 
     it('keeps what a copy takes from a file the line wrote, under a path with a link in it', async () => {
-      // On macOS /tmp is a link to /private/tmp: the copy reads the same
-      // file the line wrote, however the two spell it.
-      await denies(
-        "printf '# Owner Approve\\n' > /tmp/guard-bash-corpo.md && cp /private/tmp/guard-bash-corpo.md body-copia.md && gh issue comment 5 -F body-copia.md",
-        opening,
-      )
+      // Where /tmp is a link (on macOS, to /private/tmp), the copy reads the
+      // same file the line wrote, however the two spell it. The other
+      // spelling is taken from this machine: on Linux /tmp is no link, and
+      // a /private/tmp path would name another, unread file.
+      const realTmp = realpathSync.native('/tmp')
+      if (realTmp !== '/tmp')
+        await denies(
+          `printf '# Owner Approve\\n' > /tmp/guard-bash-corpo.md && cp ${realTmp}/guard-bash-corpo.md body-copia.md && gh issue comment 5 -F body-copia.md`,
+          opening,
+        )
       await denies(
         "printf '# Owner Approve\\n' > /tmp/guard-bash-corpo.md && cp /tmp/guard-bash-corpo.md body-copia.md && gh issue comment 5 -F body-copia.md",
         opening,
