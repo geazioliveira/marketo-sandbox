@@ -611,6 +611,133 @@ describe.concurrent('scripts/refresh-issue-link.mjs', () => {
     expect(run.stdout).toContain('PR #11 ignorada: está CLOSED.')
   })
 
+  describe('a parent issue and the slices of its stack (#31)', () => {
+    type Pr = { number: number; state: string; headRefOid: string }
+    /** The issue with no PR of its own, and its sub-issues with theirs. */
+    const parentOf = (
+      children: { number: number; prs: Pr[]; total?: number }[],
+      childrenTotal = children.length,
+      own: Pr[] = [],
+    ) => ({
+      [`issue:${ISSUE}`]: {
+        closedByPullRequestsReferences: { totalCount: own.length, nodes: own },
+        subIssues: {
+          totalCount: childrenTotal,
+          nodes: children.map(({ number, prs, total }) => ({
+            number,
+            closedByPullRequestsReferences: {
+              totalCount: total ?? prs.length,
+              nodes: prs,
+            },
+          })),
+        },
+      },
+    })
+
+    test('re-runs the issue-link of the PRs that close its sub-issues', async ({
+      expect,
+      scratch,
+    }) => {
+      const run = await scratch.refresh({
+        answers: {
+          ...parentOf([
+            { number: 43, prs: [openPr(12)] },
+            { number: 44, prs: [openPr(13, OTHER)] },
+          ]),
+          ...runsFor(HEAD, {
+            id: 4301,
+            status: 'completed',
+            conclusion: 'failure',
+          }),
+          ...runsFor(OTHER, {
+            id: 4302,
+            status: 'completed',
+            conclusion: 'failure',
+          }),
+          'rerun:4301': true,
+          'rerun:4302': true,
+        },
+      })
+      expect(run.status, run.stdout).toBe(0)
+      expect(keys(run.calls)).toEqual([
+        `issue:${ISSUE}`,
+        `runs:${HEAD}`,
+        'rerun:4301',
+        `runs:${OTHER}`,
+        'rerun:4302',
+      ])
+      expect(run.stdout).toContain(
+        `A #${ISSUE} tem 2 sub-issue(s): o issue-link das PRs que as fecham também é re-rodado`,
+      )
+    })
+
+    test('re-runs once a PR that closes the issue and a sub-issue', async ({
+      expect,
+      scratch,
+    }) => {
+      const run = await scratch.refresh({
+        answers: {
+          ...parentOf([{ number: 43, prs: [openPr(12)] }], 1, [openPr(12)]),
+          ...runsFor(HEAD, {
+            id: 4303,
+            status: 'completed',
+            conclusion: 'success',
+          }),
+          'rerun:4303': true,
+        },
+      })
+      expect(run.status, run.stdout).toBe(0)
+      expect(keys(run.calls)).toEqual([
+        `issue:${ISSUE}`,
+        `runs:${HEAD}`,
+        'rerun:4303',
+      ])
+    })
+
+    test('says there is nothing to re-run when no slice has an open PR', async ({
+      expect,
+      scratch,
+    }) => {
+      const run = await scratch.refresh({
+        answers: parentOf([
+          {
+            number: 43,
+            prs: [{ number: 10, state: 'MERGED', headRefOid: OTHER }],
+          },
+        ]),
+      })
+      expect(run.status, run.stdout).toBe(0)
+      expect(keys(run.calls)).toEqual([`issue:${ISSUE}`])
+      expect(run.stdout).toContain(
+        `Nenhuma PR aberta fecha a #${ISSUE} nem as sub-issues dela: nada a re-rodar.`,
+      )
+    })
+
+    test('goes red when there are more sub-issues than one page holds', async ({
+      expect,
+      scratch,
+    }) => {
+      const run = await scratch.refresh({ answers: parentOf([], 51) })
+      expect(run.status).toBe(1)
+      expect(run.stdout).toContain(
+        `A #${ISSUE} tem 51 sub-issues e só 0 foram lidas`,
+      )
+    })
+
+    test('goes red when a sub-issue has more closing PRs than one page holds', async ({
+      expect,
+      scratch,
+    }) => {
+      const run = await scratch.refresh({
+        answers: parentOf([{ number: 43, prs: [], total: 11 }]),
+      })
+      expect(run.status).toBe(1)
+      expect(run.stdout).toContain(
+        `A #43, sub-issue da #${ISSUE}, é fechada por 11 PRs e só 0 foram lidas`,
+      )
+    })
+  })
+
   test('goes red when more PRs close the issue than one page holds', async ({
     expect,
     scratch,
