@@ -91,7 +91,7 @@ As respostas do Approve de 2026-09-25 continuam: em `auto`, os `ask` críticos v
 
 ## Resultados
 
-O que foi construído está na [entrada do changelog](../evolution/changelog.md): os quatro hooks em `.claude/hooks/`, a biblioteca em `.claude/hooks/lib/`, o `run.sh`, o `.claude/settings.json` e 1.645 testes em `test/hooks/`.
+O que foi construído está na [entrada do changelog](../evolution/changelog.md): os quatro hooks em `.claude/hooks/`, a biblioteca em `.claude/hooks/lib/`, o `run.sh`, o `.claude/settings.json` e 1.813 testes em `test/hooks/`.
 
 Como foi verificado:
 
@@ -105,6 +105,7 @@ Como foi verificado:
 - **A terceira revisão do Copilot** achou onze, quase todas um valor ilegível numa regra que nega com só uma confirmação simples. Uma varredura de todo ponto assim aplicou uma regra só: dúvida sobre uma negação é confirmação crítica. Em `auto`, as negações do corpus foram de 29 para 60, das 902 linhas. Das 31 novas, 25 já pediam confirmação, e o caminho para as outras é escrever os valores literais ou num heredoc.
 - **A quarta revisão do Copilot** achou quatro: as escritas do `git` no worktree sem o gate, o `plan-to-issue` falhando aberto quando uma biblioteca não carrega, o `plan-to-issue` sem o `GH_HOST`, e este intent dizendo que o marcador fica no git dir do worktree. As escritas do `git` passaram a receber a decisão do `build-guard`, pela mesma função. Os testes novos acharam mais duas brechas, fechadas: um glob seguido de `..` e as leituras do hook no git rodando um programa do ambiente.
 - **A quinta revisão do Copilot** achou cinco: as leituras ao vivo no host herdado e não no do comando, no `guard-bash` e no `plan-to-issue`; o marcador não gravado quando o prazo acabava ou quando o `plan-to-issue` falhava depois de carregar; e o nome do marcador sem ser injetivo. O `plan-to-issue` passou a falhar fechado, e o nome passou a codificar o id da sessão.
+- **A sexta revisão do Copilot** achou três: os campos que o `gh api` põe na query string ao lado de `--input`, o `git update-ref` e os outros jeitos de mover a ref de `main`, e o `GIT_DIR` no `plan-to-issue`. O corpus não mudou nenhuma decisão.
 - **As sondas,** com os hooks ligados nesta sessão, em modo `auto`:
   - `gh issue edit 1 --remove-label needs-info` foi negado pelo `guard-bash`;
   - um `Edit` em `src/main.ts` numa sonda `claude/x` cortada de `origin/main` foi negado pelo `build-guard` ("o gate ainda não rodou neste worktree");
@@ -147,3 +148,4 @@ Para o dono:
 - **Atualizado**: 2026-09-27 (Fase: Learn), as onze brechas da terceira revisão do Copilot na PR #26 foram fechadas por uma varredura (#5)
 - **Atualizado**: 2026-09-27 (Fase: Learn), os quatro achados da quarta revisão do Copilot na PR #26 foram fechados, e o critério do marcador passou a dizer o diretório git comum (#5)
 - **Atualizado**: 2026-09-27 (Fase: Learn), os cinco achados da quinta revisão do Copilot na PR #26 foram fechados (#5)
+- **Atualizado**: 2026-09-27 (Fase: Learn), os três achados da sexta revisão do Copilot na PR #26 foram fechados (#5)
