@@ -15,6 +15,7 @@ import {
   requiredChecks,
 } from '../../scripts/loop-sections.mjs'
 import {
+  gitShim,
   type HookRepo,
   hookRepo,
   type HookRun,
@@ -22,6 +23,7 @@ import {
   setupTimeout,
   processTimeout,
 } from '../support/hooks'
+import { projectRoot } from '../support/temp-repo'
 
 /**
  * The shell guard (.claude/hooks/guard-bash.mjs), run as Claude Code runs
@@ -1427,3 +1429,336 @@ describe.concurrent('gh api wherever it runs (review of #5)', () => {
     )
   })
 })
+
+describe.concurrent(
+  'a program the hook cannot name, judged as gh, git and a shell (Copilot review of #26)',
+  () => {
+    const unnamed = /não consegui ler o programa que o comando roda em "/
+    const repos = () => ({ feature, onMain })
+
+    beforeAll(() => {
+      // Files the controls run: harmless programs of other languages.
+      feature.write({
+        'script.py': "print('ok')\n",
+        'x.mjs': "console.log('ok')\n",
+      })
+    })
+
+    test.for([
+      ['$CMD issue reopen 5', 'feature', /como gh: reabrir uma issue/],
+      ['"$G" commit -m x', 'onMain', /como git: commit em main/],
+      ['${CMD} pr merge 7', 'feature', /como gh: .*estado da PR/],
+      ['$SH -c "gh issue reopen 5"', 'feature', /como sh: reabrir uma issue/],
+      [
+        "$SH <<'EOF'\ngh issue reopen 5\nEOF",
+        'feature',
+        /como sh: reabrir uma issue/,
+      ],
+      ["$SH <<< 'gh issue reopen 5'", 'feature', /como sh: reabrir uma issue/],
+    ] as const)(
+      'asks, critical, for %s, and denies it in auto',
+      async ([text, where, reason], { live }) => {
+        const gh = live({})
+        const repo = repos()[where]
+        const run = await guard(text, { repo, env: gh.env })
+        expectCritical(run, unnamed)
+        expect(reasonOf(run)).toMatch(reason)
+        expectDeny(
+          await guard(text, { repo, env: gh.env, mode: 'auto' }),
+          /Em auto, a confirmação vira negação/,
+        )
+      },
+    )
+
+    it('keeps a plain ask plain', async () => {
+      const run = await guard(`$SH -c 'gh issue comment 5 --body "$X"'`, {
+        mode: 'auto',
+      })
+      expectAsk(run, unnamed)
+      expect(reasonOf(run)).toMatch(
+        /como sh: não consegui ler o corpo do comentário/,
+      )
+    })
+
+    it('judges the commands after it on what the line left before it: a checkout read as git moves no branch', async () => {
+      // Read as git, `$X checkout -b …` leaves main; the program may be
+      // another, and the commit then lands on main.
+      expectDeny(
+        await guard('$X checkout -b feature/9-x && git commit -m x', {
+          repo: onMain,
+        }),
+        /commit em main/,
+      )
+    })
+
+    it('still denies a program named by a variable the line assigns', async () => {
+      expectDeny(
+        await guard(`SH=bash; $SH -c 'gh issue reopen 5'`),
+        /reabrir uma issue/,
+      )
+    })
+
+    it.each([
+      '$PY script.py',
+      '"$NODE" x.mjs',
+      'G=gh; $G issue view 5',
+      'N=node; "$N" x.mjs',
+    ])('passes %s', async (text) => {
+      expectPass(await guard(text))
+      expectPass(await guard(text, { mode: 'auto' }))
+    })
+  },
+)
+
+describe.concurrent('gh pr create --web (Copilot review of #26)', () => {
+  it('asks, critical, and denies it in auto: the body is written in the browser', async () => {
+    expectCritical(await guard('gh pr create --web'), /--web/)
+    expectDeny(
+      await guard('gh pr create --web', { mode: 'auto' }),
+      /--web.*Em auto, a confirmação vira negação/,
+    )
+  })
+
+  it('keeps a body file it cannot read a plain ask', async () => {
+    expectAsk(
+      await guard('gh pr create -t T -F /nao/existe.md', { mode: 'auto' }),
+      /não consegui ler o corpo da PR/,
+    )
+  })
+})
+
+describe.concurrent('the time budget of a run (Copilot review of #26)', () => {
+  const transition = (n: number) =>
+    `gh issue edit ${n} --remove-label needs-triage --add-label ready-for-human`
+  const slowIssues = (numbers: number[]) => ({
+    issues: Object.fromEntries(
+      numbers.map((n) => [
+        n,
+        { mode: 'slow', labels: ['needs-triage'], lastCommentBody: '# Plano' },
+      ]),
+    ),
+  })
+
+  test('answers with a critical ask naming the budget, past it', async ({
+    live,
+  }) => {
+    const numbers = [5, 6, 7, 8, 9]
+    const gh = live(slowIssues(numbers), {
+      LOOP_HOOKS_GH_TIMEOUT_MS: '4000',
+      LOOP_HOOKS_BUDGET_MS: '2000',
+      FAKE_GH_SLOW_MS: '60000',
+    })
+    const line = numbers.map(transition).join(' && ')
+    const started = Date.now()
+    const run = await guard(line, { env: gh.env })
+    // Five reads of 4 s each would take 20 s; the budget ends the run at 2.
+    expect(Date.now() - started).toBeLessThan(12_000)
+    expectCritical(run, /o prazo de 2 s do hook acabou/)
+    expectDeny(
+      await guard(line, { env: gh.env, mode: 'auto' }),
+      /o prazo de 2 s do hook acabou.*Em auto, a confirmação vira negação/,
+    )
+  })
+
+  test('ends the one read of GitHub it cuts short with its own answer', async ({
+    live,
+  }) => {
+    // Nothing starts after the read: taken for a gh that failed, it would
+    // leave a plain ask, which auto lets through to the person.
+    const gh = live(slowIssues([5]), {
+      LOOP_HOOKS_GH_TIMEOUT_MS: '20000',
+      LOOP_HOOKS_BUDGET_MS: '3000',
+      FAKE_GH_SLOW_MS: '60000',
+    })
+    expectDeny(
+      await guard(transition(5), { env: gh.env, mode: 'auto' }),
+      /o prazo de 3 s do hook acabou.*Em auto, a confirmação vira negação/,
+    )
+  })
+
+  test('bounds a git the rules start by what is left of it', async ({
+    live,
+  }) => {
+    // The one read of the rules' own that `git cherry-pick main` makes, the
+    // message it copies, hangs past git's own 10 s. Taken for a git that
+    // failed, it would leave a plain ask, 10 s later.
+    const bin = gitShim(
+      path.join(feature.root, 'log-hangs'),
+      'for arg in "$@"; do [ "$arg" = --no-walk ] && exec sleep 15; done',
+    )
+    const gh = live(
+      {},
+      {
+        PATH: [bin, feature.bin, process.env.PATH ?? ''].join(path.delimiter),
+        LOOP_HOOKS_BUDGET_MS: '3000',
+      },
+    )
+    expectDeny(
+      await guard('git cherry-pick main', { env: gh.env, mode: 'auto' }),
+      /o prazo de 3 s do hook acabou.*Em auto, a confirmação vira negação/,
+    )
+  })
+
+  test('keeps a deny found before the budget ran out', async ({ live }) => {
+    // Room for the first command's git reads on a busy machine; the slow
+    // read of the second is what runs out.
+    const gh = live(slowIssues([5]), {
+      LOOP_HOOKS_GH_TIMEOUT_MS: '20000',
+      LOOP_HOOKS_BUDGET_MS: '6000',
+      FAKE_GH_SLOW_MS: '60000',
+    })
+    expectDeny(
+      await guard(`gh issue reopen 7 && ${transition(5)}`, { env: gh.env }),
+      /reabrir uma issue/,
+    )
+  })
+
+  test('answers before the timeout settings.json gives the hook, with the budget it ships with', async ({
+    live,
+  }) => {
+    // The hook's timeout as Claude Code reads it: past it, Claude Code kills
+    // the hook and runs the command undecided.
+    const settings = JSON.parse(
+      readFileSync(path.join(projectRoot, '.claude', 'settings.json'), 'utf8'),
+    ) as {
+      hooks: Record<
+        string,
+        { matcher?: string; hooks: { command: string; timeout: number }[] }[]
+      >
+    }
+    const timeoutMs =
+      (settings.hooks.PreToolUse ?? [])
+        .flatMap((group) => group.hooks)
+        .find((hook) => hook.command.endsWith(' guard-bash'))?.timeout ?? 0
+    expect(timeoutMs).toBeGreaterThan(0)
+    // Three reads that each run until gh's own timeout, 30 s: 90 s in all,
+    // past the hook's timeout, without a budget for the whole run.
+    const numbers = [5, 6, 7]
+    const gh = live(slowIssues(numbers), {
+      LOOP_HOOKS_GH_TIMEOUT_MS: '30000',
+      FAKE_GH_SLOW_MS: '120000',
+    })
+    const started = Date.now()
+    const run = await guard(numbers.map(transition).join(' && '), {
+      env: gh.env,
+    })
+    expect(Date.now() - started).toBeLessThan(timeoutMs * 1000)
+    expectCritical(run, /o prazo de \d+ s do hook acabou/)
+  })
+})
+
+describe.concurrent(
+  'the loop files by the repository they belong to (Copilot review of #26)',
+  () => {
+    let worktree: { dir: string; gitDir: string }
+    let nowhere: string
+    let broken: string
+
+    beforeAll(async () => {
+      worktree = await onMain.addWorktree('wt-arquivos', 'feature/9-arquivos')
+      nowhere = realpathSync.native(
+        mkdtempSync(path.join(tmpdir(), 'guard-bash-nowhere-')),
+      )
+      // A directory where git fails instead of saying "not a repository":
+      // its .git is a file git cannot read.
+      broken = realpathSync.native(
+        mkdtempSync(path.join(tmpdir(), 'guard-bash-broken-')),
+      )
+      writeFileSync(path.join(broken, '.git'), 'não é um gitdir\n')
+    }, setupTimeout)
+
+    afterAll(() => {
+      for (const dir of [nowhere, broken])
+        if (dir) rmSync(dir, { recursive: true, force: true })
+    })
+
+    it.each([
+      [
+        'another repository’s settings.local.json',
+        () => `echo x > ${elsewhere.dir}/.claude/settings.local.json`,
+      ],
+      [
+        'another repository’s loop-gate.json',
+        () => `echo x > ${elsewhere.gitDir}/loop-gate.json`,
+      ],
+      [
+        'another repository’s plan marker',
+        () => `rm -f ${elsewhere.gitDir}/loop-plan-pending-sessao-1.json`,
+      ],
+      [
+        'a settings.local.json in no repository',
+        () => `echo x > ${nowhere}/.claude/settings.local.json`,
+      ],
+    ])('passes %s', async (_, text) => {
+      expectPass(await guard(text()))
+    })
+
+    it.each([
+      [
+        'the main checkout’s settings.local.json',
+        () => `echo x > ${onMain.dir}/.claude/settings.local.json`,
+        /saída de emergência do dono/,
+      ],
+      [
+        'a worktree’s settings.local.json',
+        () => `echo x > ${worktree.dir}/.claude/settings.local.json`,
+        /saída de emergência do dono/,
+      ],
+      [
+        'a worktree’s loop-gate.json',
+        () => `echo x > ${worktree.gitDir}/loop-gate.json`,
+        /só o gate e os hooks escrevem/,
+      ],
+      [
+        'a plan marker in the common git dir',
+        () => `rm -f ${onMain.gitDir}/loop-plan-pending-sessao-1.json`,
+        /só o gate e os hooks escrevem/,
+      ],
+      [
+        'a path it cannot resolve',
+        () => `echo x > "$D/.claude/settings.local.json"`,
+        /saída de emergência do dono/,
+      ],
+    ])('denies %s, from another repository', async (_, text, reason) => {
+      expectDeny(await guard(text(), { repo: elsewhere }), reason)
+    })
+
+    it.each([
+      [
+        'settings.local.json',
+        () => `echo x > ${broken}/.claude/settings.local.json`,
+        /saída de emergência do dono/,
+      ],
+      [
+        'loop-gate.json',
+        () => `echo x > ${broken}/loop-gate.json`,
+        /só o gate e os hooks escrevem/,
+      ],
+    ])(
+      'denies %s by its name where git cannot say whose it is',
+      async (_, text, reason) => {
+        expectDeny(await guard(text()), reason)
+      },
+    )
+
+    it('keeps the user’s own settings as they were, in a home that is another repository', async () => {
+      // A home directory under git, as the owner's is: the files Claude Code
+      // reads there for every session are not another repository's.
+      const env = feature.env({ HOME: elsewhere.dir })
+      expectDeny(
+        await guard('echo x > ~/.claude/settings.local.json', { env }),
+        /saída de emergência do dono/,
+      )
+      expectPass(await guard('echo x > ~/.claude/settings.json', { env }))
+      expectDeny(
+        await guard(`echo x > ${elsewhere.dir}/cfg/settings.local.json`, {
+          env: feature.env({
+            HOME: elsewhere.dir,
+            CLAUDE_CONFIG_DIR: `${elsewhere.dir}/cfg`,
+          }),
+        }),
+        /saída de emergência do dono/,
+      )
+    })
+  },
+)

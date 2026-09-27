@@ -26,6 +26,7 @@ import {
   skipChecksTrailer,
   skipCiTokens,
 } from '../../../scripts/loop-sections.mjs'
+import { afterSpawn, spawnTimeout } from './budget.mjs'
 import { ask, combine, deny, pass } from './io.mjs'
 import { isProject, repoFromRemote, trunk } from './repo.mjs'
 import { parseCommand, readBody } from './shell.mjs'
@@ -363,30 +364,37 @@ const discoveryVariables = [
   'GIT_PREFIX',
 ]
 
+/** A git hung on a lock must not hold the tool call; the run's budget bounds it too. */
+const gitTimeoutMs = 10_000
+
 /**
  * git, as the command would see its config: in the command's repository,
  * with its `-c` and its environment (GIT_CONFIG_GLOBAL, GIT_CONFIG_COUNT and
  * the rest), through argv, never a shell. It only reads.
  */
-function gitRead(g, args, env) {
+function gitRead(g, args, env, { configArgs = g.configArgs } = {}) {
   const clean = { ...env }
   for (const name of discoveryVariables) delete clean[name]
+  const step = `ler o git em ${g.dir}`
+  const timeout = spawnTimeout(gitTimeoutMs, step)
   const run = spawnSync(
     'git',
     [
       '-C',
       g.dir,
       ...(g.gitDir === null ? [] : ['--git-dir', g.gitDir]),
-      ...g.configArgs,
+      ...configArgs,
       ...args,
     ],
     {
       encoding: 'utf8',
       env: { ...clean, LC_ALL: 'C', GIT_OPTIONAL_LOCKS: '0' },
-      timeout: 10_000,
+      timeout,
+      maxBuffer: 16 * 1024 * 1024,
       stdio: ['ignore', 'pipe', 'pipe'],
     },
   )
+  afterSpawn(run, gitTimeoutMs, timeout, step)
   if (run.error) return { status: null, out: '' }
   return { status: run.status, out: run.stdout ?? '' }
 }
@@ -550,6 +558,9 @@ const commitSpec = {
     '--trailer',
     '--pathspec-from-file',
   ],
+  // Read as a flag, abbreviations included: with no message of its own, it
+  // keeps HEAD's.
+  watch: ['--amend'],
 }
 
 /**
@@ -621,6 +632,382 @@ function commitMessage(command, argv, dir, from, files, { spec, what }) {
         `${what} traz "${token}", que faz o GitHub pular os checks do push e do merge: tire-o da mensagem`,
       )
   }
+  return pass()
+}
+
+// ---------------------------------------------------------------------------
+// Messages a commit brings from elsewhere
+
+/**
+ * The messages of revisions in the command's repository, each as `format`
+ * gives it (`%B` the whole message, `%s` the subject), selected the way
+ * cherry-pick and revert select them: each revision alone, a range walked
+ * (`git log --no-walk` walks once a range or a `^rev` is given). null when
+ * git cannot say.
+ *
+ * Of the command's `-c` (and the line's `git config`), only
+ * core.useReplaceRefs is kept: it decides which commit a name points at (a
+ * replace ref shows another in its place), and one the hook cannot read makes
+ * the messages unknown. The rest is left out: this read must not run what a
+ * `-c` asks for, such as a promisor remote it names, from which git fetches a
+ * commit it lacks through any transport (`ext::` runs a program), or a
+ * gpg.program (`--no-show-signature` too).
+ */
+function revMessages(g, revs, format, env) {
+  const configArgs = []
+  for (const entry of g.config) {
+    const key = keyOf(entry.pair)
+    if (key.known && key.key !== 'core.usereplacerefs') continue
+    if (!entry.known) return null
+    configArgs.push('-c', entry.pair)
+  }
+  const run = gitRead(
+    g,
+    [
+      'log',
+      '--no-walk',
+      '--no-show-signature',
+      `--format=${format}%x00`,
+      '--end-of-options',
+      ...revs,
+      '--',
+    ],
+    env,
+    { configArgs },
+  )
+  if (run.status !== 0) return null
+  return run.out
+    .split('\0')
+    .map((text) => text.replace(/^\n/, ''))
+    .filter((text) => text.trim() !== '')
+}
+
+const copied = {
+  'cherry-pick': 'a mensagem que o git cherry-pick copia',
+  revert: 'o assunto que o git revert copia',
+  am: 'a mensagem do patch que o git am aplica',
+  reuse: 'a mensagem que o git commit reaproveita',
+  subject: 'o assunto que o git commit copia',
+}
+
+/** The refusal for a copied message that carries a skip string, or null. */
+function copiedSkip(texts, what, where) {
+  for (const text of texts) {
+    const token = skipTokenIn(text)
+    if (token !== null)
+      return deny(
+        `${what} (${where}) traz "${token}", que faz o GitHub pular os checks do push e do merge: não traga essa mensagem para a branch`,
+      )
+  }
+  return null
+}
+
+const unreadCopy = (what, why) =>
+  ask(
+    `não consegui ler ${what} (${why}): confira que ali não há um texto que faz o GitHub pular os checks`,
+  )
+
+/**
+ * The options of cherry-pick and revert, as `git cherry-pick -h` and `git
+ * revert -h` list them. Any other option may be one of the revision walk's
+ * (`--stdin`, `--all`), which picks commits the hook does not name, so it
+ * makes the revisions unknown.
+ */
+const pickSpec = {
+  short: 'mX',
+  optional: 'S',
+  long: [
+    '--mainline',
+    '--strategy',
+    '--strategy-option',
+    '--cleanup',
+    '--empty',
+  ],
+}
+const pickFlags = new Set([
+  '-n',
+  '--no-commit',
+  '-e',
+  '--edit',
+  '--no-edit',
+  '-x',
+  '-r',
+  '-s',
+  '--signoff',
+  '--no-signoff',
+  '--ff',
+  '--allow-empty',
+  '--allow-empty-message',
+  '--keep-redundant-commits',
+  '--rerere-autoupdate',
+  '--no-rerere-autoupdate',
+  '-S',
+  '--gpg-sign',
+  '--no-gpg-sign',
+  '--reference',
+  '--no-reference',
+  ...pickSpec.long,
+  '-m',
+  '-X',
+])
+
+/**
+ * The messages cherry-pick copies whole, and the subjects revert copies
+ * (`Revert "<subject>"`), read from the revisions named. Nothing named (a
+ * `--continue` of a sequence already judged) reads nothing.
+ */
+function pickDecision(command, g, sub, env) {
+  const what = copied[sub]
+  const { options, operands } = readGitArgs(g.argv, g.at + 1, pickSpec)
+  if (options.some((option) => leaving.has(option.name))) return pass()
+  if (operands.length === 0) return pass()
+  const unknownOption = options.find(
+    (option) =>
+      !pickFlags.has(option.name) &&
+      !['--continue', '--skip'].includes(option.name),
+  )
+  if (unknownOption !== undefined)
+    return unreadCopy(what, `a opção ${unknownOption.name} escolhe commits`)
+  const blind = operands.find((operand) => !wordKnown(command, operand.index))
+  if (blind !== undefined)
+    return unreadCopy(what, `a revisão "${blind.value}" não pôde ser lida`)
+  const revs = operands.map((operand) =>
+    operand.value === '-' ? '@{-1}' : operand.value,
+  )
+  const texts = revMessages(g, revs, sub === 'revert' ? '%s' : '%B', env)
+  if (texts === null) return unreadCopy(what, `o git não leu ${revs.join(' ')}`)
+  return copiedSkip(texts, what, revs.join(' ')) ?? pass()
+}
+
+/** git am's options that take a value (`-p1`, `--directory dir`). */
+const amSpec = {
+  short: 'pC',
+  optional: 'S',
+  long: [
+    '--whitespace',
+    '--directory',
+    '--exclude',
+    '--include',
+    '--patch-format',
+    '--resolvemsg',
+    '--quoted-cr',
+    '--empty',
+  ],
+}
+
+/** git am's options with which it applies no new patch. */
+const amResumes = new Set([
+  '--continue',
+  '--skip',
+  '--resolved',
+  '-r',
+  '--show-current-patch',
+  '--retry',
+])
+
+/** A MIME encoded word (RFC 2047), as git format-patch writes a subject that is not ASCII. */
+function decodeWords(text) {
+  return text.replace(/=\?[^?]+\?([QqBb])\?([^?]*)\?=/g, (_, kind, data) =>
+    kind.toUpperCase() === 'B'
+      ? Buffer.from(data, 'base64').toString('latin1')
+      : data
+          .replaceAll('_', ' ')
+          .replace(/=([0-9A-Fa-f]{2})/g, (__, hex) =>
+            String.fromCharCode(Number.parseInt(hex, 16)),
+          ),
+  )
+}
+
+/**
+ * The line that starts a message in a mailbox, as git mailsplit tells it
+ * (is_from_line): `From `, then a time and a year, as git format-patch
+ * writes `From <sha> Mon Sep 17 00:00:00 2001`.
+ */
+const fromLine = /^From .*\d:\d\d:\d\d.*\d{4}\s*$/
+
+/**
+ * The messages a mailbox holds, as git am reads them: each one's Subject
+ * and body up to the patch (a `---` line or the diff), decoded from
+ * quoted-printable or base64. null for what the hook does not read: a
+ * multipart message, an encoding it does not know.
+ */
+function mailboxMessages(text, { messageId }) {
+  const lines = text.split(/\r?\n/)
+  const chunks = []
+  let current = []
+  for (const line of lines) {
+    if (fromLine.test(line) && current.some((l) => l.trim() !== '')) {
+      chunks.push(current)
+      current = []
+    }
+    current.push(line)
+  }
+  chunks.push(current)
+  const messages = []
+  for (const chunk of chunks) {
+    const start = fromLine.test(chunk[0] ?? '') ? 1 : 0
+    const blank = chunk.findIndex(
+      (line, index) => index >= start && line === '',
+    )
+    const headerLines = chunk.slice(start, blank < 0 ? chunk.length : blank)
+    const headers = new Map()
+    let last = null
+    for (const line of headerLines) {
+      if (/^[ \t]/.test(line) && last !== null)
+        headers.set(last, `${headers.get(last)} ${line.trim()}`)
+      else {
+        const at = line.indexOf(':')
+        if (at <= 0) continue
+        last = line.slice(0, at).trim().toLowerCase()
+        headers.set(last, line.slice(at + 1).trim())
+      }
+    }
+    if (/^multipart\//i.test(headers.get('content-type') ?? '')) return null
+    const encoding = (headers.get('content-transfer-encoding') ?? '')
+      .trim()
+      .toLowerCase()
+    // Decoded whole first: the line that ends the message is inside the
+    // encoding too.
+    let raw = (blank < 0 ? [] : chunk.slice(blank + 1)).join('\n')
+    if (encoding === 'base64')
+      raw = Buffer.from(raw.replace(/\s+/g, ''), 'base64').toString('latin1')
+    else if (encoding === 'quoted-printable')
+      raw = raw
+        .replace(/=\r?\n/g, '')
+        .replace(/=([0-9A-Fa-f]{2})/g, (_, hex) =>
+          String.fromCharCode(Number.parseInt(hex, 16)),
+        )
+    else if (!['', '7bit', '8bit', 'binary'].includes(encoding)) return null
+    const bodyLines = []
+    for (const line of raw.split(/\r?\n/)) {
+      if (line === '---' || /^diff --git |^Index: |^--- \S/.test(line)) break
+      bodyLines.push(line)
+    }
+    const body = bodyLines.join('\n')
+    const subject = decodeWords(headers.get('subject') ?? '')
+    const id = messageId
+      ? `\n\nMessage-ID: ${headers.get('message-id') ?? ''}`
+      : ''
+    if (subject === '' && body.trim() === '') continue
+    messages.push(`${subject}\n\n${body}${id}`)
+  }
+  return messages
+}
+
+/**
+ * The messages of the patches git am applies: each mailbox file named, read
+ * relative to the directory git runs in, or stdin when none is named (a
+ * heredoc, a `<` file; a pipe is not read).
+ */
+function amDecision(command, g, files) {
+  const what = copied.am
+  const { options, operands } = readGitArgs(g.argv, g.at + 1, amSpec)
+  if (
+    options.some(
+      (option) => leaving.has(option.name) || amResumes.has(option.name),
+    )
+  )
+    return pass()
+  const messageId = options.some((option) =>
+    ['-m', '--message-id'].includes(option.name),
+  )
+  const sources =
+    operands.length === 0
+      ? [{ value: '-', index: -1, known: true }]
+      : operands.map((operand) => ({
+          ...operand,
+          known: wordKnown(command, operand.index),
+        }))
+  const decisions = []
+  for (const source of sources) {
+    const where = source.value === '-' ? 'o stdin' : source.value
+    const read = readSource(command, g.dir, source.value, source.known, files)
+    if (!read.known) {
+      decisions.push(unreadCopy(what, `${where} não pôde ser lido`))
+      continue
+    }
+    const messages = mailboxMessages(read.text, { messageId })
+    if (messages === null) {
+      decisions.push(
+        unreadCopy(what, `${where} traz uma codificação que o hook não lê`),
+      )
+      continue
+    }
+    const refusal = copiedSkip(messages, what, where)
+    if (refusal !== null) return refusal
+  }
+  return combine(decisions)
+}
+
+/**
+ * The messages git commit copies from a commit: `-C`/`--reuse-message` and
+ * `-c`/`--reedit-message` take its whole message, `--fixup` and `--squash`
+ * its subject (`fixup! <subject>`), `--fixup=amend:` and `reword:` the whole
+ * message, and `--amend` with no message of its own keeps HEAD's. The
+ * editor, which may change any of them, is the documented limit.
+ */
+function commitSources(command, g, env) {
+  const { options } = readGitArgs(g.argv, g.at + 1, commitSpec)
+  const reads = []
+  let ownMessage = false
+  let amend = false
+  for (const option of options) {
+    if (['-m', '--message', '-F', '--file'].includes(option.name))
+      ownMessage = true
+    if (option.name === '--amend') amend = true
+    if (option.value === null) continue
+    if (
+      ['-C', '--reuse-message', '-c', '--reedit-message'].includes(option.name)
+    ) {
+      ownMessage = true
+      reads.push({
+        option,
+        rev: option.value,
+        format: '%B',
+        what: copied.reuse,
+      })
+    } else if (option.name === '--fixup' || option.name === '--squash') {
+      const whole = /^(?:amend|reword):/.exec(option.value)
+      reads.push({
+        option,
+        rev: whole ? option.value.slice(whole[0].length) : option.value,
+        format: whole ? '%B' : '%s',
+        what: whole ? copied.reuse : copied.subject,
+      })
+    }
+  }
+  if (amend && !ownMessage)
+    reads.push({ option: null, rev: 'HEAD', format: '%B', what: copied.reuse })
+  const decisions = []
+  for (const { option, rev, format, what } of reads) {
+    if (option !== null && !wordKnown(command, option.index)) {
+      decisions.push(unreadCopy(what, `a revisão "${rev}" não pôde ser lida`))
+      continue
+    }
+    const texts = revMessages(g, [rev], format, env)
+    if (texts === null) {
+      decisions.push(unreadCopy(what, `o git não leu ${rev}`))
+      continue
+    }
+    const refusal = copiedSkip(texts, what, rev)
+    if (refusal !== null) return refusal
+  }
+  return combine(decisions)
+}
+
+/**
+ * A commit whose message comes from elsewhere carrying a skip string
+ * (Copilot review of #26): cherry-pick and revert copy it from the commits
+ * they name, am from the patch, and git commit from a commit it names. Unlike
+ * a message on the line, one that cannot be read asks: the source is a
+ * commit or a file the line names, not text the person typed, and asking
+ * costs only the rare line that names it through an expansion.
+ */
+function copiedMessage(command, g, sub, env, files) {
+  if (sub === 'cherry-pick' || sub === 'revert')
+    return pickDecision(command, g, sub, env)
+  if (sub === 'am') return amDecision(command, g, files)
+  if (sub === 'commit') return commitSources(command, g, env)
   return pass()
 }
 
@@ -926,6 +1313,7 @@ function decide({ command, g, sub, alias }, ctx, env) {
     decisions.push(
       commitMessage(command, argv, g.dir, g.at + 1, ctx.files, messages[sub]),
     )
+  decisions.push(copiedMessage(command, g, sub, env, ctx.files))
   return combine(decisions)
 }
 

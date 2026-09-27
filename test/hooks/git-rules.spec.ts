@@ -1,4 +1,10 @@
-import { mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs'
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import {
@@ -355,6 +361,271 @@ describe('skip strings in merge commit messages (Copilot review of #26)', () => 
       verdict('git merge --no-ff -m "[skip ci]" origin/main', elsewhere.dir)
         .decision,
     ).toBe('pass')
+  })
+})
+
+describe('messages a commit brings from elsewhere (Copilot review of #26)', () => {
+  /**
+   * A branch of the issue whose history holds the messages another command
+   * copies: a clean commit, then a skip string in a subject, in a body only,
+   * and as the trailer, each by its sha; and the patches git format-patch
+   * makes of three of them.
+   */
+  let sourced: HookRepo
+  const sha = { base: '', clean: '', subject: '', body: '', trailer: '' }
+  const patch = { clean: '', subject: '', body: '' }
+
+  beforeAll(async () => {
+    sourced = await hookRepo({ branch: FEATURE })
+    await sourced.commit({ 'a.txt': 'a\n' }, 'Limpo')
+    await sourced.commit({ 'b.txt': 'b\n' }, 'Pular [skip ci]')
+    await sourced.commit(
+      { 'c.txt': 'c\n' },
+      'Assunto limpo\n\nCorpo com [ci skip].',
+    )
+    await sourced.commit(
+      { 'd.txt': 'd\n' },
+      `Com trailer\n\n${skipChecksTrailer}`,
+    )
+    ;[sha.base, sha.clean, sha.subject, sha.body, sha.trailer] = (
+      await sourced.git('rev-list', '--reverse', 'HEAD')
+    ).split('\n')
+    const dir = path.join(sourced.root, 'patches')
+    for (const name of ['clean', 'subject', 'body'] as const)
+      patch[name] = await sourced.git(
+        'format-patch',
+        '-1',
+        sha[name],
+        '-o',
+        path.join(dir, name),
+      )
+  }, setupTimeout)
+
+  afterAll(() => sourced?.remove(), setupTimeout)
+
+  const at = (text: string) => verdict(text, sourced.dir)
+  const refused = /traz "(?:\[skip ci\]|\[ci skip\]|skip-checks: true)"/
+
+  it.each([
+    ['cherry-pick of a subject', () => `git cherry-pick ${sha.subject}`],
+    ['cherry-pick of a body', () => `git cherry-pick ${sha.body}`],
+    ['cherry-pick of the trailer', () => `git cherry-pick -x ${sha.trailer}`],
+    [
+      'cherry-pick of a clean commit and one that is not',
+      () => `git cherry-pick ${sha.clean} ${sha.subject}`,
+    ],
+    [
+      'cherry-pick of a range',
+      () => `git cherry-pick ${sha.base}..${sha.subject}`,
+    ],
+    ['revert of a subject', () => `git revert --no-edit ${sha.subject}`],
+    ['am of a patch', () => `git am ${patch.subject}`],
+    [
+      'am of a patch with the string in its body',
+      () => `git am -3 ${patch.body}`,
+    ],
+    ['am reading the patch on stdin', () => `git am < ${patch.subject}`],
+    ['commit -C', () => `git commit -C ${sha.subject}`],
+    ['commit -c', () => `git commit -c ${sha.body}`],
+    [
+      'commit --reuse-message=',
+      () => `git commit --reuse-message=${sha.trailer}`,
+    ],
+    [
+      'commit --reedit-message',
+      () => `git commit --reedit-message ${sha.subject}`,
+    ],
+    ['commit --fixup of a subject', () => `git commit --fixup=${sha.subject}`],
+    [
+      'commit --fixup=amend: of a body',
+      () => `git commit --fixup=amend:${sha.body}`,
+    ],
+    [
+      'commit --squash of a subject',
+      () => `git commit --squash ${sha.subject}`,
+    ],
+    [
+      'commit --amend --no-edit of a HEAD that has one',
+      () => 'git commit --amend --no-edit',
+    ],
+    // git's parse-options takes an unambiguous abbreviation.
+    [
+      'commit --amen --no-edit, which git reads as --amend',
+      () => 'git commit --amen --no-edit',
+    ],
+  ])('denies %s that carries a skip string', (_, text) => {
+    const decision = at(text())
+    expect(decision.decision).toBe('deny')
+    expect(decision.reason).toMatch(refused)
+  })
+
+  it.each([
+    ['cherry-pick of a clean commit', () => `git cherry-pick ${sha.clean}`],
+    [
+      'cherry-pick of a clean range',
+      () => `git cherry-pick ${sha.base}..${sha.clean}`,
+    ],
+    // git revert keeps the subject alone.
+    [
+      'revert of a commit with the string in its body only',
+      () => `git revert ${sha.body}`,
+    ],
+    ['am of a clean patch', () => `git am ${patch.clean}`],
+    ['commit -C of a clean commit', () => `git commit -C ${sha.clean}`],
+    // --fixup and --squash copy the subject alone.
+    ['commit --fixup of a body', () => `git commit --fixup ${sha.body}`],
+    ['commit --squash of a body', () => `git commit --squash=${sha.body} -m x`],
+    [
+      'commit --amend with a new message',
+      () => 'git commit --amend -m "Limpo"',
+    ],
+    ['cherry-pick --continue', () => 'git cherry-pick --continue'],
+    ['am --abort', () => 'git am --abort'],
+  ])('passes %s', (_, text) => {
+    expect(at(text())).toEqual({ decision: 'pass' })
+  })
+
+  it.each([
+    ['a revision behind an expansion', 'git cherry-pick "$SHA"'],
+    ['a revision git does not know', 'git cherry-pick naoexiste123'],
+    ['a revert of a substitution', 'git revert "$(git rev-parse HEAD)"'],
+    ['a patch that is not there', 'git am /nao/existe.patch'],
+    ['a patch read from a pipe', 'cat x.patch | git am'],
+    ['commit -C behind an expansion', 'git commit -C "$REV"'],
+  ])('asks, not critical, for %s', (_, text) => {
+    expect(at(text)).toMatchObject({ decision: 'ask', critical: false })
+  })
+
+  it('asks for a cherry-pick whose commits an option picks: they are not the revisions it names', () => {
+    // Every commit of every branch that is not on main, the skip strings
+    // among them; the hook would read only `^main`, which names none.
+    expect(at('git cherry-pick --all ^main')).toMatchObject({
+      decision: 'ask',
+      critical: false,
+      reason: expect.stringMatching(/a opção --all escolhe commits/) as string,
+    })
+  })
+
+  it('asks for a revision behind an expansion, even one git would take for a name', async () => {
+    // A branch named `$LIMPO`, on a clean commit: git would read the word as
+    // the hook sees it, but the shell hands git the variable's value.
+    await sourced.git('branch', '-f', '$LIMPO', sha.clean)
+    for (const text of ['git cherry-pick "$LIMPO"', 'git revert "$LIMPO"'])
+      expect(at(text)).toMatchObject({
+        decision: 'ask',
+        critical: false,
+        reason: expect.stringMatching(
+          /a revisão "\$LIMPO" não pôde ser lida/,
+        ) as string,
+      })
+  })
+
+  it('reads the copied messages without the command’s -c, which could make the read run a program', () => {
+    // A -c naming a promisor remote: git would fetch the commit it lacks
+    // from it, and the ext:: transport runs any program. The read asks
+    // instead, and runs nothing.
+    const marker = path.join(sourced.root, 'buscou')
+    const text = `git -c remote.lazy.promisor=true -c remote.lazy.url='ext::touch ${marker}' -c protocol.ext.allow=always cherry-pick ${'1'.repeat(40)}`
+    expect(at(text)).toMatchObject({ decision: 'ask', critical: false })
+    expect(existsSync(marker)).toBe(false)
+  })
+
+  it('follows the -c that decides which commit a name points at', async () => {
+    // A replace ref shows the clean commit in place of the one with a skip
+    // string in its subject: git cherry-pick copies the clean message, unless
+    // core.useReplaceRefs=false makes it copy the original's.
+    await sourced.git('replace', '-f', sha.subject, sha.clean)
+    try {
+      expect(at(`git cherry-pick ${sha.subject}`)).toEqual({ decision: 'pass' })
+      for (const decision of [
+        at(`git -c core.useReplaceRefs=false cherry-pick ${sha.subject}`),
+        // The same, set by an earlier `git config` of the line.
+        verdict(`git cherry-pick ${sha.subject}`, sourced.dir, {
+          lineConfig: [{ pair: 'core.useReplaceRefs=false', known: true }],
+        }),
+      ]) {
+        expect(decision.decision).toBe('deny')
+        expect(decision.reason).toMatch(refused)
+      }
+      expect(
+        at(`git -c core.useReplaceRefs="$V" revert ${sha.subject}`),
+      ).toMatchObject({ decision: 'ask', critical: false })
+    } finally {
+      await sourced.git('replace', '-d', sha.subject)
+    }
+  })
+
+  it('passes a cherry-pick in another repository, reading nothing', () => {
+    const { decision } = judge('git cherry-pick "$SHA"', elsewhere.dir)
+    expect(decision.decision).toBe('pass')
+  })
+
+  describe('patches as git am reads them', () => {
+    const mail = (headers: string, body: string) =>
+      `From 1111111111111111111111111111111111111111 Mon Sep 17 00:00:00 2001\nFrom: Hooks Spec <hooks-spec@example.invalid>\nDate: Sat, 26 Sep 2026 10:00:00 -0300\n${headers}\n\n${body}`
+    const diff =
+      'diff --git a/x.md b/x.md\n--- a/x.md\n+++ b/x.md\n@@ -1 +1 @@\n-a\n+b\n'
+
+    beforeAll(() => {
+      sourced.write(
+        {
+          'qp.patch': mail(
+            'Subject: [PATCH] Limpo\nContent-Transfer-Encoding: quoted-printable',
+            'Corpo com =5Bskip ci=5D, codificado.\n---\n x.md | 2 +-\n\n' +
+              diff,
+          ),
+          'b64.patch': mail(
+            'Subject: [PATCH] Limpo\nContent-Transfer-Encoding: base64',
+            `${Buffer.from(`Corpo.\n\n${skipChecksTrailer}\n---\n${diff}`).toString('base64')}\n`,
+          ),
+          'word.patch': mail(
+            'Subject: [PATCH] =?UTF-8?q?Corre=C3=A7=C3=A3o_=5Bno_ci=5D?=',
+            `Corpo.\n---\n${diff}`,
+          ),
+          'folded.patch': mail(
+            'Subject: [PATCH] Um assunto longo que o format-patch dobra [skip\n ci] no meio',
+            `Corpo.\n---\n${diff}`,
+          ),
+          'two.patch': `${mail('Subject: [PATCH 1/2] Limpo', `Corpo.\n---\n${diff}`)}\n${mail('Subject: [PATCH 2/2] Outro', `Corpo com [actions skip].\n---\n${diff}`)}`,
+          // The diff may mention a skip string: it is no part of the message.
+          'in-diff.patch': mail(
+            'Subject: [PATCH] Documentar os tokens',
+            'Corpo.\n---\ndiff --git a/AGENTS.md b/AGENTS.md\n--- a/AGENTS.md\n+++ b/AGENTS.md\n@@ -1 +1 @@\n-a\n+Nunca escreva [skip ci].\n',
+          ),
+          'multi.patch': mail(
+            'Subject: [PATCH] Limpo\nContent-Type: multipart/mixed; boundary="x"',
+            '--x\nContent-Type: text/plain\n\nCorpo.\n--x--\n',
+          ),
+        },
+        path.join(sourced.root, 'mail'),
+      )
+    }, setupTimeout)
+
+    const mailbox = (name: string) =>
+      path.join(sourced.root, 'mail', `${name}.patch`)
+
+    it.each([
+      ['a quoted-printable body', 'qp'],
+      ['a base64 body with the trailer', 'b64'],
+      ['a subject in a MIME encoded word', 'word'],
+      ['a folded subject', 'folded'],
+      ['the second message of a mailbox', 'two'],
+    ])('denies %s', (_, name) => {
+      const decision = at(`git am ${mailbox(name)}`)
+      expect(decision.decision).toBe('deny')
+      expect(decision.reason).toMatch(/a mensagem do patch que o git am aplica/)
+    })
+
+    it('passes a patch whose diff, not its message, mentions a skip string', () => {
+      expect(at(`git am ${mailbox('in-diff')}`)).toEqual({ decision: 'pass' })
+    })
+
+    it('asks, not critical, for a multipart message it does not read', () => {
+      expect(at(`git am ${mailbox('multi')}`)).toMatchObject({
+        decision: 'ask',
+        critical: false,
+      })
+    })
   })
 })
 

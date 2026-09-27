@@ -695,12 +695,34 @@ describe('gh pr create', () => {
     expectDeny(await judge('gh pr create -t T'), /precisa de um corpo/)
   })
 
-  it('asks for --web', async () => {
-    expectAsk(await judge('gh pr create --web'), { reason: /--web/ })
+  it.each([
+    ['--web', 'gh pr create --web', /--web/],
+    ['-w with a body', 'gh pr create -w -t T -b "Closes #5."', /--web/],
+    ['--editor', 'gh pr create --editor', /editor/],
+    ['-e', 'gh pr create -e -t T', /editor/],
+  ])(
+    'asks, critical, for %s: the body is written after the hook, where it cannot look (Copilot review of #26)',
+    async (_, text, reason) => {
+      expectAsk(await judge(text), { critical: true, reason })
+    },
+  )
+
+  it('keeps a deny beside --web', async () => {
+    expectDeny(
+      await judge('gh pr create --web -t "Hooks [skip ci]"'),
+      /o título da PR traz/,
+    )
+    expectDeny(
+      await judge('gh pr create --web', { repo: project('claude/x') }),
+      /"claude\/x" não é uma/,
+    )
   })
 
-  it('asks when the body cannot be read', async () => {
+  it('asks, not critical, when the body cannot be read', async () => {
     expectAsk(await judge('gh pr create -t T -F /nao/existe.md'), {
+      reason: /não consegui ler o corpo da PR/,
+    })
+    expectAsk(await judge('gh pr create -t T -b "$CORPO"'), {
       reason: /não consegui ler o corpo da PR/,
     })
   })
@@ -1609,11 +1631,13 @@ describe('githubClient against the strict fake', () => {
 
   it('documents each call as gh api graphql with its variables', () => {
     expect(Object.keys(gh.githubCalls).sort()).toEqual([
+      'issueComments',
       'issueState',
       'prByHead',
       'prByNumber',
       'threadLastAuthor',
       'viewer',
+      'viewerIssues',
     ])
     expect(
       gh
@@ -1630,6 +1654,70 @@ describe('githubClient against the strict fake', () => {
       'number=3',
     ])
   })
+
+  fakeTest(
+    'reads an issue’s newest comments and the account’s newest issues, for plan-to-issue (Copilot review of #26)',
+    async ({ fake }) => {
+      const f = fake({
+        comments: {
+          5: {
+            comments: [
+              {
+                body: '# Plano',
+                createdAt: '2026-09-26T10:00:00Z',
+                viewerDidAuthor: true,
+              },
+            ],
+          },
+        },
+        viewerIssues: {
+          issues: [
+            {
+              number: 30,
+              createdAt: '2026-09-26T11:00:00Z',
+              title: 'Uma coisa',
+              body: '## Contexto',
+              repo: 'geazioliveira/marketo-sandbox',
+              labels: ['enhancement'],
+            },
+          ],
+        },
+      })
+      const client = gh.githubClient({ env: f.env }) as Github & {
+        issueComments(repo: string, n: number): Read<unknown>
+        viewerIssues(): Read<unknown>
+      }
+      expect(client.issueComments(PROJECT, 5)).toEqual({
+        ok: true,
+        value: [
+          {
+            body: '# Plano',
+            createdAt: '2026-09-26T10:00:00Z',
+            viewerDidAuthor: true,
+          },
+        ],
+      })
+      expect(client.viewerIssues()).toEqual({
+        ok: true,
+        value: [
+          {
+            number: 30,
+            createdAt: '2026-09-26T11:00:00Z',
+            title: 'Uma coisa',
+            body: '## Contexto',
+            repo: 'geazioliveira/marketo-sandbox',
+            labels: ['enhancement'],
+          },
+        ],
+      })
+      const [owner, name] = PROJECT.split('/')
+      expect(f.calls().map((call) => call.argv)).toEqual([
+        gh.githubCallArgv('issueComments', { owner, name, number: 5 }),
+        gh.githubCallArgv('viewerIssues'),
+      ])
+      expect(f.calls().filter((call) => call.violation)).toEqual([])
+    },
+  )
 
   fakeTest('reads a partial page of labels as incomplete', async ({ fake }) => {
     const f = fake({

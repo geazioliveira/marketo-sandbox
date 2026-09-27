@@ -1,5 +1,6 @@
 import { readdirSync, readFileSync } from 'node:fs'
 import path from 'node:path'
+import { loadHookLib } from '../support/hooks'
 import { projectRoot } from '../support/temp-repo'
 
 // .claude/settings.json is what turns the hooks on (#5). A hook left out of
@@ -67,7 +68,11 @@ describe('.claude/settings.json (#5)', () => {
   it.each([
     ['PreToolUse', 'Bash|Monitor|mcp__terminal__run_in_terminal', 'guard-bash'],
     ['PreToolUse', 'Edit|Write|NotebookEdit', 'build-guard'],
-    ['PostToolUse', 'ExitPlanMode|Bash', 'plan-to-issue'],
+    [
+      'PostToolUse',
+      'ExitPlanMode|Bash|Monitor|mcp__terminal__run_in_terminal',
+      'plan-to-issue',
+    ],
     ['SessionStart', null, 'session-context'],
     ['UserPromptSubmit', null, 'session-context'],
   ])('runs on %s, matching %s, the %s hook', (event, matcher, name) => {
@@ -78,6 +83,57 @@ describe('.claude/settings.json (#5)', () => {
 
   it('registers nothing else', () => {
     expect(registered).toHaveLength(5)
+  })
+
+  it('publishes a plan through every tool guard-bash guards (Copilot review of #26)', () => {
+    const matcherOf = (name: string) =>
+      new Set(
+        registered
+          .filter((entry) => entry.name === name)
+          .flatMap((entry) => (entry.matcher ?? '').split('|')),
+      )
+    const guarded = matcherOf('guard-bash')
+    const publishing = matcherOf('plan-to-issue')
+    for (const tool of guarded) expect(publishing).toContain(tool)
+  })
+
+  it('gives each hook that reads git or GitHub a budget well below its timeout (Copilot review of #26)', async () => {
+    // Claude Code kills a hook past its timeout and runs the tool call
+    // undecided; the budget ends the run first, with room for Node to start
+    // and for the answer to be printed.
+    const budget = await loadHookLib<{
+      hookBudgetsMs: Record<string, number>
+    }>('budget')
+    const margin = 10_000
+    const names = Object.keys(budget.hookBudgetsMs).sort()
+    expect(names).toEqual(['build-guard', 'guard-bash', 'plan-to-issue'])
+    for (const name of names) {
+      const timeouts = registered
+        .filter((entry) => entry.name === name)
+        .map((entry) => entry.hook.timeout ?? 0)
+      expect(timeouts.length).toBeGreaterThan(0)
+      for (const timeout of timeouts)
+        expect(budget.hookBudgetsMs[name] + margin).toBeLessThanOrEqual(
+          timeout * 1000,
+        )
+    }
+  })
+
+  it('lets the environment lower a budget, never raise it past its timeout (Copilot review of #26)', async () => {
+    // The margin above holds only for the budget shipped: a variable left in
+    // Claude Code's environment must not stretch a run past the kill.
+    const budget = await loadHookLib<{
+      budgetVariable: string
+      hookBudgetsMs: Record<string, number>
+      startBudget: (name: string, env: Record<string, string>) => number
+    }>('budget')
+    for (const [name, own] of Object.entries(budget.hookBudgetsMs)) {
+      const run = (value: string) =>
+        budget.startBudget(name, { [budget.budgetVariable]: value })
+      expect(run(String(own * 10))).toBe(own)
+      expect(run('1000')).toBe(1000)
+      for (const unread of ['0', '-5', 'x', '']) expect(run(unread)).toBe(own)
+    }
   })
 
   it('denies what the plan of #5 denies, and allows nothing', () => {

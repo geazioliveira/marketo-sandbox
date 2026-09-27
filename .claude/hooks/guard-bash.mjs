@@ -11,24 +11,32 @@
 // with `>` that a later command reads as a body.
 //
 // What the parser cannot see through is covered in two ways. A script handed
-// to `sh`, `find -exec` or `watch` is read and judged like the line; a
-// program whose name is an expansion, or a shell reading a pipe, asks when
-// the line mentions gh or git. And a tripwire looks at the programs that run
+// to `sh`, `find -exec` or `watch` is read and judged like the line; a shell
+// reading a pipe asks when the line mentions gh or git; a program whose name
+// is an expansion is judged as each program the rules know, gh, git and a
+// shell, and anything one of them would refuse asks, critical, since the
+// program is not known. And a tripwire looks at the programs that run
 // text of their own (`node -e`, an alias, a sourced file): next to a file
 // only the loop writes, or next to a label, the Approve or a mutation when the
 // program can start a process or reach the network, it asks a person to
 // look. A command line that cannot be read whole, and mentions gh or git,
 // asks as well. Plain writes to the files only the loop writes (the gate's
 // cache, the plan marker, the owner's escape hatch) are refused, and to the
-// harness they ask. What such a program writes is not known, so after one, a
-// file the line reads (a body, a script) is unknown unless the line itself
-// wrote it afterwards.
+// harness they ask, in this project (any clone or worktree of it) or where
+// the hook cannot tell the repository. What such a program writes is not
+// known, so after one, a file the line reads (a body, a script) is unknown
+// unless the line itself wrote it afterwards.
+//
+// The run has one time budget (lib/budget.mjs), shared by every git and gh
+// it starts: past it, the line asks, critical, before Claude Code would kill
+// the hook and let the line run undecided.
 //
 // The libraries are imported inside the try, not at the top: a module that
 // fails to load would end the process with exit 1, which Claude Code reads
 // as a non-blocking error and lets the command through. When io.mjs itself
 // cannot load, there is no JSON to print, so the hook exits 2, which blocks.
 import { existsSync, readFileSync, statSync } from 'node:fs'
+import { homedir } from 'node:os'
 import path from 'node:path'
 
 /**
@@ -460,7 +468,7 @@ function writesUnseen(command) {
  */
 function sensitiveNames({ loop, gh }) {
   return {
-    files: [loop.gateCacheFile, loop.planPendingPrefix, 'settings.local.json'],
+    files: [loop.gateCacheFile, loop.planPendingPrefix, settingsLocal],
     actions: [
       ...loop.stateLabels,
       headingWords(loop.approveHeading),
@@ -1101,14 +1109,48 @@ function writesOf(command, cwd, state) {
   return writes
 }
 
+/** The owner's escape hatch, by name: Claude Code's local settings file. */
+const settingsLocal = 'settings.local.json'
+
+/**
+ * The directories whose settings.local.json Claude Code may read for every
+ * session, this project's included, whatever repository holds them: the
+ * user's own (~/.claude, or CLAUDE_CONFIG_DIR). Compared without case, as
+ * macOS's default file system compares names.
+ */
+function userSettingsDirs() {
+  const dirs = [path.join(homedir(), '.claude')]
+  const configured = process.env.CLAUDE_CONFIG_DIR
+  if (typeof configured === 'string' && configured !== '')
+    dirs.push(path.resolve(configured))
+  return dirs
+}
+
+const isUserSettings = (file, { realPathOf }) => {
+  const dir = realPathOf(path.dirname(file)).toLowerCase()
+  return userSettingsDirs().some(
+    (candidate) =>
+      realPathOf(candidate).toLowerCase() === dir ||
+      path.resolve(candidate).toLowerCase() ===
+        path.dirname(file).toLowerCase(),
+  )
+}
+
 /**
  * A write to a file the loop keeps: the owner's escape hatch and the files
  * only the gate and the hooks write are refused; the harness asks, as an
- * edit of it does in build-guard. A path that holds an expansion is judged
- * by the names it spells.
+ * edit of it does in build-guard.
+ *
+ * The names are this project's files (Copilot review of #26): they are
+ * refused where the write lands in this project, any clone or worktree of it,
+ * and where the hook cannot tell (a path or a cwd that holds an expansion,
+ * a git that fails), judged then by the names the path spells. Another
+ * repository's, or a directory under none, are not the loop's. The user's
+ * own settings.local.json stays refused wherever it lies: Claude Code may
+ * read it for every session, and the current rule refused it.
  */
 function protectedWrite(write, cwd, cwdKnown, repoOf, libs) {
-  const { io, loop, repo: repoLib } = libs
+  const { io, loop, repo: repoLib, budget } = libs
   const spelled = write.word.value
   const file = write.word.known && cwdKnown ? path.resolve(cwd, spelled) : null
   const name = file === null ? spelled : path.basename(file)
@@ -1116,16 +1158,27 @@ function protectedWrite(write, cwd, cwdKnown, repoOf, libs) {
     file === null
       ? (candidate) => spelled.includes(candidate)
       : (candidate) => name === candidate
-  if (names('settings.local.json'))
-    return io.deny(
-      `o comando escreve em ${spelled}: .claude/settings.local.json é a saída de emergência do dono`,
-    )
-  if (
+  const hatch = names(settingsLocal)
+  const loopFile =
     names(loop.gateCacheFile) ||
     (file === null
       ? spelled.includes(loop.planPendingPrefix)
       : name.startsWith(loop.planPendingPrefix))
-  )
+  let ours = true
+  if (file !== null && (hatch || loopFile))
+    try {
+      const owner = repoOf(repoLib.existingDirOf(file))
+      ours = owner != null && repoLib.isProject(owner)
+    } catch (error) {
+      // git could not say whose file it is: judged by its name.
+      if (error instanceof budget.BudgetExhausted) throw error
+      ours = true
+    }
+  if (hatch && (ours || isUserSettings(file, repoLib)))
+    return io.deny(
+      `o comando escreve em ${spelled}: .claude/settings.local.json é a saída de emergência do dono`,
+    )
+  if (loopFile && ours)
     return io.deny(
       `o comando mexe em ${spelled}, que só o gate e os hooks escrevem: rode npm run gate, e publique o plano numa issue para o marcador sair`,
     )
@@ -1190,7 +1243,7 @@ function placeOfWrite(spelled, file, repoOf, { io, repo: repoLib }) {
   if (relative === null) return null
   const holds = (inner) =>
     relative === '' || inner === relative || inner.startsWith(`${relative}/`)
-  if (holds('.claude/settings.local.json') && relative !== '')
+  if (holds(`.claude/${settingsLocal}`) && relative !== '')
     return io.deny(
       `o comando mexe em ${spelled}, que contém .claude/settings.local.json, a saída de emergência do dono`,
     )
@@ -1298,6 +1351,66 @@ function shellInput(command) {
       known: command.known?.[k] !== false,
     }
   return { kind: 'stdin' }
+}
+
+/**
+ * The script operand of a shell's `-c`, as { value, known }, or null: the
+ * first operand after the options, as bash and sh take it. For a program the
+ * hook could not name, read as a shell; shell.mjs reads the ones it names.
+ */
+function inlineScript(command) {
+  const argv = command.argv.map(String)
+  let k = 1
+  let inline = false
+  while (k < argv.length) {
+    const arg = argv[k]
+    if (arg === '--' || arg === '-') {
+      k += 1
+      break
+    }
+    if (arg.startsWith('--')) {
+      k += arg === '--rcfile' || arg === '--init-file' ? 2 : 1
+      continue
+    }
+    if ((arg.startsWith('-') || arg.startsWith('+')) && arg.length > 1) {
+      if (arg.includes('c')) inline = true
+      k += /[oO]/.test(arg) ? 2 : 1
+      continue
+    }
+    break
+  }
+  if (!inline || k >= argv.length) return null
+  return { value: argv[k], known: command.known?.[k] !== false }
+}
+
+/**
+ * The programs a command whose program the hook cannot name is judged as:
+ * each one the rules know. `sh` stands for every shell.
+ */
+const unresolvedAs = ['gh', 'git', 'sh']
+
+/**
+ * A copy of what the line left so far, for a reading of a command that may
+ * not run as read: what it would leave is thrown away with the copy. The
+ * cache of git's config answers is shared, since it holds only answers.
+ */
+function cloneState(from) {
+  return {
+    ...from,
+    exported: { ...from.exported },
+    heads: new Map(from.heads),
+    lineConfig: [...from.lineConfig],
+    ghAliases: new Map(from.ghAliases),
+    written: new Map(from.written),
+    remotes: new Map(
+      [...from.remotes].map(([key, seen]) => [
+        key,
+        { ...seen, repos: [...seen.repos] },
+      ]),
+    ),
+    evaluators: [...from.evaluators],
+    opaque: [...from.opaque],
+  }
 }
 
 /** Programs whose run under find -exec may remove or write the files it finds. */
@@ -1437,7 +1550,7 @@ function baseDirOf(input, toolInput) {
 const maxDepth = 6
 
 async function decide(input, libs) {
-  const { io, shell, gh, git, repo } = libs
+  const { io, shell, gh, git, repo, budget } = libs
   const toolInput =
     input.tool_input !== null && typeof input.tool_input === 'object'
       ? input.tool_input
@@ -1446,6 +1559,7 @@ async function decide(input, libs) {
   if (typeof text !== 'string') return io.pass()
   const base = baseDirOf(input, toolInput)
   const parsed = shell.parseCommand(text)
+  budget.startBudget('guard-bash')
   const github = gh.githubClient()
 
   // One repoAt per directory, and only when a rule asks for it: `gh issue
@@ -1456,8 +1570,9 @@ async function decide(input, libs) {
     return repos.get(dir)
   }
 
-  // What the commands already judged leave for the ones after them.
-  const state = {
+  // What the commands already judged leave for the ones after them. A
+  // program the hook cannot name is judged on copies of it (judgeUnresolved).
+  let state = {
     exported: {},
     heads: new Map(),
     headsLost: false,
@@ -1559,6 +1674,215 @@ async function decide(input, libs) {
     return decisions
   }
 
+  /**
+   * What a command's program does, judged by its name: gh and git by their
+   * rules, a shell, find and watch by the commands they run.
+   */
+  const judgeProgram = async (command, cwd, cwdKnown, depth) => {
+    const decisions = []
+    const env = { ...process.env, ...command.env }
+    const program = programOf(command)
+
+    const gitCtx = {
+      cwd,
+      cwdKnown,
+      env: process.env,
+      repoAt: (dir) => adjust(repoOf(dir)),
+      lineConfig: state.lineConfig,
+      files,
+      cache: state.cache,
+    }
+
+    state.evaluators.push(...evaluatorsOf(command, gitCtx, libs, state))
+    if (program === 'git') {
+      decisions.push(git.gitDecision(command, gitCtx))
+      const change = git.headChangeOf(command, gitCtx)
+      if (change !== null) {
+        const moved = change.dirKnown ? repoOf(change.dir) : null
+        if (!change.dirKnown) state.headsLost = true
+        else if (moved != null) state.heads.set(moved.gitDir, change.head)
+      }
+      state.lineConfig.push(...git.configSetBy(command, gitCtx))
+      const remote = git.remoteChangeOf(command, gitCtx)
+      if (remote !== null) recordRemote(remote)
+    } else if (program === 'gh') {
+      // gh finds its repository through git, so GIT_DIR moves it too.
+      const gitDir = env.GIT_DIR
+      const dirKnown = cwdKnown && !/[$`]/.test(gitDir ?? '')
+      const where = gitDir ? path.resolve(cwd, gitDir) : cwd
+      const ctx = {
+        cwd,
+        cwdKnown: dirKnown,
+        permissionMode: input.permission_mode,
+        github,
+        env: process.env,
+        files,
+        ghAliases: state.ghAliases,
+        judgeOther: async (other, otherCtx) =>
+          io.combine(
+            await judge(
+              { ...other, cwd: null },
+              otherCtx.cwd,
+              otherCtx.cwdKnown !== false,
+              depth + 1,
+            ),
+          ),
+      }
+      Object.defineProperty(ctx, 'repo', {
+        enumerable: true,
+        get: () => withRemotes(adjust(repoOf(where))),
+      })
+      decisions.push(await gh.ghDecision(command, ctx))
+      for (const [name, expansion] of gh.ghAliasDefinitions(command, ctx))
+        state.ghAliases.set(name, expansion)
+      if (gh.ghMovesHead(command, ctx)) {
+        const moved = dirKnown ? repoOf(where) : null
+        if (moved == null) state.headsLost = true
+        else state.heads.set(moved.gitDir, { known: false, branch: null })
+      }
+    } else if (shells.has(program)) {
+      const script = shellInput(command)
+      if (script.kind === 'inline') {
+        // shell.mjs reads the `-c` script of a shell it can name; for a
+        // program it could not name, judged as a shell, it is read here.
+        const inline =
+          command.unresolved === true ? inlineScript(command) : null
+        if (inline?.known)
+          decisions.push(
+            ...(await parseScript(inline.value, cwd, cwdKnown, depth)),
+          )
+        else if (inline !== null && mentionsGhOrGit(text))
+          decisions.push(
+            io.ask(
+              `não consegui ler o script que o ${program} roda: confira que ele não roda um gh ou um git que o hook nega`,
+            ),
+          )
+      } else if (
+        script.kind === 'file' ||
+        (script.kind === 'stdin' && command.stdinFile)
+      ) {
+        const spelled =
+          script.kind === 'file' ? script.value : command.stdinFile
+        const read =
+          (script.kind === 'file' && !script.known) || !cwdKnown
+            ? unknownText
+            : fileText(path.resolve(cwd, spelled), state)
+        if (read.known)
+          decisions.push(
+            ...(await parseScript(read.text, cwd, cwdKnown, depth)),
+          )
+        else {
+          state.opaque.push(`${program} ${spelled}`)
+          if (mentionsGhOrGit(text))
+            decisions.push(
+              io.ask(
+                `não consegui ler o script que o ${program} roda (${spelled}): confira que ele não roda um gh ou um git que o hook nega`,
+              ),
+            )
+        }
+      } else if (script.kind === 'stdin' && command.stdin === null) {
+        state.opaque.push(`${program} lendo um pipe`)
+        if (mentionsGhOrGit(text))
+          decisions.push(
+            io.ask(
+              `o ${program} roda o que chega pelo pipe, que o hook não lê: confira que não é um gh ou um git que o hook nega`,
+            ),
+          )
+      } else if (script.kind === 'stdin' && command.unresolved === true) {
+        // A heredoc or a here-string: shell.mjs reads it for a shell it can
+        // name; here it is the script of a program it could not.
+        if (command.stdinKnown !== false)
+          decisions.push(
+            ...(await parseScript(command.stdin, cwd, cwdKnown, depth)),
+          )
+        else if (mentionsGhOrGit(text))
+          decisions.push(
+            io.ask(
+              `não consegui ler o script que o ${program} lê do stdin: confira que ele não roda um gh ou um git que o hook nega`,
+            ),
+          )
+      }
+    } else if (program === 'find') {
+      for (const script of findScripts(command))
+        decisions.push(
+          ...(await parseScript(
+            script.text,
+            cwd,
+            cwdKnown && !script.elsewhere,
+            depth,
+          )),
+        )
+    } else if (program === 'watch') {
+      decisions.push(
+        ...(await parseScript(watchScript(command), cwd, cwdKnown, depth)),
+      )
+    } else if (program === 'parallel') {
+      state.opaque.push('parallel')
+      if (mentionsGhOrGit(text))
+        decisions.push(
+          io.ask(
+            'o parallel monta comandos que o hook não lê: confira que não é um gh ou um git que o hook nega',
+          ),
+        )
+    }
+    return decisions
+  }
+
+  /**
+   * A program whose name is an expansion the hook cannot read (`$CMD`,
+   * `"$(command -v gh)"`; Copilot review of #26) is judged as each program
+   * the rules know: gh, git, and a shell running its words (`$SH -c …`, a
+   * script file, a heredoc). Evaluators (`node -e`) are the tripwire's, which
+   * counts such a program as able to do anything. Each reading runs on a copy
+   * of what the line left so far, since which one runs is not known. The
+   * worst reading wins, but the program is uncertain: a deny or a critical
+   * ask becomes a critical ask, which the autonomous modes refuse; a plain
+   * ask stays plain; when every reading passes, the command passes.
+   */
+  const judgeUnresolved = async (command, cwd, cwdKnown, depth) => {
+    const saved = state
+    const readings = []
+    for (const program of unresolvedAs) {
+      state = cloneState(saved)
+      try {
+        const candidate = {
+          ...command,
+          argv: [program, ...command.argv.slice(1)],
+          known: command.argv.map(
+            (_, index) => index === 0 || command.known?.[index] !== false,
+          ),
+          unresolved: true,
+        }
+        readings.push({
+          program,
+          decision: io.combine(
+            await judgeProgram(candidate, cwd, cwdKnown, depth),
+          ),
+        })
+      } finally {
+        state = saved
+      }
+    }
+    const worst = io.combine(readings.map((reading) => reading.decision))
+    if (worst.decision === 'pass') return io.pass()
+    const level = (decision) =>
+      decision.decision === 'deny'
+        ? 3
+        : decision.decision === 'ask'
+          ? decision.critical === true
+            ? 2
+            : 1
+          : 0
+    const top = level(worst)
+    const reasons = readings
+      .filter((reading) => level(reading.decision) === top)
+      .map((reading) => `como ${reading.program}: ${reading.decision.reason}`)
+    return io.ask(
+      `não consegui ler o programa que o comando roda em "${command.argv[0]}", e ele pode ser um dos que o hook confere (${reasons.join('; ')}): confira que não é`,
+      { critical: top >= 2 },
+    )
+  }
+
   const judge = async (original, base, baseKnown, depth) => {
     if (depth > maxDepth)
       return [
@@ -1576,133 +1900,12 @@ async function decide(input, libs) {
       ...original,
       env: { ...state.exported, ...original.env },
     })
-    const env = { ...process.env, ...command.env }
-    const program = programOf(command)
-    const known0 = command.known?.[0] !== false
 
-    const gitCtx = {
-      cwd,
-      cwdKnown,
-      env: process.env,
-      repoAt: (dir) => adjust(repoOf(dir)),
-      lineConfig: state.lineConfig,
-      files,
-      cache: state.cache,
-    }
-
-    if (!known0) {
+    if (command.known?.[0] === false) {
       state.opaque.push(command.argv[0])
-      if (mentionsGhOrGit(text))
-        decisions.push(
-          io.ask(
-            `não consegui ler o programa que o comando roda em "${command.argv[0]}": confira que não é um gh ou um git que o hook nega`,
-          ),
-        )
+      decisions.push(await judgeUnresolved(command, cwd, cwdKnown, depth))
     } else {
-      state.evaluators.push(...evaluatorsOf(command, gitCtx, libs, state))
-      if (program === 'git') {
-        decisions.push(git.gitDecision(command, gitCtx))
-        const change = git.headChangeOf(command, gitCtx)
-        if (change !== null) {
-          const moved = change.dirKnown ? repoOf(change.dir) : null
-          if (!change.dirKnown) state.headsLost = true
-          else if (moved != null) state.heads.set(moved.gitDir, change.head)
-        }
-        state.lineConfig.push(...git.configSetBy(command, gitCtx))
-        const remote = git.remoteChangeOf(command, gitCtx)
-        if (remote !== null) recordRemote(remote)
-      } else if (program === 'gh') {
-        // gh finds its repository through git, so GIT_DIR moves it too.
-        const gitDir = env.GIT_DIR
-        const dirKnown = cwdKnown && !/[$`]/.test(gitDir ?? '')
-        const where = gitDir ? path.resolve(cwd, gitDir) : cwd
-        const ctx = {
-          cwd,
-          cwdKnown: dirKnown,
-          permissionMode: input.permission_mode,
-          github,
-          env: process.env,
-          files,
-          ghAliases: state.ghAliases,
-          judgeOther: async (other, otherCtx) =>
-            io.combine(
-              await judge(
-                { ...other, cwd: null },
-                otherCtx.cwd,
-                otherCtx.cwdKnown !== false,
-                depth + 1,
-              ),
-            ),
-        }
-        Object.defineProperty(ctx, 'repo', {
-          enumerable: true,
-          get: () => withRemotes(adjust(repoOf(where))),
-        })
-        decisions.push(await gh.ghDecision(command, ctx))
-        for (const [name, expansion] of gh.ghAliasDefinitions(command, ctx))
-          state.ghAliases.set(name, expansion)
-        if (gh.ghMovesHead(command, ctx)) {
-          const moved = dirKnown ? repoOf(where) : null
-          if (moved == null) state.headsLost = true
-          else state.heads.set(moved.gitDir, { known: false, branch: null })
-        }
-      } else if (shells.has(program)) {
-        const script = shellInput(command)
-        if (
-          script.kind === 'file' ||
-          (script.kind === 'stdin' && command.stdinFile)
-        ) {
-          const spelled =
-            script.kind === 'file' ? script.value : command.stdinFile
-          const read =
-            (script.kind === 'file' && !script.known) || !cwdKnown
-              ? unknownText
-              : fileText(path.resolve(cwd, spelled), state)
-          if (read.known)
-            decisions.push(
-              ...(await parseScript(read.text, cwd, cwdKnown, depth)),
-            )
-          else {
-            state.opaque.push(`${program} ${spelled}`)
-            if (mentionsGhOrGit(text))
-              decisions.push(
-                io.ask(
-                  `não consegui ler o script que o ${program} roda (${spelled}): confira que ele não roda um gh ou um git que o hook nega`,
-                ),
-              )
-          }
-        } else if (script.kind === 'stdin' && command.stdin === null) {
-          state.opaque.push(`${program} lendo um pipe`)
-          if (mentionsGhOrGit(text))
-            decisions.push(
-              io.ask(
-                `o ${program} roda o que chega pelo pipe, que o hook não lê: confira que não é um gh ou um git que o hook nega`,
-              ),
-            )
-        }
-      } else if (program === 'find') {
-        for (const script of findScripts(command))
-          decisions.push(
-            ...(await parseScript(
-              script.text,
-              cwd,
-              cwdKnown && !script.elsewhere,
-              depth,
-            )),
-          )
-      } else if (program === 'watch') {
-        decisions.push(
-          ...(await parseScript(watchScript(command), cwd, cwdKnown, depth)),
-        )
-      } else if (program === 'parallel') {
-        state.opaque.push('parallel')
-        if (mentionsGhOrGit(text))
-          decisions.push(
-            io.ask(
-              'o parallel monta comandos que o hook não lê: confira que não é um gh ou um git que o hook nega',
-            ),
-          )
-      }
+      decisions.push(...(await judgeProgram(command, cwd, cwdKnown, depth)))
       recordExports(command, state)
     }
 
@@ -1715,39 +1918,52 @@ async function decide(input, libs) {
     return decisions
   }
 
-  // A substitution runs before the command that holds it, but is judged
-  // after the line's own commands: so a program that may write files unseen
-  // anywhere on the line makes the files the line did not write unknown
-  // from the start.
-  if (parsed.commands.some(writesUnseen)) state.untracked = true
+  /** Judges every command of the line, in order, into `decisions`. */
+  const judgeLine = async (decisions) => {
+    // A substitution runs before the command that holds it, but is judged
+    // after the line's own commands: so a program that may write files unseen
+    // anywhere on the line makes the files the line did not write unknown
+    // from the start.
+    if (parsed.commands.some(writesUnseen)) state.untracked = true
 
-  // The same for the remotes: a git inside a substitution or a `bash -c` is
-  // listed after the gh commands it may run before. When a git that changes
-  // the remotes is listed after a gh, that gh cannot read its repository
-  // from the disk.
-  const firstGh = parsed.commands.findIndex(
-    (command) => programOf(command) === 'gh',
-  )
-  if (
-    firstGh >= 0 &&
-    parsed.commands.slice(firstGh + 1).some(
-      (command) =>
-        programOf(command) === 'git' &&
-        command.known?.[0] !== false &&
-        git.remoteChangeOf(command, {
-          cwd: path.resolve(base, command.cwd ?? '.'),
-          cwdKnown: false,
-          env: process.env,
-          lineConfig: [],
-          cache: state.cache,
-        }) !== null,
+    // The same for the remotes: a git inside a substitution or a `bash -c` is
+    // listed after the gh commands it may run before. When a git that changes
+    // the remotes is listed after a gh, that gh cannot read its repository
+    // from the disk.
+    const firstGh = parsed.commands.findIndex(
+      (command) => programOf(command) === 'gh',
     )
-  )
-    state.remotesLost = true
+    if (
+      firstGh >= 0 &&
+      parsed.commands.slice(firstGh + 1).some(
+        (command) =>
+          programOf(command) === 'git' &&
+          command.known?.[0] !== false &&
+          git.remoteChangeOf(command, {
+            cwd: path.resolve(base, command.cwd ?? '.'),
+            cwdKnown: false,
+            env: process.env,
+            lineConfig: [],
+            cache: state.cache,
+          }) !== null,
+      )
+    )
+      state.remotesLost = true
 
+    for (const command of parsed.commands)
+      decisions.push(...(await judge(command, base, true, 0)))
+  }
+
+  // A budget spent halfway keeps what the commands judged so far decided: a
+  // deny among them still wins over the budget's critical ask.
   const decisions = []
-  for (const command of parsed.commands)
-    decisions.push(...(await judge(command, base, true, 0)))
+  try {
+    await judgeLine(decisions)
+  } catch (error) {
+    if (!(error instanceof budget.BudgetExhausted)) throw error
+    decisions.push(io.ask(error.message, { critical: true }))
+    return io.combine(decisions)
+  }
 
   // A program the hook does not read, and an evaluator found only in the
   // raw text of a line that did not parse, count as able to do anything.
@@ -1773,19 +1989,20 @@ async function decide(input, libs) {
 let io = null
 try {
   io = await import('./lib/io.mjs')
-  const [shell, gh, git, repo, loop] = await Promise.all([
+  const [shell, gh, git, repo, loop, budget] = await Promise.all([
     import('./lib/shell.mjs'),
     import('./lib/gh-rules.mjs'),
     import('./lib/git-rules.mjs'),
     import('./lib/repo.mjs'),
     import('../../scripts/loop-sections.mjs'),
+    import('./lib/budget.mjs'),
   ])
   const input = await io.readInput()
   const decision =
     input === null
       ? io.deny('a entrada do hook não pôde ser lida')
       : io.resolve(
-          await decide(input, { io, shell, gh, git, repo, loop }),
+          await decide(input, { io, shell, gh, git, repo, loop, budget }),
           input.permission_mode,
         )
   process.stdout.write(io.preToolUseOutput(decision))

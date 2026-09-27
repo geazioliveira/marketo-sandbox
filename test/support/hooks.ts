@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import {
   chmodSync,
   existsSync,
@@ -114,6 +114,33 @@ export function spawnWith(
     )
     child.stdin.end(input ?? '')
   })
+}
+
+/** The git the machine has, for a shim that wraps it. */
+export function realGit(): string {
+  const found = spawnSync('sh', ['-c', 'command -v git'], {
+    encoding: 'utf8',
+  }).stdout.trim()
+  if (!path.isAbsolute(found)) throw new Error('git não está no PATH')
+  return found
+}
+
+/**
+ * A directory holding a `git` that runs `before` in sh and then the real git
+ * with the same arguments, to put first on a hook's PATH. A `before` that
+ * stands for a hung git should `exec sleep`: a sleep started as a child
+ * would keep the hook's pipe open after the hook killed the shim.
+ */
+export function gitShim(dir: string, before: string): string {
+  const bin = path.join(dir, 'shim-bin')
+  mkdirSync(bin, { recursive: true })
+  const git = `'${realGit().replaceAll("'", `'\\''`)}'`
+  writeFileSync(
+    path.join(bin, 'git'),
+    `#!/bin/sh\n${before}\nexec ${git} "$@"\n`,
+  )
+  chmodSync(path.join(bin, 'git'), 0o755)
+  return bin
 }
 
 let sharedRoot: string | null = null

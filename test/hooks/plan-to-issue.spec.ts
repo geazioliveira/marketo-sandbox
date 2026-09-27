@@ -1266,6 +1266,305 @@ describe.concurrent(
   },
 )
 
+/**
+ * The input after a Monitor or mcp__terminal__run_in_terminal call: the same
+ * command as Bash, a response that may hold no stdout of gh's (Monitor starts
+ * the command in the background; run_in_terminal runs it in the person's
+ * terminal), and run_in_terminal's own cwd.
+ */
+function otherTool(
+  repo: HookRepo,
+  tool: 'Monitor' | 'mcp__terminal__run_in_terminal',
+  command: string,
+  response: unknown,
+  {
+    toolInput = {},
+    cwd = repo.dir,
+    env,
+  }: {
+    toolInput?: Record<string, unknown>
+    cwd?: string
+    env?: NodeJS.ProcessEnv
+  } = {},
+): Promise<HookRun> {
+  return repo.run(
+    'plan-to-issue',
+    {
+      session_id: SESSION,
+      transcript_path: path.join(repo.root, 'transcript.jsonl'),
+      cwd,
+      permission_mode: 'auto',
+      hook_event_name: 'PostToolUse',
+      tool_name: tool,
+      tool_input: { command, description: 'Publicar o plano', ...toolInput },
+      tool_response: response,
+    },
+    { env },
+  )
+}
+
+/** An instant after the marker a spec just wrote: GitHub's clock, as ISO. */
+const later = () => new Date(Date.now() + 60_000).toISOString()
+const earlier = () => new Date(Date.now() - 3_600_000).toISOString()
+
+describe.concurrent(
+  'plan-to-issue on Monitor and run_in_terminal (Copilot review of #26)',
+  () => {
+    const comment = 'gh issue comment 5 --body-file plano.md'
+
+    test('a # Plano comment of the account, after the marker, read live on the issue, removes it', async ({
+      fresh,
+      expect,
+    }) => {
+      const repo = await pending(fresh)
+      repo.write({ 'plano.md': planComment })
+      repo.setFixture({
+        comments: {
+          5: {
+            comments: [
+              { body: 'Antes.', createdAt: earlier(), viewerDidAuthor: true },
+              { body: planComment, createdAt: later(), viewerDidAuthor: true },
+            ],
+          },
+        },
+      })
+      const run = await otherTool(repo, 'Monitor', comment, {
+        taskId: 'b1',
+        status: 'running',
+      })
+      expect(run.status).toBe(0)
+      expect(existsSync(repo.markerPath(SESSION))).toBe(false)
+      expect(contextOf(run)).toContain('plano publicado na issue #5')
+      expect(contextOf(run)).toContain('o marcador foi removido')
+      expect(repo.calls()).toEqual([
+        expect.objectContaining({ call: 'issueComments', key: '5' }),
+      ])
+    })
+
+    test('the issue URL in the response counts as on Bash, with no live read', async ({
+      fresh,
+      expect,
+    }) => {
+      const repo = await pending(fresh)
+      mkdirSync(path.join(repo.dir, 'docs'))
+      repo.write({ 'docs/plano.md': planComment })
+      const run = await otherTool(
+        repo,
+        'mcp__terminal__run_in_terminal',
+        comment,
+        `${ISSUE_URL}/5#issuecomment-9\n`,
+        { toolInput: { cwd: 'docs' } },
+      )
+      expect(existsSync(repo.markerPath(SESSION))).toBe(false)
+      expect(contextOf(run)).toContain(`plano publicado em ${ISSUE_URL}/5`)
+      expect(repo.calls()).toEqual([])
+    })
+
+    test('gh issue create, read live among the account’s newest issues', async ({
+      fresh,
+      expect,
+    }) => {
+      const repo = await pending(fresh)
+      repo.write({ 'issue.md': sectionsOf(featureSections) })
+      repo.setFixture({
+        viewerIssues: {
+          issues: [
+            {
+              number: 30,
+              createdAt: later(),
+              title: 'Uma coisa',
+              body: sectionsOf(featureSections),
+              repo: 'geazioliveira/marketo-sandbox',
+              labels: ['enhancement', TO],
+            },
+          ],
+        },
+      })
+      const run = await otherTool(
+        repo,
+        'mcp__terminal__run_in_terminal',
+        `gh issue create --title 'Uma coisa' --label enhancement,${TO} --body-file issue.md`,
+        'Comando enviado ao terminal.',
+      )
+      expect(existsSync(repo.markerPath(SESSION))).toBe(false)
+      expect(contextOf(run)).toContain('plano publicado na issue #30')
+      expect(repo.calls()).toEqual([
+        expect.objectContaining({ call: 'viewerIssues' }),
+      ])
+    })
+
+    test.for([
+      [
+        'a # Plano comment from before the marker',
+        { body: planComment, createdAt: earlier(), viewerDidAuthor: true },
+      ],
+      [
+        'a # Plano comment of another account',
+        { body: planComment, createdAt: later(), viewerDidAuthor: false },
+      ],
+      [
+        'a comment that does not open with # Plano',
+        {
+          body: `Resumo.\n\n${planComment}`,
+          createdAt: later(),
+          viewerDidAuthor: true,
+        },
+      ],
+    ] as const)(
+      'keeps the marker for %s, and says so',
+      async ([, found], { fresh, expect }) => {
+        const repo = await pending(fresh)
+        repo.write({ 'plano.md': planComment })
+        repo.setFixture({ comments: { 5: { comments: [found] } } })
+        const run = await otherTool(repo, 'Monitor', comment, { taskId: 'b2' })
+        expect(existsSync(repo.markerPath(SESSION))).toBe(true)
+        expect(contextOf(run)).toContain('o marcador continua')
+        expect(contextOf(run)).toContain('#5')
+      },
+    )
+
+    test('keeps the marker when the live read fails, and says so', async ({
+      fresh,
+      expect,
+    }) => {
+      const repo = await pending(fresh)
+      repo.write({ 'plano.md': planComment })
+      repo.setFixture({ comments: { 5: { mode: 'fail', comments: [] } } })
+      const run = await otherTool(repo, 'Monitor', comment, { taskId: 'b3' })
+      expect(existsSync(repo.markerPath(SESSION))).toBe(true)
+      expect(contextOf(run)).toContain('não consegui confirmar no GitHub')
+      expect(contextOf(run)).toContain('o marcador continua')
+    })
+
+    test.for([
+      ['created before the marker', () => ({ createdAt: earlier() })],
+      ['in another repository', () => ({ repo: 'alguem/outro' })],
+      ['under another title', () => ({ title: 'Outra coisa' })],
+      [
+        'without the plan’s sections',
+        () => ({ body: 'Só um resumo, sem as seções.' }),
+      ],
+    ] as const)(
+      'keeps the marker for gh issue create when the account’s one new issue is %s',
+      async ([, change], { fresh, expect }) => {
+        const repo = await pending(fresh)
+        repo.write({ 'issue.md': sectionsOf(featureSections) })
+        repo.setFixture({
+          viewerIssues: {
+            issues: [
+              {
+                number: 30,
+                createdAt: later(),
+                title: 'Uma coisa',
+                body: sectionsOf(featureSections),
+                repo: 'geazioliveira/marketo-sandbox',
+                labels: ['enhancement'],
+                ...change(),
+              },
+            ],
+          },
+        })
+        const run = await otherTool(
+          repo,
+          'Monitor',
+          `gh issue create -t 'Uma coisa' -l enhancement -F issue.md`,
+          { taskId: 'b4' },
+        )
+        expect(existsSync(repo.markerPath(SESSION))).toBe(true)
+        expect(contextOf(run)).toContain('o marcador continua')
+      },
+    )
+
+    test('removes it for that same issue, as it is', async ({
+      fresh,
+      expect,
+    }) => {
+      // The control of the cases above: each differs from this one issue in
+      // one field only.
+      const repo = await pending(fresh)
+      repo.write({ 'issue.md': sectionsOf(featureSections) })
+      repo.setFixture({
+        viewerIssues: {
+          issues: [
+            {
+              number: 30,
+              createdAt: later(),
+              title: 'Uma coisa',
+              body: sectionsOf(featureSections),
+              repo: 'geazioliveira/marketo-sandbox',
+              labels: ['enhancement'],
+            },
+          ],
+        },
+      })
+      const run = await otherTool(
+        repo,
+        'Monitor',
+        `gh issue create -t 'Uma coisa' -l enhancement -F issue.md`,
+        { taskId: 'b4' },
+      )
+      expect(existsSync(repo.markerPath(SESSION))).toBe(false)
+      expect(contextOf(run)).toContain('plano publicado na issue #30')
+    })
+
+    test('a body it cannot read is read on GitHub instead', async ({
+      fresh,
+      expect,
+    }) => {
+      // Through Monitor, `--body "$PLANO"` may well be the plan: the comment
+      // GitHub holds decides.
+      const repo = await pending(fresh)
+      repo.setFixture({
+        comments: {
+          5: {
+            comments: [
+              { body: planComment, createdAt: later(), viewerDidAuthor: true },
+            ],
+          },
+        },
+      })
+      const run = await otherTool(
+        repo,
+        'Monitor',
+        'gh issue comment 5 --body "$PLANO"',
+        { taskId: 'b5' },
+      )
+      expect(existsSync(repo.markerPath(SESSION))).toBe(false)
+      expect(contextOf(run)).toContain('plano publicado na issue #5')
+      expect(repo.calls()).toEqual([
+        expect.objectContaining({ call: 'issueComments', key: '5' }),
+      ])
+    })
+
+    test('answers with the budget’s reason when GitHub is too slow for it, and keeps the marker', async ({
+      fresh,
+      expect,
+    }) => {
+      const repo = await pending(fresh)
+      repo.write({ 'plano.md': planComment })
+      repo.setFixture({ comments: { 5: { mode: 'slow', comments: [] } } })
+      const run = await otherTool(
+        repo,
+        'Monitor',
+        comment,
+        { taskId: 'b6' },
+        {
+          env: repo.env({
+            LOOP_HOOKS_BUDGET_MS: '2000',
+            LOOP_HOOKS_GH_TIMEOUT_MS: '8000',
+            FAKE_GH_SLOW_MS: '60000',
+          }),
+        },
+      )
+      expect(existsSync(repo.markerPath(SESSION))).toBe(true)
+      expect(contextOf(run)).toContain('o prazo de 2 s do hook acabou')
+      expect(contextOf(run)).toContain(
+        'O marcador do plano pendente continua como estava',
+      )
+    })
+  },
+)
+
 describe.concurrent('plan-to-issue: input it cannot use', () => {
   test('input that is not a JSON object exits 0 and prints nothing', async ({
     fresh,

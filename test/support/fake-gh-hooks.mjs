@@ -17,6 +17,8 @@
 //     threads?: { [id]: Answer & { lastAuthor: string | null } },
 //     prs?:     { [number]: Answer & { pr: Pr } },
 //     heads?:   { [branch]: Answer & { prs: Pr[] } },
+//     comments?: { [number]: Answer & { comments: [{ body, createdAt, viewerDidAuthor }] } },
+//     viewerIssues?: Answer & { issues: [{ number, createdAt, title, body, repo, labels: string[] }] },
 //   }
 //   Answer = { mode?: 'ok' | 'fail' | 'slow' }   ok by default; fail exits 1;
 //            slow sleeps FAKE_GH_SLOW_MS (default 20000) before answering,
@@ -55,6 +57,16 @@ const calls = {
   prByHead: {
     variables: ['owner', 'name', 'head'],
     query: `query($owner: String!, $name: String!, $head: String!) { repository(owner: $owner, name: $name) { pullRequests(headRefName: $head, states: [OPEN], first: 2) { totalCount nodes { ${prFields} } } } }`,
+  },
+  issueComments: {
+    variables: ['owner', 'name', 'number'],
+    query:
+      'query($owner: String!, $name: String!, $number: Int!) { repository(owner: $owner, name: $name) { issue(number: $number) { comments(last: 100) { nodes { body createdAt viewerDidAuthor } } } } }',
+  },
+  viewerIssues: {
+    variables: [],
+    query:
+      'query { viewer { issues(last: 20, orderBy: { field: CREATED_AT, direction: ASC }) { nodes { number createdAt title body repository { nameWithOwner } labels(first: 100) { nodes { name } } } } } }',
   },
 }
 
@@ -196,6 +208,45 @@ function answerFor(fixture, name, values) {
         key: values.number,
         entry,
         data: { repository: { pullRequest: prNode(entry.pr) } },
+      }
+    )
+  }
+  if (name === 'issueComments') {
+    const entry = fixture.comments?.[values.number]
+    return (
+      entry && {
+        key: values.number,
+        entry,
+        data: {
+          repository: {
+            issue: { comments: { nodes: entry.comments ?? [] } },
+          },
+        },
+      }
+    )
+  }
+  if (name === 'viewerIssues') {
+    const entry = fixture.viewerIssues
+    return (
+      entry && {
+        key: 'viewer',
+        entry,
+        data: {
+          viewer: {
+            issues: {
+              nodes: (entry.issues ?? []).map((issue) => ({
+                number: issue.number,
+                createdAt: issue.createdAt,
+                title: issue.title ?? '',
+                body: issue.body ?? '',
+                repository: { nameWithOwner: issue.repo },
+                labels: {
+                  nodes: (issue.labels ?? []).map((label) => ({ name: label })),
+                },
+              })),
+            },
+          },
+        },
       }
     )
   }

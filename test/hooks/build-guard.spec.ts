@@ -1,6 +1,4 @@
-import { spawnSync } from 'node:child_process'
 import {
-  chmodSync,
   copyFileSync,
   mkdirSync,
   mkdtempSync,
@@ -19,6 +17,7 @@ import {
   planPendingFile,
 } from '../../scripts/loop-sections.mjs'
 import {
+  gitShim,
   type HookRepo,
   hookRepo,
   type HookRepoOptions,
@@ -180,31 +179,6 @@ function openCache(headSha: string): string {
   })}\n`
 }
 
-/** The git the machine has, for a shim that wraps it. */
-function realGit(): string {
-  const found = spawnSync('sh', ['-c', 'command -v git'], {
-    encoding: 'utf8',
-  }).stdout.trim()
-  if (!path.isAbsolute(found)) throw new Error('git não está no PATH')
-  return found
-}
-
-/**
- * A directory holding a `git` that runs `before` in sh and then the real git
- * with the same arguments, to put first on the hook's PATH.
- */
-function gitShim(dir: string, before: string): string {
-  const bin = path.join(dir, 'shim-bin')
-  mkdirSync(bin, { recursive: true })
-  const git = `'${realGit().replaceAll("'", `'\\''`)}'`
-  writeFileSync(
-    path.join(bin, 'git'),
-    `#!/bin/sh\n${before}\nexec ${git} "$@"\n`,
-  )
-  chmodSync(path.join(bin, 'git'), 0o755)
-  return bin
-}
-
 /** The repository's environment with a shim directory first on PATH. */
 function withShim(
   repo: HookRepo,
@@ -315,7 +289,7 @@ describe.concurrent('the input', () => {
     )
   })
 
-  test('denies when git is too slow for the budget of the run', async ({
+  test('asks, critical, when git is too slow for the budget of the run, and denies it in auto (Copilot review of #26)', async ({
     expect,
     fresh,
     scratch,
@@ -324,19 +298,63 @@ describe.concurrent('the input', () => {
     await repo.commit({ '.gitignore': 'dist/\n' }, 'Ignore')
     const bin = gitShim(scratch(), 'sleep 0.3')
     const call = toolCall(`${repo.dir}/dist/a.js`)
-    const late = verdict(
-      await repo.run('build-guard', call, {
-        env: withShim(repo, bin, { LOOP_HOOKS_BUILD_GUARD_BUDGET_MS: '100' }),
-      }),
+    const env = withShim(repo, bin, { LOOP_HOOKS_BUDGET_MS: '100' })
+    const late = verdict(await repo.run('build-guard', call, { env }))
+    expect(late.decision).toBe('ask')
+    expect(late.reason).toContain('o prazo de 0.1 s do hook acabou')
+    const auto = verdict(
+      await repo.run(
+        'build-guard',
+        toolCall(`${repo.dir}/dist/a.js`, { mode: 'auto' }),
+        {
+          env,
+        },
+      ),
     )
-    expect(late.decision).toBe('deny')
-    expect(late.reason).toContain('o prazo de 0.1 s acabou')
+    expect(auto.decision).toBe('deny')
+    expect(auto.reason).toContain('Em auto, a confirmação vira negação')
     // The same slow git within the budget: the ignored file passes.
     const inTime = verdict(
       await repo.run('build-guard', call, { env: withShim(repo, bin) }),
     )
     expect(inTime.decision).toBe('pass')
   })
+
+  // A git that hangs past its own 10 s: the budget, not git's timeout, ends
+  // it, whichever git it is (Copilot review of #26). Read as a git that
+  // failed, the run would answer something else, and seconds later.
+  test.for([
+    [
+      'the reads of the repository',
+      'exec sleep 15',
+      'antes de ler o repositório de',
+    ],
+    [
+      'the read of the .gitignore',
+      'for arg in "$@"; do [ "$arg" = check-ignore ] && exec sleep 15; done',
+      'antes de conferir o .gitignore',
+    ],
+  ] as const)(
+    'ends %s, hung, when the budget runs out',
+    async ([, before, step], { expect, fresh, scratch }) => {
+      const repo = await fresh({ branch: BRANCH })
+      await repo.commit({ '.gitignore': 'dist/\n' }, 'Ignore')
+      const env = withShim(repo, gitShim(scratch(), before), {
+        LOOP_HOOKS_BUDGET_MS: '3000',
+      })
+      const run = verdict(
+        await repo.run(
+          'build-guard',
+          toolCall(`${repo.dir}/dist/a.js`, { mode: 'auto' }),
+          { env },
+        ),
+      )
+      expect(run.decision).toBe('deny')
+      expect(run.reason).toContain('o prazo de 3 s do hook acabou')
+      expect(run.reason).toContain(step)
+      expect(run.reason).toContain('Em auto, a confirmação vira negação')
+    },
+  )
 
   test('denies a gate state the guard does not know', async ({
     expect,
@@ -349,7 +367,7 @@ describe.concurrent('the input', () => {
     const hooks = path.join(root, '.claude', 'hooks')
     mkdirSync(path.join(hooks, 'lib'), { recursive: true })
     copyFileSync(hookPath('build-guard'), path.join(hooks, 'build-guard.mjs'))
-    for (const lib of ['io.mjs', 'repo.mjs'])
+    for (const lib of ['io.mjs', 'repo.mjs', 'budget.mjs'])
       copyFileSync(
         path.join(hooksDir, 'lib', lib),
         path.join(hooks, 'lib', lib),

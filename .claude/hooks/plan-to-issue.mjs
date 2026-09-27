@@ -1,5 +1,5 @@
-// PostToolUse ExitPlanMode|Bash (#5): a plan accepted in plan mode is
-// pending until it is posted on an issue.
+// PostToolUse ExitPlanMode|Bash|Monitor|mcp__terminal__run_in_terminal (#5):
+// a plan accepted in plan mode is pending until it is posted on an issue.
 //
 // Accepting a plan in Claude Code's plan mode feels like an approval, and
 // that is the trap: the Approve is the owner's comment on the issue, and a
@@ -23,6 +23,16 @@
 // leads to, and the worktree there, whose branch names the issue and whose
 // repository holds the marker and the caches.
 //
+// guard-bash lets a gh run through Monitor and the terminal panel's
+// mcp__terminal__run_in_terminal too, and neither need return gh's output:
+// Monitor starts the command in the background, and the terminal runs it
+// where the hook cannot read. There, with no URL of gh's in the response,
+// the hook asks GitHub itself (Copilot review of #26): the issue must hold a
+// comment of the account's, created after the plan was accepted, that opens
+// exactly with `# Plano` (for `gh issue create`, a new issue of the
+// account's in this project, with the plan's sections). No evidence, no
+// removal: the marker stays and the hook says why.
+//
 // The publication also removes the gate's cache in every worktree of the
 // repository: a cache was written before this plan, and the Approve it read
 // is not an Approve of the plan just posted. The marker lives in the common
@@ -30,6 +40,7 @@
 //
 // A PostToolUse hook cannot undo the tool call, so it never blocks: it
 // writes or removes the marker and tells the agent what it did.
+import { readFileSync, statSync } from 'node:fs'
 import path from 'node:path'
 import {
   agentPlanLabelTransition,
@@ -42,19 +53,30 @@ import {
   kindOf,
   sectionsFor,
 } from '../../scripts/loop-sections.mjs'
+import { BudgetExhausted, startBudget } from './lib/budget.mjs'
+import { githubClient } from './lib/gh-rules.mjs'
 import { autonomousModes, contextOutput, readInput } from './lib/io.mjs'
 import {
   clearGateCaches,
   clearPendingPlan,
   isProject,
   pendingPlanExists,
+  pendingPlanPath,
   projectRepo,
   repoAt,
   writePendingPlan,
 } from './lib/repo.mjs'
-import { optionValues, parseCommand, readBody } from './lib/shell.mjs'
+import {
+  findOptions,
+  optionValues,
+  parseCommand,
+  readBody,
+} from './lib/shell.mjs'
 
 const event = 'PostToolUse'
+
+/** The tools that run a command line: the ones guard-bash guards. */
+const commandTools = ['Bash', 'Monitor', 'mcp__terminal__run_in_terminal']
 
 /** How much of the plan the marker keeps: enough to tell two plans apart. */
 const planHeadLength = 300
@@ -251,6 +273,7 @@ function judgeBody(command, kind, baseCwd) {
   if (!body.known || typeof body.text !== 'string')
     return {
       counts: false,
+      unread: body.source !== 'none',
       note:
         body.source === 'none' && kind === 'comment'
           ? null
@@ -258,8 +281,17 @@ function judgeBody(command, kind, baseCwd) {
     }
   if (kind === 'comment')
     return { counts: commentOpening(body.text) === 'plan', note: null }
+  return planCounts(body.text, labelsOf(command))
+}
 
-  const { kind: labelKind, found } = kindOf(labelsOf(command))
+/**
+ * Whether an issue's body counts as the plan, by its category labels: no
+ * required section missing for its kind; with no category label either kind
+ * will do, and with both it counts as neither.
+ * @returns {{ counts: boolean, note: string | null }}
+ */
+function planCounts(text, labels) {
+  const { kind: labelKind, found } = kindOf(labels)
   if (found.length > 1)
     return {
       counts: false,
@@ -268,7 +300,7 @@ function judgeBody(command, kind, baseCwd) {
   const kinds = labelKind === null ? [featureKind, bugKind] : [labelKind]
   const results = kinds.map((candidate) => ({
     candidate,
-    missing: checkSections(body.text, candidate).missing,
+    missing: checkSections(text, candidate).missing,
   }))
   if (results.some((result) => result.missing.length === 0))
     return { counts: true, note: null }
@@ -293,6 +325,100 @@ function issueUrls(toolResponse) {
     url: match[0].trim(),
     issue: Number(match[1]),
   }))
+}
+
+/**
+ * When the session's plan was accepted, in ms: the newest `acceptedAt` of
+ * its markers (or the file's time, for a marker that does not say), null
+ * when none can be read.
+ */
+function acceptedTime(commonDirs, sessionId) {
+  let latest = null
+  for (const dir of commonDirs) {
+    const file = pendingPlanPath(dir, sessionId)
+    let at = Number.NaN
+    try {
+      at = Date.parse(JSON.parse(readFileSync(file, 'utf8')).acceptedAt)
+    } catch {
+      // Not JSON, or no acceptedAt: the file's own time.
+    }
+    if (Number.isNaN(at))
+      try {
+        at = statSync(file).mtimeMs
+      } catch {
+        continue
+      }
+    latest = latest === null ? at : Math.max(latest, at)
+  }
+  return latest
+}
+
+/**
+ * GitHub's own word that a publication run where its output is not read
+ * went through (Copilot review of #26): for a comment, one of the account's
+ * on the issue, created after the plan was accepted, opening exactly with
+ * `# Plano`; for a new issue, one of the account's in this project, created
+ * after it, whose body carries the plan's sections (and whose title is the
+ * command's, when the command's can be read). One read-only GraphQL call.
+ * @returns {{ issue: number, evidence: string } | { note: string }}
+ */
+function confirmLive(command, kind, target, since, github) {
+  const text = shortText(command)
+  if (since === null)
+    return {
+      note: `não consegui ler quando o plano foi aceito, para conferir no GitHub que \`${text}\` o publicou depois; o marcador continua: publique-o pelo Bash, cuja saída mostra a URL.`,
+    }
+  if (kind === 'comment') {
+    const read = github.issueComments(projectRepo, target.issue)
+    if (!read.ok)
+      return {
+        note: `não consegui confirmar no GitHub que \`${text}\` publicou o plano na #${target.issue} (${read.reason}); o marcador continua: publique-o pelo Bash, cuja saída mostra a URL.`,
+      }
+    const posted = read.value.some(
+      (comment) =>
+        comment.viewerDidAuthor &&
+        Date.parse(comment.createdAt) > since &&
+        commentOpening(comment.body) === 'plan',
+    )
+    return posted
+      ? {
+          issue: target.issue,
+          evidence:
+            'um comentário seu que abre com # Plano, de depois do plano aceito',
+        }
+      : {
+          note: `\`${text}\` publicaria o plano, mas o GitHub não mostra na #${target.issue} um comentário seu que abra com # Plano, de depois do plano aceito; o marcador continua. Pelo Monitor ou pelo terminal, o comando pode não ter terminado: confira, e publique pelo Bash se preciso.`,
+        }
+  }
+  const read = github.viewerIssues()
+  if (!read.ok)
+    return {
+      note: `não consegui confirmar no GitHub que \`${text}\` criou a issue do plano (${read.reason}); o marcador continua: publique-o pelo Bash, cuja saída mostra a URL.`,
+    }
+  const titles = findOptions(command.argv, ['-t', '--title'])
+  const title = titles.at(-1)
+  const titleKnown = title !== undefined && isKnown(command, title.index)
+  const created = read.value
+    .filter(
+      (issue) =>
+        isProject(issue.repo) &&
+        Date.parse(issue.createdAt) > since &&
+        (!titleKnown || issue.title === title.value) &&
+        planCounts(
+          issue.body,
+          issue.labels.map((label) => label.toLowerCase()),
+        ).counts,
+    )
+    .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))
+  return created.length > 0
+    ? {
+        issue: created[0].number,
+        evidence:
+          'uma issue sua neste projeto, com as seções do plano, criada depois do plano aceito',
+      }
+    : {
+        note: `\`${text}\` publicaria o plano, mas o GitHub não mostra uma issue sua neste projeto, criada depois do plano aceito, com as seções do plano${titleKnown ? ` e o título "${title.value}"` : ''}; o marcador continua. Pelo Monitor ou pelo terminal, o comando pode não ter terminado: confira, e publique pelo Bash se preciso.`,
+      }
 }
 
 function acceptedPlan(input) {
@@ -326,7 +452,7 @@ const pendingText = (branchIssue) =>
       : `- num comentário cuja primeira linha é exatamente # Plano, na #${branchIssue}, a issue desta branch.`,
     `Seções obrigatórias de uma feature (${featureKind}): ${headings(featureSections)}.`,
     `Seções obrigatórias de um bug (${bugKind}): ${headings(bugSections)}.`,
-    `Até a publicação, editar fora de context/intent/ pede confirmação, e em ${autonomousModes.join(', ')} é negado. Só remove o marcador um gh issue comment ou gh issue create sozinho no comando (um cd antes vale), com o gh do PATH, cuja saída mostre a URL da issue. Depois dele, rode npm run gate de novo.`,
+    `Até a publicação, editar fora de context/intent/ pede confirmação, e em ${autonomousModes.join(', ')} é negado. Só remove o marcador um gh issue comment ou gh issue create sozinho no comando (um cd antes vale), com o gh do PATH, cuja saída mostre a URL da issue; pelo Monitor ou pelo terminal, sem essa URL, o hook confere a publicação no GitHub. Depois dela, rode npm run gate de novo.`,
   ].join('\n')
 
 function onExitPlanMode(input, repo, sessionId) {
@@ -343,7 +469,7 @@ function onExitPlanMode(input, repo, sessionId) {
   return pendingText(issueFromBranch(repo.branch))
 }
 
-function onBash(input, baseCwd, sessionId) {
+function onCommand(input, baseCwd, sessionId, { live }) {
   const text = input.tool_input?.command
   if (typeof text !== 'string') return null
   // Parse before asking git anything: this runs after every Bash call, and
@@ -388,6 +514,11 @@ function onBash(input, baseCwd, sessionId) {
         publicationKind(command) !== null || shellMoves.has(command.argv[0]),
     )
   const urls = issueUrls(input.tool_response)
+  let client = null
+  const github = () => {
+    client ??= githubClient()
+    return client
+  }
   const notes = []
   for (const { command, kind, place } of placed) {
     const target = targetOf(command, kind, place)
@@ -425,31 +556,56 @@ function onBash(input, baseCwd, sessionId) {
       )
       continue
     }
-    const { counts, note } = judgeBody(command, kind, baseCwd)
-    if (!counts) {
+    // Through Monitor or the terminal, a body the hook cannot read may
+    // still be the plan: GitHub is asked below.
+    const { counts, note, unread } = judgeBody(command, kind, baseCwd)
+    if (!counts && !(live && unread)) {
       if (note !== null) notes.push(note)
       continue
     }
-    if (parsed.unparsable) {
-      notes.push(
-        `não consegui ler o comando inteiro, e \`${shortText(command)}\` publicaria o plano; o marcador continua: publique-o num comando que se leia inteiro.`,
+    // gh's own word, the URL it printed, counts as it does on Bash.
+    let why = null
+    let shown
+    if (!counts) why = note
+    else if (parsed.unparsable)
+      why = `não consegui ler o comando inteiro, e \`${shortText(command)}\` publicaria o plano; o marcador continua: publique-o num comando que se leia inteiro.`
+    else if (!alone || !ghOfPath(command))
+      why = `\`${shortText(command)}\` publicaria o plano, mas só conta um gh issue comment ou gh issue create sozinho no comando (um cd antes vale), com o gh do PATH: com outro comando na linha, a URL na saída pode não ser do gh, e o corpo lido agora pode não ser o que ele publicou; o marcador continua.`
+    else {
+      shown = urls.find(
+        (found) => kind === 'create' || found.issue === target.issue,
       )
-      continue
+      if (shown === undefined)
+        why = `\`${shortText(command)}\` publicaria o plano, mas a saída não mostra a URL da issue; o marcador continua. Confira se a publicação saiu: só uma publicação que mostre a URL o remove.`
     }
-    if (!alone || !ghOfPath(command)) {
-      notes.push(
-        `\`${shortText(command)}\` publicaria o plano, mas só conta um gh issue comment ou gh issue create sozinho no comando (um cd antes vale), com o gh do PATH: com outro comando na linha, a URL na saída pode não ser do gh, e o corpo lido agora pode não ser o que ele publicou; o marcador continua.`,
-      )
+    let published = null
+    if (shown !== undefined)
+      published = {
+        issue: shown.issue,
+        where: `em ${shown.url}`,
+      }
+    else if (!live) {
+      notes.push(why)
       continue
-    }
-    const shown = urls.find(
-      (found) => kind === 'create' || found.issue === target.issue,
-    )
-    if (shown === undefined) {
-      notes.push(
-        `\`${shortText(command)}\` publicaria o plano, mas a saída não mostra a URL da issue; o marcador continua. Confira se a publicação saiu: só uma publicação que mostre a URL o remove.`,
+    } else {
+      const marks = [place.repo, sessionRepo]
+        .filter((repo) => marked(repo))
+        .map((repo) => repo.commonDir)
+      const confirmed = confirmLive(
+        command,
+        kind,
+        target,
+        acceptedTime([...new Set(marks)], sessionId),
+        github(),
       )
-      continue
+      if (confirmed.note !== undefined) {
+        notes.push(confirmed.note)
+        continue
+      }
+      published = {
+        issue: confirmed.issue,
+        where: `na issue #${confirmed.issue} (conferido no GitHub: ${confirmed.evidence})`,
+      }
     }
     // The spec is silent on the gate's cache; removing it is the restrictive
     // side. It was written before this plan, and until the gate runs again
@@ -467,7 +623,7 @@ function onBash(input, baseCwd, sessionId) {
       clearPendingPlan(commonDir, sessionId)
     const { from, to } = agentPlanLabelTransition
     return [
-      `plano publicado em ${shown.url}; o marcador foi removido. Se a issue estava em ${from}, troque: gh issue edit ${shown.issue} --remove-label ${from} --add-label ${to}`,
+      `plano publicado ${published.where}; o marcador foi removido. Se a issue estava em ${from}, troque: gh issue edit ${published.issue} --remove-label ${from} --add-label ${to}`,
       'Rode npm run gate de novo antes de construir: o cache do gate de cada worktree deste repositório, se havia um, foi removido, porque veio de antes deste plano, que ainda não tem o Approve do dono.',
     ].join('\n')
   }
@@ -481,18 +637,31 @@ async function main() {
   if (input.hook_event_name !== undefined && input.hook_event_name !== event)
     return null
   const tool = input.tool_name
-  if (tool !== 'ExitPlanMode' && tool !== 'Bash') return null
-  const baseCwd = path.resolve(
+  if (tool !== 'ExitPlanMode' && !commandTools.includes(tool)) return null
+  const inputCwd = path.resolve(
     typeof input.cwd === 'string' && input.cwd !== '' ? input.cwd : '.',
   )
+  // run_in_terminal takes a cwd of its own, relative to the session's, as
+  // guard-bash reads it.
+  const ownCwd = input.tool_input?.cwd
+  const baseCwd =
+    tool === 'mcp__terminal__run_in_terminal' &&
+    typeof ownCwd === 'string' &&
+    ownCwd !== ''
+      ? path.resolve(inputCwd, ownCwd)
+      : inputCwd
   const sessionId =
     typeof input.session_id === 'string' ? input.session_id : null
   try {
-    if (tool === 'Bash') return onBash(input, baseCwd, sessionId)
-    const repo = repoAt(baseCwd)
+    startBudget('plan-to-issue')
+    if (tool !== 'ExitPlanMode')
+      return onCommand(input, baseCwd, sessionId, { live: tool !== 'Bash' })
+    const repo = repoAt(inputCwd)
     if (repo === null || !isProject(repo)) return null
     return onExitPlanMode(input, repo, sessionId)
   } catch (error) {
+    if (error instanceof BudgetExhausted)
+      return `${error.message}. O marcador do plano pendente continua como estava: publique o plano pelo Bash, cuja saída mostra a URL.`
     // The tool call already happened and cannot be refused, but a marker
     // that could not be written or checked must not go unnoticed: the agent
     // is told, which is the most this event can restrict.

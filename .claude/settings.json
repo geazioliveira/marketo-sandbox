@@ -24,7 +24,7 @@
     ],
     "PostToolUse": [
       {
-        "matcher": "ExitPlanMode|Bash",
+        "matcher": "ExitPlanMode|Bash|Monitor|mcp__terminal__run_in_terminal",
         "hooks": [
           {
             "type": "command",

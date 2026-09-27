@@ -44,16 +44,12 @@ const discoveryVariable =
   /^GIT_(DIR|WORK_TREE|COMMON_DIR|INDEX_FILE|OBJECT_DIRECTORY|ALTERNATE_OBJECT_DIRECTORIES|CEILING_DIRECTORIES|DISCOVERY_ACROSS_FILESYSTEM|NAMESPACE|PREFIX)$/
 const gitTimeoutMs = 10_000
 
-// Claude Code kills a hook past its timeout (60 s unless settings.json says
-// otherwise), and a killed hook is a non-blocking error: the edit goes
-// through. Each git call is bounded on its own, but a run makes several, so
-// the run as a whole has a budget too, checked before every git call it
-// starts; past it, the hook refuses instead of racing the kill. A repoAt
-// already running when the budget ends can add four git calls, so the hook's
-// timeout in settings.json has to cover the budget plus 40 s. The
-// environment may lower the budget (the specs do), never raise it.
-const budgetMs = 30_000
-const budgetVariable = 'LOOP_HOOKS_BUILD_GUARD_BUDGET_MS'
+// Claude Code kills a hook past its timeout (90 s in settings.json), and a
+// killed hook is a non-blocking error: the edit goes through. Each git call
+// is bounded on its own, but a run makes several, so the run as a whole has
+// a budget too (budget.mjs), shared by every git it starts, repoAt's
+// included: each one's timeout is what is left of it at most. Past it, the
+// hook asks, critical, instead of racing the kill (Copilot review of #26).
 
 /** Links followed while placing one path, as Linux's MAXSYMLINKS. */
 const maxLinks = 40
@@ -63,25 +59,6 @@ function gitEnv() {
   for (const [name, value] of Object.entries(process.env))
     if (!discoveryVariable.test(name)) env[name] = value
   return { ...env, LC_ALL: 'C', GIT_OPTIONAL_LOCKS: '0' }
-}
-
-/** The run's clock: what is left of the budget, and a check that throws past it. */
-function clockOf(env) {
-  const lowered = Number(env[budgetVariable])
-  const budget =
-    Number.isFinite(lowered) && lowered > 0
-      ? Math.min(lowered, budgetMs)
-      : budgetMs
-  const deadline = Date.now() + budget
-  return {
-    remaining: () => deadline - Date.now(),
-    check(step) {
-      if (Date.now() > deadline)
-        throw new Error(
-          `o prazo de ${budget / 1000} s acabou antes de ${step}: o git está lento, tente de novo`,
-        )
-    },
-  }
 }
 
 /**
@@ -110,9 +87,10 @@ function fold(text) {
  * file falls through to the gate. check-ignore reads the index, so a tracked
  * file is never ignored, even when a pattern matches it.
  */
-function isIgnored(top, relative, clock) {
+function isIgnored(top, relative, budget) {
   if (relative === '') return false
-  clock.check('conferir o .gitignore')
+  const step = 'conferir o .gitignore'
+  const timeout = budget.spawnTimeout(gitTimeoutMs, step)
   const run = spawnSync(
     'git',
     [
@@ -129,10 +107,11 @@ function isIgnored(top, relative, clock) {
       encoding: 'utf8',
       env: gitEnv(),
       input: `${relative}\0`,
-      timeout: Math.max(1, Math.min(gitTimeoutMs, clock.remaining())),
+      timeout,
       stdio: ['pipe', 'pipe', 'ignore'],
     },
   )
+  budget.afterSpawn(run, gitTimeoutMs, timeout, step)
   if (run.error !== undefined || run.status !== 0) return false
   // --verbose -z prints source, line, pattern and path, each ended by NUL.
   const [source = '', , pattern = ''] = String(run.stdout ?? '').split('\0')
@@ -325,7 +304,7 @@ function insideWorktree(top, dir, repo) {
 
 /** The decision for one real target path. */
 function judge(target, input, libs) {
-  const { io, repo, loop, repoAt, clock } = libs
+  const { io, repo, loop, repoAt, budget } = libs
   const found = repoAt(repo.existingDirOf(target))
   if (found === null || !repo.isProject(found)) return io.pass()
 
@@ -371,7 +350,7 @@ function judge(target, input, libs) {
   // Claude Code reads its own settings, local and ignored ones included, and
   // the rest of the harness asks even with the gate open. The spec names
   // only .claude/ here; the rest of the harness is the side that restricts.
-  if (!harness && isIgnored(found.top, relative, clock)) return io.pass()
+  if (!harness && isIgnored(found.top, relative, budget)) return io.pass()
 
   switch (status.state) {
     case 'pending-plan':
@@ -412,7 +391,7 @@ function judge(target, input, libs) {
   }
 }
 
-function decide(input, { io, repo, loop }) {
+function decide(input, { io, repo, loop, budget }) {
   const named = namedPaths(input)
   if (named.length === 0)
     return io.deny('a entrada do hook não traz o caminho do arquivo a editar')
@@ -422,40 +401,52 @@ function decide(input, { io, repo, loop }) {
       'o caminho do arquivo é relativo e a entrada não traz o cwd para resolvê-lo',
     )
 
-  const clock = clockOf(process.env)
+  budget.startBudget('build-guard')
   // One repoAt per directory: the places of one call mostly share it, and
   // each costs up to four git runs.
   const known = new Map()
   const repoAt = (dir) => {
     const start = repo.existingDirOf(dir)
     if (!known.has(start)) {
-      clock.check(`ler o repositório de ${start}`)
+      budget.checkBudget(`ler o repositório de ${start}`)
       known.set(start, repo.repoAt(start))
     }
     return known.get(start)
   }
-  const libs = { io, repo, loop, repoAt, realPathOf: repo.realPathOf, clock }
-  return io.combine(
-    targetsOf(named, cwd, repo.realPathOf).map((place) =>
-      place.refusal === undefined
-        ? judge(place.target, input, libs)
-        : io.deny(place.refusal),
-    ),
-  )
+  const libs = { io, repo, loop, repoAt, realPathOf: repo.realPathOf, budget }
+  // A budget spent halfway keeps what the places judged so far decided: a
+  // deny among them still wins over the budget's ask.
+  const decisions = []
+  try {
+    for (const place of targetsOf(named, cwd, repo.realPathOf))
+      decisions.push(
+        place.refusal === undefined
+          ? judge(place.target, input, libs)
+          : io.deny(place.refusal),
+      )
+  } catch (error) {
+    if (!(error instanceof budget.BudgetExhausted)) throw error
+    decisions.push(io.ask(error.message, { critical: true }))
+  }
+  return io.combine(decisions)
 }
 
 let io = null
 try {
   io = await import('./lib/io.mjs')
-  const [repo, loop] = await Promise.all([
+  const [repo, loop, budget] = await Promise.all([
     import('./lib/repo.mjs'),
     import('../../scripts/loop-sections.mjs'),
+    import('./lib/budget.mjs'),
   ])
   const input = await io.readInput()
   const decision =
     input === null
       ? io.deny('a entrada do hook não pôde ser lida')
-      : io.resolve(decide(input, { io, repo, loop }), input.permission_mode)
+      : io.resolve(
+          decide(input, { io, repo, loop, budget }),
+          input.permission_mode,
+        )
   process.stdout.write(io.preToolUseOutput(decision))
 } catch (error) {
   const reason = `o hook falhou: ${error instanceof Error ? error.message : String(error)}`

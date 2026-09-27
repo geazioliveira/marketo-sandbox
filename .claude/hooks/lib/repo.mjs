@@ -22,6 +22,7 @@ import {
   gateCacheFile,
   planPendingFile,
 } from '../../../scripts/loop-sections.mjs'
+import { afterSpawn, spawnTimeout } from './budget.mjs'
 
 export const projectRepo = 'geazioliveira/marketo-sandbox'
 export const trunk = 'main'
@@ -43,7 +44,10 @@ const discoveryVariables = [
   'GIT_PREFIX',
 ]
 
-/** A git hung on a lock or a network mount must not hold the tool call. */
+/**
+ * A git hung on a lock or a network mount must not hold the tool call: each
+ * run is bounded, and so is the hook's run as a whole (budget.mjs).
+ */
 const gitTimeoutMs = 10_000
 
 function gitEnv(env) {
@@ -55,12 +59,15 @@ function gitEnv(env) {
 }
 
 function git(dir, args, env) {
+  const step = `ler o repositório de ${dir}`
+  const timeout = spawnTimeout(gitTimeoutMs, step)
   const run = spawnSync('git', ['-C', dir, ...args], {
     encoding: 'utf8',
     env: gitEnv(env),
-    timeout: gitTimeoutMs,
+    timeout,
     stdio: ['ignore', 'pipe', 'pipe'],
   })
+  afterSpawn(run, gitTimeoutMs, timeout, step)
   if (run.error)
     throw new Error(`git não pôde rodar em ${dir}: ${run.error.message}`)
   return {

@@ -32,6 +32,7 @@ import {
   requiredChecks,
   stateLabels,
 } from '../../../scripts/loop-sections.mjs'
+import { afterSpawn, spawnTimeout } from './budget.mjs'
 import { readSource, skipTokenIn, wordKnown } from './git-rules.mjs'
 import { ask, combine, deny, pass } from './io.mjs'
 import { isProject, projectRepo, repoFromArg, trunk } from './repo.mjs'
@@ -83,6 +84,17 @@ export const githubCalls = Object.freeze({
   prByHead: Object.freeze({
     variables: ['owner', 'name', 'head'],
     query: `query($owner: String!, $name: String!, $head: String!) { repository(owner: $owner, name: $name) { pullRequests(headRefName: $head, states: [OPEN], first: 2) { totalCount nodes { ${prFields} } } } }`,
+  }),
+  // plan-to-issue, for a plan posted through Monitor or the terminal panel,
+  // whose output is not gh's (Copilot review of #26): the issue's newest
+  // comments, and the account's newest issues.
+  issueComments: Object.freeze({
+    variables: ['owner', 'name', 'number'],
+    query: `query($owner: String!, $name: String!, $number: Int!) { repository(owner: $owner, name: $name) { issue(number: $number) { comments(last: ${page}) { nodes { body createdAt viewerDidAuthor } } } } }`,
+  }),
+  viewerIssues: Object.freeze({
+    variables: [],
+    query: `query { viewer { issues(last: 20, orderBy: { field: CREATED_AT, direction: ASC }) { nodes { number createdAt title body repository { nameWithOwner } labels(first: ${page}) { nodes { name } } } } } }`,
   }),
 })
 
@@ -217,8 +229,9 @@ function mergeStateOf(pr) {
 
 /**
  * Live reads through `gh`, each bounded by a timeout (default 6000 ms, env
- * LOOP_HOOKS_GH_TIMEOUT_MS). Each returns { ok: true, value } or
- * { ok: false, reason }, and never throws. gh runs through argv
+ * LOOP_HOOKS_GH_TIMEOUT_MS) and by the run's budget (budget.mjs). Each returns
+ * { ok: true, value } or { ok: false, reason }; the only throw is
+ * BudgetExhausted, which ends the whole run. gh runs through argv
  * (spawnSync), never a shell, with its prompts and update notice off.
  *   .viewer()                   -> login
  *   .issueState(repo, number)   -> { labels, labelsComplete, lastCommentBody }
@@ -226,18 +239,27 @@ function mergeStateOf(pr) {
  *   .prMergeState(repo, prRef)  -> { number, state, headRefOid, checksOk,
  *                                    checksDetail, review, requested,
  *                                    openThreads, pagesComplete, unread }
+ *   .issueComments(repo, number) -> [{ body, createdAt, viewerDidAuthor }],
+ *                                   the newest page
+ *   .viewerIssues()             -> [{ number, createdAt, title, body, repo,
+ *                                    labels }], the account's 20 newest
  * prRef is a PR number, or a branch whose one open PR is read.
  */
 export function githubClient({ env = process.env, timeoutMs } = {}) {
   const limit = timeoutOf(env, timeoutMs)
 
   function graphql(name, values) {
+    // The run's budget (budget.mjs) bounds the read too; when it runs out,
+    // the hook answers for the whole run instead of reading a killed gh as a
+    // failure of this one read.
+    const step = 'ler o GitHub'
+    const timeout = spawnTimeout(limit, step)
     let run
     try {
       run = spawnSync('gh', githubCallArgv(name, values), {
         encoding: 'utf8',
         env: { ...env, GH_PROMPT_DISABLED: '1', GH_NO_UPDATE_NOTIFIER: '1' },
-        timeout: limit,
+        timeout,
         killSignal: 'SIGKILL',
         maxBuffer: 16 * 1024 * 1024,
         stdio: ['ignore', 'pipe', 'pipe'],
@@ -245,6 +267,7 @@ export function githubClient({ env = process.env, timeoutMs } = {}) {
     } catch (error) {
       return failed(`gh não pôde rodar: ${error.message}`)
     }
+    afterSpawn(run, limit, timeout, step)
     if (run.error?.code === 'ENOENT')
       return failed('gh não está instalado ou não está no PATH')
     if (run.error?.code === 'ETIMEDOUT' || run.signal !== null)
@@ -333,6 +356,52 @@ export function githubClient({ env = process.env, timeoutMs } = {}) {
         return failed(`mais de uma PR aberta sai da branch ${prRef}`)
       return mergeStateOf(nodes[0])
     },
+
+    issueComments(repo, number) {
+      if (!Number.isInteger(Number(number)) || Number(number) < 1)
+        return failed(`"${number}" não é número de issue`)
+      const read = graphql('issueComments', {
+        ...splitRepo(repo),
+        number: Number(number),
+      })
+      if (!read.ok) return read
+      const issue = read.value?.repository?.issue
+      if (issue == null) return failed(`a issue #${number} não foi encontrada`)
+      const nodes = issue.comments?.nodes
+      if (!Array.isArray(nodes))
+        return failed(`o GitHub não deu os comentários da issue #${number}`)
+      return ok(
+        nodes
+          .filter((node) => node !== null && typeof node === 'object')
+          .map((node) => ({
+            body: typeof node.body === 'string' ? node.body : '',
+            createdAt: String(node.createdAt ?? ''),
+            viewerDidAuthor: node.viewerDidAuthor === true,
+          })),
+      )
+    },
+
+    viewerIssues() {
+      const read = graphql('viewerIssues', {})
+      if (!read.ok) return read
+      const nodes = read.value?.viewer?.issues?.nodes
+      if (!Array.isArray(nodes))
+        return failed('o GitHub não deu as issues da conta do gh')
+      return ok(
+        nodes
+          .filter((node) => node !== null && typeof node === 'object')
+          .map((node) => ({
+            number: Number(node.number),
+            createdAt: String(node.createdAt ?? ''),
+            title: typeof node.title === 'string' ? node.title : '',
+            body: typeof node.body === 'string' ? node.body : '',
+            repo: String(node.repository?.nameWithOwner ?? '').toLowerCase(),
+            labels: (Array.isArray(node.labels?.nodes) ? node.labels.nodes : [])
+              .map((label) => label?.name)
+              .filter((name) => typeof name === 'string'),
+          })),
+      )
+    },
   }
 }
 
@@ -342,6 +411,8 @@ const offline = {
   issueState: () => failed('um alias não é lido ao vivo'),
   threadLastAuthor: () => failed('um alias não é lido ao vivo'),
   prMergeState: () => failed('um alias não é lido ao vivo'),
+  issueComments: () => failed('um alias não é lido ao vivo'),
+  viewerIssues: () => failed('um alias não é lido ao vivo'),
 }
 
 /**
@@ -961,13 +1032,22 @@ function prCreate(command, ctx) {
     '--fill-first',
     '--fill-verbose',
   ])
-  if (body.source === 'web')
+  // --web and --editor write the body after the hook ran, where it can
+  // never look: neither the Closes line nor a skip string can be checked, so
+  // a person must, and in the autonomous modes nobody does (Copilot review
+  // of #26). A body file or an expansion the hook could not read is another
+  // matter: what gh posts is on the line, and it asks like any body it
+  // cannot read.
+  if (body.source === 'web' || body.source === 'editor')
     decisions.push(
       ask(
-        'gh pr create --web: o corpo é escrito no navegador, fora do alcance do hook; confira que a primeira linha é Closes #N.',
+        body.source === 'web'
+          ? `gh pr create --web: o corpo é escrito no navegador, fora do alcance do hook; confira que a primeira linha é exatamente "Closes #${issue ?? 'N'}." e que nem o título nem o corpo trazem um texto que pula os checks`
+          : `gh pr create --editor: o corpo é escrito no editor, fora do alcance do hook; confira que a primeira linha é exatamente "Closes #${issue ?? 'N'}." e que nem o título nem o corpo trazem um texto que pula os checks`,
+        { critical: true },
       ),
     )
-  else if (body.source === 'editor' || !body.known)
+  else if (!body.known)
     decisions.push(
       ask('não consegui ler o corpo da PR para conferir a primeira linha'),
     )
