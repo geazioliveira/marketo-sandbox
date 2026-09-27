@@ -52,20 +52,62 @@
 // as loop-sections names it; it never removes one; and it says so on
 // stderr with exit 2, which for PostToolUse Claude Code shows to Claude
 // (the hooks reference: "Shows stderr to Claude; the tool already ran").
+//
+// The same fallback takes any failure of an accepted plan's marking, not
+// only a library that did not load (Copilot review of #26, fifth round): a
+// budget spent while the repository was read, a git dir it cannot write, a
+// bug. It fails closed. It writes the marker by its own short path (git
+// rev-parse --git-common-dir and one file), in a slice of the budget the
+// library holds back for it; when even that write fails, it removes the
+// gate's cache from every worktree of the repository, so build-guard reads
+// the gate as never run instead of open on an Approve that predates the
+// plan; and it tells Claude, through exit 2, exactly which of these it
+// did, or, when it could do neither, that nothing was written and nothing
+// may be built. The input is read here, before the libraries load, so the
+// fallback has it whatever failed. On a publication, a failure never
+// removes the marker: the fallback touches nothing there and says so.
 import { spawnSync } from 'node:child_process'
-import { renameSync, writeFileSync } from 'node:fs'
+import { readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 
 /**
  * The marker's file name, as loop-sections' planPendingFile gives it, for
  * when that module is what failed to load: planPendingPrefix, the session
- * id with every character outside [A-Za-z0-9_-] made `_`, `_` for none, and
- * `.json`. test/hooks/plan-to-issue.spec.ts holds the two equal.
+ * id with [A-Za-z0-9-] kept and every other UTF-8 byte as `_XX` (a lone
+ * surrogate as `_uXXXX`), `_` for none, and `.json`.
+ * test/hooks/plan-to-issue.spec.ts holds the two equal.
  */
 function fallbackMarkerName(sessionId) {
-  const id = String(sessionId ?? '').replace(/[^A-Za-z0-9_-]/g, '_')
-  return `loop-plan-pending-${id === '' ? '_' : id}.json`
+  const id = String(sessionId ?? '')
+  if (id === '') return 'loop-plan-pending-_.json'
+  const hex = (value, width) =>
+    value.toString(16).toUpperCase().padStart(width, '0')
+  let encoded = ''
+  for (const char of id) {
+    const code = char.codePointAt(0)
+    if (/^[A-Za-z0-9-]$/.test(char)) encoded += char
+    else if (code >= 0xd800 && code <= 0xdfff) encoded += `_u${hex(code, 4)}`
+    else
+      for (const byte of new TextEncoder().encode(char))
+        encoded += `_${hex(byte, 2)}`
+  }
+  return `loop-plan-pending-${encoded}.json`
 }
+
+/**
+ * loop-sections' gateCacheFile, for when that module failed to load;
+ * test/hooks/plan-to-issue.spec.ts holds the two equal.
+ */
+const gateCacheName = 'loop-gate.json'
+
+/** The fallback's git bound when no budget holds one (the libraries did not load). */
+const fallbackGitMs = 10_000
+
+/**
+ * The least the fallback's git gets, even when the budget is spent: it fits
+ * in the margin between the budget and the hook's timeout in settings.json.
+ */
+const leastGitMs = 1_000
 
 /** Reads stdin whole as a JSON object, or null, with nothing but Node's own. */
 async function readRawInput() {
@@ -84,10 +126,11 @@ async function readRawInput() {
 
 /**
  * The common git dir around the input's cwd, as plan-to-issue writes the
- * marker there, or the reason it could not be found. git runs through argv,
- * bounded, with no variable a git hook may have left pointing it elsewhere.
+ * marker there, or the reason it could not be found (`notRepo` when git
+ * says the directory is in no repository). git runs through argv, bounded,
+ * with no variable a git hook may have left pointing it elsewhere.
  */
-function commonGitDir(cwd) {
+function commonGitDir(cwd, timeout) {
   const env = {}
   for (const [name, value] of Object.entries(process.env))
     if (
@@ -102,38 +145,97 @@ function commonGitDir(cwd) {
     {
       encoding: 'utf8',
       env: { ...env, LC_ALL: 'C', GIT_OPTIONAL_LOCKS: '0' },
-      timeout: 10_000,
+      timeout,
+      killSignal: 'SIGKILL',
       stdio: ['ignore', 'pipe', 'pipe'],
     },
   )
-  if (run.error !== undefined || run.status !== 0)
-    return {
-      reason:
-        String(run.error?.message ?? run.stderr ?? '').trim() || 'git falhou',
-    }
-  return { dir: String(run.stdout).trim() }
+  if (run.error?.code === 'ETIMEDOUT' || run.signal != null)
+    return { reason: `o git não respondeu em ${timeout} ms` }
+  if (run.error !== undefined || run.status !== 0) {
+    const reason =
+      String(run.error?.message ?? run.stderr ?? '').trim() || 'git falhou'
+    return { reason, notRepo: /not a git repository/i.test(reason) }
+  }
+  const dir = String(run.stdout).trim()
+  return dir === '' ? { reason: 'o git não deu o diretório' } : { dir }
+}
+
+/** Writes the marker whole or not at all; the reason it failed, or null. */
+function writeMarker(target, data) {
+  const scratch = `${target}.${process.pid}.tmp`
+  try {
+    writeFileSync(scratch, `${JSON.stringify(data, null, 2)}\n`)
+    renameSync(scratch, target)
+    return null
+  } catch (failure) {
+    rmSync(scratch, { force: true })
+    return failure?.message ?? String(failure)
+  }
 }
 
 /**
- * What the hook does when its libraries do not load: on ExitPlanMode,
- * writes the marker all the same (whole or not at all), with what can be
- * read without them; on anything else, touches nothing. Returns what stderr
- * tells Claude.
+ * Removes the gate's cache from every worktree's git dir: the common dir
+ * (the main worktree's) and each linked worktree's under `worktrees/`, as
+ * repo.mjs' worktreeGitDirs lists them. Every removal is tried, and each
+ * one that fails is named.
+ * @returns {{ removed: string[], failed: { file: string, reason: string }[] }}
  */
-async function onLoadFailure(error) {
-  const why = error instanceof Error ? error.message : String(error)
-  const head = `hooks do loop: o plan-to-issue não carregou suas bibliotecas (${why})`
-  const input = await readRawInput()
+function clearCaches(commonDir) {
+  const removed = []
+  const failed = []
+  const dirs = [commonDir]
+  const admin = path.join(commonDir, 'worktrees')
+  try {
+    for (const entry of readdirSync(admin, { withFileTypes: true }))
+      if (entry.isDirectory()) dirs.push(path.join(admin, entry.name))
+  } catch (error) {
+    // No linked worktree yet; any other failure is not read as none.
+    if (error?.code !== 'ENOENT')
+      failed.push({ file: admin, reason: error?.message ?? String(error) })
+  }
+  for (const dir of dirs) {
+    const file = path.join(dir, gateCacheName)
+    try {
+      rmSync(file)
+      removed.push(file)
+    } catch (error) {
+      if (error?.code !== 'ENOENT')
+        failed.push({ file, reason: error?.message ?? String(error) })
+    }
+  }
+  return { removed, failed }
+}
+
+const publishPlan =
+  'publique o plano numa issue, num comentário cuja primeira linha é exatamente # Plano, e espere o Approve do dono antes de editar fora de context/intent/'
+
+/**
+ * What the hook does when the libraries did not load (`stage` 'load') or
+ * failed (`stage` 'run'), and returns what stderr tells Claude. On
+ * ExitPlanMode it fails closed: the marker by the short path, else the gate
+ * caches of every worktree, and it says which. On anything else it touches
+ * nothing: a failure never removes a marker.
+ */
+function failClosed(input, { stage, why, gitMs }) {
+  const head =
+    stage === 'load'
+      ? `hooks do loop: o plan-to-issue não carregou suas bibliotecas (${why})`
+      : `hooks do loop: o plan-to-issue falhou (${why})`
   if (input?.tool_name !== 'ExitPlanMode')
-    return `${head}. O marcador de um plano aceito e ainda não publicado, se havia um, continua como estava: nenhuma publicação o remove até o hook voltar a carregar. Avise o dono.\n`
+    return stage === 'load'
+      ? `${head}. O marcador de um plano aceito e ainda não publicado, se havia um, continua como estava: nenhuma publicação o remove até o hook voltar a carregar. Avise o dono.\n`
+      : `${head}. A falha não remove o marcador de um plano aceito e ainda não publicado: se havia um, ele continua como estava. Avise o dono.\n`
   const cwd = path.resolve(
     typeof input.cwd === 'string' && input.cwd !== '' ? input.cwd : '.',
   )
   const sessionId =
     typeof input.session_id === 'string' ? input.session_id : null
-  const found = commonGitDir(cwd)
+  const found = commonGitDir(cwd, gitMs)
   if (found.dir === undefined)
-    return `${head}, e o marcador do plano aceito não pôde ser gravado (${found.reason}): publique o plano numa issue antes de construir, e não edite fora de context/intent/ até lá. Avise o dono.\n`
+    return found.notRepo
+      ? `${head}. ${cwd} não fica num repositório git: não há marcador de plano a gravar nem cache do gate a remover. Avise o dono.\n`
+      : `${head}. Nada foi gravado: não achei o diretório do git de ${cwd} (${found.reason}), então nem o marcador do plano aceito foi gravado nem o cache do gate foi removido, e o gate pode continuar aberto para um plano que o dono não viu. Não construa: ${publishPlan}. Avise o dono.\n`
   const plan =
     typeof input.tool_input?.plan === 'string'
       ? input.tool_input.plan
@@ -141,34 +243,52 @@ async function onLoadFailure(error) {
         ? input.tool_response.plan
         : ''
   const target = path.join(found.dir, fallbackMarkerName(sessionId))
-  try {
-    const scratch = `${target}.${process.pid}.tmp`
-    writeFileSync(
-      scratch,
-      `${JSON.stringify(
-        {
-          schema: 1,
-          sessionId,
-          branch: null,
-          acceptedAt: new Date().toISOString(),
-          planFilePath:
-            typeof input.tool_input?.planFilePath === 'string'
-              ? input.tool_input.planFilePath
-              : null,
-          planHead: Array.from(plan).slice(0, 300).join(''),
-          loadFailure: why,
-        },
-        null,
-        2,
-      )}\n`,
-    )
-    renameSync(scratch, target)
-  } catch (failure) {
-    return `${head}, e o marcador do plano aceito não pôde ser gravado em ${target} (${failure?.message ?? failure}): publique o plano numa issue antes de construir, e não edite fora de context/intent/ até lá. Avise o dono.\n`
-  }
-  return `${head}. O plano aceito foi marcado como pendente mesmo assim (${target}): um plano aceito no plan mode não é Approve; publique-o numa issue antes de construir, num comentário cuja primeira linha é exatamente # Plano. Até o hook voltar a carregar, nenhuma publicação remove o marcador. Avise o dono.\n`
+  const failure = writeMarker(target, {
+    schema: 1,
+    sessionId,
+    branch: null,
+    acceptedAt: new Date().toISOString(),
+    planFilePath:
+      typeof input.tool_input?.planFilePath === 'string'
+        ? input.tool_input.planFilePath
+        : null,
+    planHead: Array.from(plan).slice(0, 300).join(''),
+    failure: { stage, reason: why },
+  })
+  if (failure === null)
+    return `${head}. O plano aceito foi marcado como pendente mesmo assim, pelo caminho de reserva (${target}): um plano aceito no plan mode não é Approve; publique-o numa issue antes de construir, num comentário cuja primeira linha é exatamente # Plano. ${
+      stage === 'load'
+        ? 'Até o hook voltar a carregar, nenhuma publicação remove o marcador.'
+        : 'Publicado o plano, o hook remove o marcador como sempre.'
+    } Avise o dono.\n`
+
+  // No marker: the caches go, so no worktree reads the gate as open on an
+  // Approve older than this plan. On a run that threw, the library wrote
+  // no marker, whether its write failed or it never reached one.
+  const lost =
+    stage === 'run'
+      ? `o marcador do plano aceito não pôde ser gravado nem pelo caminho de reserva, em ${target} (${failure})`
+      : `o marcador do plano aceito não pôde ser gravado em ${target} (${failure})`
+  const caches = clearCaches(found.dir)
+  const removed = caches.removed.map((file) => path.dirname(file)).join(', ')
+  if (caches.failed.length === 0)
+    return `${head}, e ${lost}. Em troca, ${
+      caches.removed.length > 0
+        ? `removi o cache do gate de ${caches.removed.length} worktree(s) deste repositório (${removed})`
+        : 'nenhuma worktree deste repositório tinha cache do gate a remover'
+    }: o build-guard lê o gate como não rodado e nega a edição. Não rode npm run gate nem construa antes de publicar o plano numa issue, num comentário cuja primeira linha é exatamente # Plano: sem o marcador, o gate não sabe deste plano e reabriria sobre o Approve antigo. Avise o dono.\n`
+  const failed = caches.failed
+    .map(({ file, reason }) => `${file} (${reason})`)
+    .join('; ')
+  if (caches.removed.length === 0)
+    return `${head}. Nada foi gravado: ${lost}, e não consegui remover o cache do gate: ${failed}. O gate pode continuar aberto para um plano que o dono não viu. Não construa: ${publishPlan}. Avise o dono.\n`
+  return `${head}, e ${lost}. Removi o cache do gate de ${removed}, mas não consegui remover ${failed}: onde ele ficou, o gate pode continuar aberto para um plano que o dono não viu. Não construa: ${publishPlan}. Avise o dono.\n`
 }
 
+const reasonOf = (error) =>
+  error instanceof Error ? error.message : String(error)
+
+const input = await readRawInput()
 let publication = null
 let loadError = null
 try {
@@ -178,16 +298,35 @@ try {
 }
 
 if (publication === null) {
-  process.stderr.write(await onLoadFailure(loadError))
+  process.stderr.write(
+    failClosed(input, {
+      stage: 'load',
+      why: reasonOf(loadError),
+      gitMs: fallbackGitMs,
+    }),
+  )
   process.exitCode = 2
 } else {
   try {
-    const out = await publication.run()
+    const out = await publication.run(input)
     if (out !== null) process.stdout.write(`${out}\n`)
-  } catch {
-    // main never throws past its own catch; anything else here is a bug in
-    // the hook, and a PostToolUse hook's failure must not surface as an
-    // error on a tool call that already ran.
+    process.exitCode = 0
+  } catch (error) {
+    // The slice of the budget the library held back for this, with what is
+    // left of the rest; none started, the fallback's own bound.
+    let window = null
+    try {
+      window = publication.fallbackWindowMs?.() ?? null
+    } catch {
+      window = null
+    }
+    const gitMs =
+      window === null
+        ? fallbackGitMs
+        : Math.max(leastGitMs, Math.min(fallbackGitMs, window))
+    process.stderr.write(
+      failClosed(input, { stage: 'run', why: reasonOf(error), gitMs }),
+    )
+    process.exitCode = 2
   }
-  process.exitCode = 0
 }

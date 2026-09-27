@@ -43,6 +43,7 @@ export class BudgetExhausted extends Error {
 
 let deadline = Infinity
 let budgetMs = null
+let heldMs = 0
 
 /**
  * Starts the budget of this run for hook `name`: its entry in hookBudgetsMs,
@@ -55,7 +56,31 @@ export function startBudget(name, env = process.env) {
   budgetMs =
     Number.isFinite(lowered) && lowered > 0 ? Math.min(lowered, own) : own
   deadline = Date.now() + budgetMs
+  heldMs = 0
   return budgetMs
+}
+
+/**
+ * Holds back a slice of the budget, at most `ms` and never more than a third
+ * of it, for a fallback that must still run once the rest is spent
+ * (plan-to-issue marks an accepted plan even when the repository could not
+ * be read in time; Copilot review of #26, fifth round). The work before the
+ * fallback sees a deadline that much earlier, so the whole run still ends
+ * within the budget. Returns the ms held.
+ */
+export function holdBack(ms) {
+  if (budgetMs === null || !Number.isFinite(deadline)) return 0
+  const slice = Math.max(0, Math.min(ms, Math.floor(budgetMs / 3)))
+  deadline -= slice
+  heldMs += slice
+  return slice
+}
+
+/** Gives back what holdBack kept, and returns what is left of the budget in ms. */
+export function releaseHeld() {
+  deadline += heldMs
+  heldMs = 0
+  return remainingMs()
 }
 
 /** What is left of the budget, in ms (Infinity when none was started). */

@@ -136,6 +136,31 @@ describe('.claude/settings.json (#5)', () => {
     }
   })
 
+  it('holds back at most a third of a budget for a fallback, and gives it back (Copilot review of #26, fifth round)', async () => {
+    // plan-to-issue marks an accepted plan even when the repository could
+    // not be read in time: the slice held back is what that write runs in,
+    // and the run as a whole still ends within the budget.
+    const budget = await loadHookLib<{
+      budgetVariable: string
+      startBudget: (name: string, env: Record<string, string>) => number
+      holdBack: (ms: number) => number
+      releaseHeld: () => number
+      remainingMs: () => number
+    }>('budget')
+    const env = { [budget.budgetVariable]: '3000' }
+    budget.startBudget('plan-to-issue', env)
+    expect(budget.holdBack(5000)).toBe(1000)
+    expect(budget.remainingMs()).toBeLessThanOrEqual(2000)
+    expect(budget.releaseHeld()).toBeGreaterThan(2000)
+    expect(budget.releaseHeld()).toBeLessThanOrEqual(3000)
+    budget.startBudget('plan-to-issue', {})
+    expect(budget.holdBack(5000)).toBe(5000)
+    expect(budget.remainingMs()).toBeLessThanOrEqual(15_000)
+    // A new run starts with nothing held.
+    budget.startBudget('plan-to-issue', env)
+    expect(budget.releaseHeld()).toBeLessThanOrEqual(3000)
+  })
+
   it('denies what the plan of #5 denies, and allows nothing', () => {
     expect(settings.permissions?.allow ?? []).toEqual([])
     expect(settings.permissions?.deny).toEqual([

@@ -70,6 +70,10 @@ afterAll(() => {
 
 interface GhCall {
   argv: string[]
+  /** The host the fake gh was asked for, and the GH_HOST and GH_REPO it saw. */
+  host?: string
+  envHost?: string | null
+  envRepo?: string | null
   call?: string
   key?: string
   mode?: string
@@ -545,6 +549,247 @@ describe.concurrent('resolveReviewThread, read live', () => {
     expectAsk(await guard(resolve, { env: gh.env }), /não consegui confirmar/)
   })
 })
+
+describe.concurrent(
+  'the live reads go to the GitHub the command goes to (Copilot review of #26, fifth round)',
+  () => {
+    // Claude Code's environment may carry an enterprise GH_HOST while the
+    // command names github.com. The hook's reads used to follow the
+    // environment and judge the command by another GitHub's PR.
+    const ghe = 'ghe.example.com'
+    const inherited = { GH_HOST: ghe }
+    const resolveThread = `-f query='mutation { resolveReviewThread(input: {threadId: "PRRT_1"}) { thread { isResolved } } }'`
+    const transition =
+      'gh issue edit 5 --remove-label needs-triage --add-label ready-for-human'
+    const redCheck = {
+      suites: [
+        {
+          workflow: requiredChecks[0].workflow,
+          runs: [
+            {
+              name: requiredChecks[0].job,
+              status: 'COMPLETED',
+              conclusion: 'FAILURE',
+              startedAt: '2026-09-26T10:00:00Z',
+            },
+          ],
+        },
+      ],
+    }
+
+    /** Every call went to github.com, with the host set on gh itself. */
+    const expectGithubCom = (gh: Live, count: number) => {
+      const calls = gh.calls()
+      expect(calls).toHaveLength(count)
+      for (const call of calls) {
+        expect(call).toMatchObject({
+          host: 'github.com',
+          envHost: 'github.com',
+        })
+        expect(call.argv.slice(0, 4)).toEqual([
+          'api',
+          'graphql',
+          '--hostname',
+          'github.com',
+        ])
+        expect(call.violation).toBeUndefined()
+      }
+    }
+
+    test.for([
+      [
+        'GH_HOST=github.com on the command',
+        `GH_HOST=github.com gh pr merge 7 -R github.com/${'geazioliveira/marketo-sandbox'}`,
+      ],
+      [
+        '-R github.com/OWNER/REPO alone',
+        'gh pr merge 7 -R github.com/geazioliveira/marketo-sandbox',
+      ],
+      [
+        'the PR URL',
+        'gh pr merge https://github.com/geazioliveira/marketo-sandbox/pull/7',
+      ],
+      [
+        'GH_HOST=github.com exported earlier on the line',
+        'export GH_HOST=github.com; gh pr merge 7',
+      ],
+    ])(
+      'gh pr merge with %s over an inherited enterprise GH_HOST reads github.com’s PR',
+      async ([, command], { live }) => {
+        const gh = live(
+          {
+            prs: { 7: { pr: readyPr(redCheck) } },
+            hosts: { [ghe]: { prs: { 7: { pr: readyPr() } } } },
+          },
+          inherited,
+        )
+        expectDeny(
+          await guard(command, { env: gh.env }),
+          /concluído com FAILURE/,
+        )
+        expectGithubCom(gh, 1)
+      },
+    )
+
+    test('gh pr merge of the current branch reads github.com’s open PR', async ({
+      live,
+    }) => {
+      const gh = live(
+        {
+          heads: {
+            [FEATURE]: { prs: [readyPr({ threads: [{ isResolved: false }] })] },
+          },
+          hosts: { [ghe]: { heads: { [FEATURE]: { prs: [readyPr()] } } } },
+        },
+        inherited,
+      )
+      expectDeny(
+        await guard('GH_HOST=github.com gh pr merge --squash', { env: gh.env }),
+        /thread\(s\) de revisão aberta\(s\)/,
+      )
+      expectGithubCom(gh, 1)
+    })
+
+    test('the label transition reads github.com’s issue', async ({ live }) => {
+      const gh = live(
+        {
+          issues: {
+            5: {
+              labels: ['enhancement', 'needs-info'],
+              lastCommentBody: '# Plano\n\nTexto.',
+            },
+          },
+          hosts: {
+            [ghe]: {
+              issues: {
+                5: {
+                  labels: ['enhancement', 'needs-triage'],
+                  lastCommentBody: '# Plano\n\nTexto.',
+                },
+              },
+            },
+          },
+        },
+        inherited,
+      )
+      expectDeny(
+        await guard(`GH_HOST=github.com ${transition}`, { env: gh.env }),
+        /não está em needs-triage/,
+      )
+      expectGithubCom(gh, 1)
+    })
+
+    test.for([
+      [
+        '--hostname github.com',
+        `gh api graphql --hostname github.com ${resolveThread}`,
+      ],
+      [
+        'GH_HOST=github.com',
+        `GH_HOST=github.com gh api graphql ${resolveThread}`,
+      ],
+    ])(
+      'resolveReviewThread with %s reads github.com’s thread and account',
+      async ([, command], { live }) => {
+        const gh = live(
+          {
+            viewer: { login: 'geazioliveira' },
+            threads: {
+              PRRT_1: { lastAuthor: 'copilot-pull-request-reviewer' },
+            },
+            hosts: {
+              [ghe]: {
+                viewer: { login: 'geazioliveira' },
+                threads: { PRRT_1: { lastAuthor: 'geazioliveira' } },
+              },
+            },
+          },
+          inherited,
+        )
+        expectDeny(
+          await guard(command, { env: gh.env }),
+          /responda na thread antes de resolvê-la/,
+        )
+        expectGithubCom(gh, 2)
+      },
+    )
+
+    test('keeps GH_REPO out of the reads: the call names its repository', async ({
+      live,
+    }) => {
+      const gh = live(
+        { prs: { 7: { pr: readyPr(redCheck) } } },
+        { GH_REPO: 'geazioliveira/marketo-sandbox' },
+      )
+      expectDeny(await guard('gh pr merge 7', { env: gh.env }))
+      expect(gh.calls()).toEqual([
+        expect.objectContaining({
+          call: 'prByNumber',
+          host: 'github.com',
+          envRepo: null,
+        }),
+      ])
+    })
+
+    test('another GitHub named by -R is not read, from github.com or elsewhere', async ({
+      live,
+    }) => {
+      const gh = live({ prs: { 7: { pr: readyPr(redCheck) } } })
+      expectPass(
+        await guard(`gh pr merge 7 -R ${ghe}/geazioliveira/marketo-sandbox`, {
+          env: gh.env,
+        }),
+      )
+      expect(gh.calls()).toEqual([])
+    })
+
+    test.for([
+      [
+        'resolveReviewThread on --hostname "$H"',
+        `gh api graphql --hostname "$H" ${resolveThread}`,
+        /não consegui confirmar que a última resposta da thread é sua/,
+      ],
+      [
+        'resolveReviewThread on GH_HOST=$H',
+        `GH_HOST=$H gh api graphql ${resolveThread}`,
+        /não consegui confirmar que a última resposta da thread é sua/,
+      ],
+      [
+        'gh pr merge on GH_HOST=$H',
+        'GH_HOST=$H gh pr merge 7',
+        /não consegui ler o estado da PR/,
+      ],
+      [
+        'the label transition on GH_HOST=$H',
+        `GH_HOST=$H ${transition}`,
+        /não consegui ler em que repositório/,
+      ],
+    ])(
+      'reads nothing when the host cannot be read: %s asks, critical',
+      async ([, command, reason], { live }) => {
+        // github.com would let each through: nothing may be read there for
+        // a command that may go elsewhere.
+        const gh = live({
+          viewer: { login: 'geazioliveira' },
+          threads: { PRRT_1: { lastAuthor: 'geazioliveira' } },
+          prs: { 7: { pr: readyPr() } },
+          issues: {
+            5: {
+              labels: ['enhancement', 'needs-triage'],
+              lastCommentBody: '# Plano\n\nTexto.',
+            },
+          },
+        })
+        expectAsk(await guard(command, { env: gh.env }), reason)
+        expectDeny(
+          await guard(command, { env: gh.env, mode: 'auto' }),
+          /Em auto, a confirmação vira negação/,
+        )
+        expect(gh.calls()).toEqual([])
+      },
+    )
+  },
+)
 
 describe.concurrent('the tripwire', () => {
   it.each([

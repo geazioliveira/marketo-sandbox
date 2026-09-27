@@ -58,10 +58,13 @@ const prFields = `number state headRefOid commits(last: 1) { nodes { commit { oi
  * changes here without changing there fails its specs instead of passing
  * against an answer shaped for another question.
  *
- * Each call is `gh api graphql`, then each variable in the order listed, as
- * `-f name=value` (a raw string; `-F name=value` for `number`, an Int, whose
- * value is always digits), then `-f query=<query>`. `-F` is kept off the
- * strings because it reads `@file` and converts `true`, `null` and numbers.
+ * Each call is `gh api graphql --hostname <host>`, then each variable in the
+ * order listed, as `-f name=value` (a raw string; `-F name=value` for
+ * `number`, an Int, whose value is always digits), then `-f query=<query>`.
+ * `-F` is kept off the strings because it reads `@file` and converts `true`,
+ * `null` and numbers. The host is the client's (githubClient), always
+ * written out: gh api would otherwise take GH_HOST, or the one host gh is
+ * logged in to, and read another GitHub than the one the command goes to.
  */
 export const githubCalls = Object.freeze({
   viewer: Object.freeze({
@@ -98,10 +101,13 @@ export const githubCalls = Object.freeze({
   }),
 })
 
-/** The argv of one githubCalls entry with its variables' values. */
-export function githubCallArgv(name, values = {}) {
+/** The host every live read goes to unless told otherwise: this project's. */
+const projectHost = 'github.com'
+
+/** The argv of one githubCalls entry with its variables' values, on `host`. */
+export function githubCallArgv(name, values = {}, host = projectHost) {
   const call = githubCalls[name]
-  const args = ['api', 'graphql']
+  const args = ['api', 'graphql', '--hostname', host]
   for (const variable of call.variables)
     args.push(
       variable === 'number' ? '-F' : '-f',
@@ -233,6 +239,17 @@ function mergeStateOf(pr) {
  * { ok: true, value } or { ok: false, reason }; the only throw is
  * BudgetExhausted, which ends the whole run. gh runs through argv
  * (spawnSync), never a shell, with its prompts and update notice off.
+ *
+ * A client reads one host, `host` (github.com by default), and nothing else
+ * (Copilot review of #26, fifth round): the reads that judge a command must
+ * come from the GitHub the command goes to, and the hook's own environment
+ * may name another one. So every call carries `--hostname <host>`, gh runs
+ * with GH_HOST set to it, and GH_REPO is dropped: each query names its
+ * repository in its variables, and no inherited default may stand in. The
+ * token is the one gh picks for that host: GH_TOKEN or GITHUB_TOKEN, else
+ * the login stored for it, on github.com; GH_ENTERPRISE_TOKEN or
+ * GITHUB_ENTERPRISE_TOKEN only on another host. An enterprise token the
+ * hook inherits never authenticates a read of github.com.
  *   .viewer()                   -> login
  *   .issueState(repo, number)   -> { labels, labelsComplete, lastCommentBody }
  *   .threadLastAuthor(threadId) -> login | null
@@ -245,8 +262,20 @@ function mergeStateOf(pr) {
  *                                    labels }], the account's 20 newest
  * prRef is a PR number, or a branch whose one open PR is read.
  */
-export function githubClient({ env = process.env, timeoutMs } = {}) {
+export function githubClient({
+  env = process.env,
+  timeoutMs,
+  host = projectHost,
+} = {}) {
   const limit = timeoutOf(env, timeoutMs)
+  const readHost = String(host).trim().toLowerCase()
+  const ghEnv = {
+    ...env,
+    GH_HOST: readHost,
+    GH_PROMPT_DISABLED: '1',
+    GH_NO_UPDATE_NOTIFIER: '1',
+  }
+  delete ghEnv.GH_REPO
 
   function graphql(name, values) {
     // The run's budget (budget.mjs) bounds the read too; when it runs out,
@@ -256,9 +285,9 @@ export function githubClient({ env = process.env, timeoutMs } = {}) {
     const timeout = spawnTimeout(limit, step)
     let run
     try {
-      run = spawnSync('gh', githubCallArgv(name, values), {
+      run = spawnSync('gh', githubCallArgv(name, values, readHost), {
         encoding: 'utf8',
-        env: { ...env, GH_PROMPT_DISABLED: '1', GH_NO_UPDATE_NOTIFIER: '1' },
+        env: ghEnv,
         timeout,
         killSignal: 'SIGKILL',
         maxBuffer: 16 * 1024 * 1024,
@@ -405,14 +434,55 @@ export function githubClient({ env = process.env, timeoutMs } = {}) {
   }
 }
 
-/** A client that reads nothing: an alias is judged as written, never live. */
-const offline = {
-  viewer: () => failed('um alias não é lido ao vivo'),
-  issueState: () => failed('um alias não é lido ao vivo'),
-  threadLastAuthor: () => failed('um alias não é lido ao vivo'),
-  prMergeState: () => failed('um alias não é lido ao vivo'),
-  issueComments: () => failed('um alias não é lido ao vivo'),
-  viewerIssues: () => failed('um alias não é lido ao vivo'),
+/**
+ * One client per host, made when first asked for: what guard-bash and
+ * plan-to-issue hand the rules as `githubFor`, so each command's reads go to
+ * its own host (Copilot review of #26, fifth round).
+ */
+export function githubClients({ env = process.env, timeoutMs } = {}) {
+  const clients = new Map()
+  return (host) => {
+    const key = String(host).trim().toLowerCase()
+    if (!clients.has(key))
+      clients.set(key, githubClient({ env, timeoutMs, host: key }))
+    return clients.get(key)
+  }
+}
+
+/** A client that reads nothing, every read failing with `reason`. */
+const noReads = (reason) => ({
+  viewer: () => failed(reason),
+  issueState: () => failed(reason),
+  threadLastAuthor: () => failed(reason),
+  prMergeState: () => failed(reason),
+  issueComments: () => failed(reason),
+  viewerIssues: () => failed(reason),
+})
+
+/** An alias is judged as written, never live. */
+const offline = noReads('um alias não é lido ao vivo')
+
+/**
+ * The client of a command whose host cannot be read (GH_HOST or --hostname
+ * with an expansion): it may be github.com or another GitHub, and a read of
+ * either could judge the command by the wrong one. Nothing is read, and the
+ * rule that needed the read asks, critical, as for a read that failed.
+ */
+const unaligned = noReads(
+  'não consegui ler em que GitHub o comando roda, GH_HOST ou --hostname com uma expansão, e nada foi lido',
+)
+
+/**
+ * The client for the host a command's reads go to (Copilot review of #26,
+ * fifth round), or `unaligned` for a host that cannot be read (null).
+ * ctx.githubFor(host) when given (guard-bash; an alias being defined gets
+ * one that reads nothing), else ctx.github as it is (a spec's stub), else a
+ * new client for the host.
+ */
+function clientAt(ctx, host) {
+  if (host === null) return unaligned
+  if (typeof ctx.githubFor === 'function') return ctx.githubFor(host)
+  return ctx.github ?? githubClient({ host })
 }
 
 /**
@@ -1519,7 +1589,7 @@ async function judgeAlias(name, expansion, args, command, ctx, { live }) {
     )
   const inner = extend(ctx, {
     aliasDepth: (ctx.aliasDepth ?? 0) + 1,
-    ...(live ? {} : { github: offline }),
+    ...(live ? {} : { github: offline, githubFor: () => offline }),
   })
   const decisions = []
   for (const each of parsed.commands) {
@@ -2458,18 +2528,20 @@ function placeholderRepo(command, ctx) {
   return remotesKnown(ctx) ? (ctx.repo?.repo ?? null) : null
 }
 
-function apiDecision(command, ctx, from) {
-  const request = apiRequest(command, ctx, from)
+function apiDecision(command, base, from) {
+  const request = apiRequest(command, base, from)
   if (request.method === 'GET') return pass()
   // Another host is another GitHub; one that cannot be read may be this one.
-  const host = request.host ?? envOf(command, ctx).GH_HOST ?? null
-  if (
-    typeof host === 'string' &&
-    host.trim() !== '' &&
-    !/[$`]/.test(host) &&
-    normalHost(host) !== 'github.com'
-  )
-    return pass()
+  const host = request.host ?? envOf(command, base).GH_HOST ?? null
+  const spelled = typeof host === 'string' && host.trim() !== ''
+  const hostKnown = !spelled || !/[$`]/.test(host)
+  if (spelled && hostKnown && normalHost(host) !== 'github.com') return pass()
+  // What is judged here is github.com, where the call goes when its host is
+  // github.com or none is set: a live read goes there too, and nowhere for
+  // a host that cannot be read (Copilot review of #26, fifth round).
+  const ctx = extend(base, {
+    github: clientAt(base, hostKnown ? projectHost : null),
+  })
   const endpoint = request.endpoint
   if (endpoint === null) return pass()
   if (!endpoint.known)
@@ -2528,10 +2600,14 @@ const handlers = {
 /**
  * Decision (or Promise of one) for one SimpleCommand whose argv[0] is 'gh'.
  * ctx = { cwd: the command's directory, absolute; repo: repoAt of it (read
- * only when a rule needs it); permissionMode; github: githubClient() }.
+ * only when a rule needs it); permissionMode; githubFor: host -> client
+ * (githubClients()), or github: one client for every read }.
  * A handler also gets `target`, the repository the command acts on, this
  * project when it cannot be read, and `targetKnown`, false then: a rule
- * that would pass on a live read of this project asks instead.
+ * that would pass on a live read of this project asks instead. Its
+ * `github` reads the host the command goes to (Copilot review of #26,
+ * fifth round): github.com for this project, nothing when the target
+ * cannot be read.
  */
 export async function ghDecision(command, ctx) {
   const [group, verb] = leadingWords(command)
@@ -2540,7 +2616,12 @@ export async function ghDecision(command, ctx) {
     return unread(
       `não consegui ler o subcomando do gh em "${group.value}": confira o que ele faz`,
     )
-  const local = extend(ctx, { github: ctx.github ?? githubClient() })
+  // One factory of clients for the command and the aliases it runs: the
+  // client itself is chosen once the command's host is known.
+  const local =
+    typeof ctx.githubFor === 'function' || ctx.github != null
+      ? ctx
+      : extend(ctx, { githubFor: githubClients() })
   if (group.value === 'api') return apiDecision(command, local, group.index + 1)
   if (!ghCommands.has(group.value)) return aliasUse(command, local, group)
   if (verb === undefined) return pass()
@@ -2570,6 +2651,10 @@ export async function ghDecision(command, ctx) {
       operands,
       target: target.repo ?? projectRepo,
       targetKnown: !target.unknown,
+      // This project is on github.com: a target that could be read as it is
+      // there, whatever GH_HOST the hook inherits; one that could not, read
+      // nowhere.
+      github: clientAt(local, target.unknown ? null : projectHost),
     }),
   )
 }

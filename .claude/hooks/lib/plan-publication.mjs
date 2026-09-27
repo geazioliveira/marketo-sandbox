@@ -2,8 +2,10 @@
 // inside its load boundary: the entry imports this module in a try, so a
 // library that fails to load (this one, the contract, any lib it imports)
 // is caught there and still marks an accepted plan as pending (Copilot
-// review of #26, fourth round). The entry's header says what the hook does
-// and why.
+// review of #26, fourth round). On ExitPlanMode nothing here catches a
+// failure: it reaches the entry, whose fallback marks the plan all the same
+// or, failing that, removes the gate's caches (fifth round). The entry's
+// header says what the hook does and why.
 import { readFileSync, statSync } from 'node:fs'
 import path from 'node:path'
 import {
@@ -17,8 +19,13 @@ import {
   kindOf,
   sectionsFor,
 } from '../../../scripts/loop-sections.mjs'
-import { BudgetExhausted, startBudget } from './budget.mjs'
-import { githubClient, targetOf as ghTarget } from './gh-rules.mjs'
+import {
+  BudgetExhausted,
+  holdBack,
+  releaseHeld,
+  startBudget,
+} from './budget.mjs'
+import { githubClients, targetOf as ghTarget } from './gh-rules.mjs'
 import { autonomousModes, contextOutput, readInput } from './io.mjs'
 import {
   clearGateCaches,
@@ -39,6 +46,12 @@ import {
 } from './shell.mjs'
 
 const event = 'PostToolUse'
+
+/**
+ * The slice of the budget ExitPlanMode keeps for the entry's fallback (git
+ * rev-parse and one file): budget.holdBack caps it at a third of the budget.
+ */
+const fallbackReserveMs = 5000
 
 /** The tools that run a command line: the ones guard-bash guards. */
 const commandTools = ['Bash', 'Monitor', 'mcp__terminal__run_in_terminal']
@@ -182,7 +195,11 @@ function placeOf(command, baseCwd, repoOf) {
  * target that cannot be read (an expansion, in the repository or the host)
  * is `unknown` and counts as another repository: the marker stays, the
  * restrictive side, and the hook says why.
- * @returns {{ project: boolean, issue: number | null, unknown: boolean, host?: string }}
+ *
+ * `readHost` is the GitHub a publication to this project goes to, where
+ * confirmLive asks whether it went through (Copilot review of #26, fifth
+ * round): github.com, whatever GH_HOST the hook itself inherits.
+ * @returns {{ project: boolean, issue: number | null, unknown: boolean, host?: string, readHost?: string }}
  */
 function targetOf(command, kind, place, exported) {
   const unknown = { project: false, issue: null, unknown: true }
@@ -200,6 +217,7 @@ function targetOf(command, kind, place, exported) {
         project: isProject(`${url[1]}/${url[2]}`),
         issue: Number(url[3]),
         unknown: false,
+        readHost: 'github.com',
       }
     else return unknown
   }
@@ -212,7 +230,12 @@ function targetOf(command, kind, place, exported) {
   if (found.unknown) return unknown
   if (typeof found.host === 'string')
     return { project: false, issue, unknown: false, host: found.host }
-  return { project: isProject(found.repo), issue, unknown: false }
+  return {
+    project: isProject(found.repo),
+    issue,
+    unknown: false,
+    readHost: 'github.com',
+  }
 }
 
 /**
@@ -488,11 +511,9 @@ function onCommand(input, baseCwd, sessionId, { live }) {
         publicationKind(command) !== null || shellMoves.has(command.argv[0]),
     )
   const urls = issueUrls(input.tool_response)
-  let client = null
-  const github = () => {
-    client ??= githubClient()
-    return client
-  }
+  // One client per host, bound to the host the publication goes to, never
+  // to the one the hook inherits (Copilot review of #26, fifth round).
+  const githubFor = githubClients()
   const notes = []
   for (const { command, kind, place, exported: before } of placed) {
     const target = targetOf(command, kind, place, before)
@@ -565,6 +586,13 @@ function onCommand(input, baseCwd, sessionId, { live }) {
     else if (!live) {
       notes.push(why)
       continue
+    } else if (typeof target.readHost !== 'string') {
+      // Unreachable while a target of this project is on github.com; kept
+      // so a target whose host is not known is never read anywhere.
+      notes.push(
+        `não consegui ler em que GitHub \`${shortText(command)}\` publica, e não confiro a publicação em nenhum; o marcador continua: publique o plano pelo Bash, cuja saída mostra a URL.`,
+      )
+      continue
     } else {
       const marks = [place.repo, sessionRepo]
         .filter((repo) => marked(repo))
@@ -574,7 +602,7 @@ function onCommand(input, baseCwd, sessionId, { live }) {
         kind,
         target,
         acceptedTime([...new Set(marks)], sessionId),
-        github(),
+        githubFor(target.readHost),
       )
       if (confirmed.note !== undefined) {
         notes.push(confirmed.note)
@@ -608,10 +636,10 @@ function onCommand(input, baseCwd, sessionId, { live }) {
   return notes.length > 0 ? notes.join('\n') : null
 }
 
-async function main() {
-  const input = await readInput()
+async function main(given) {
+  const input = given === undefined ? await readInput() : given
   // Nothing to read, nothing to mark: this event cannot block anyway.
-  if (input === null) return null
+  if (input === null || typeof input !== 'object') return null
   if (input.hook_event_name !== undefined && input.hook_event_name !== event)
     return null
   const tool = input.tool_name
@@ -630,29 +658,46 @@ async function main() {
       : inputCwd
   const sessionId =
     typeof input.session_id === 'string' ? input.session_id : null
-  try {
-    startBudget('plan-to-issue')
-    if (tool !== 'ExitPlanMode')
-      return onCommand(input, baseCwd, sessionId, { live: tool !== 'Bash' })
+  startBudget('plan-to-issue')
+  if (tool === 'ExitPlanMode') {
+    // No catch: a plan accepted and not marked must fail closed, and the
+    // entry's fallback does that (Copilot review of #26, fifth round). It
+    // runs in the slice held back here, so a budget spent on a slow git
+    // still leaves it time to write the marker.
+    holdBack(fallbackReserveMs)
     const repo = repoAt(inputCwd)
     if (repo === null || !isProject(repo)) return null
     return onExitPlanMode(input, repo, sessionId)
+  }
+  try {
+    return onCommand(input, baseCwd, sessionId, { live: tool !== 'Bash' })
   } catch (error) {
+    // The tool call already happened and cannot be refused, but a marker
+    // that could not be checked must not go unnoticed: the agent is told,
+    // which is the most this event can restrict.
     if (error instanceof BudgetExhausted)
       return `${error.message}. O marcador do plano pendente continua como estava: publique o plano pelo Bash, cuja saída mostra a URL.`
-    // The tool call already happened and cannot be refused, but a marker
-    // that could not be written or checked must not go unnoticed: the agent
-    // is told, which is the most this event can restrict.
     return `o hook plan-to-issue falhou (${error?.message ?? error}): o marcador do plano pendente pode não estar certo. Publique o plano numa issue antes de construir.`
   }
 }
 
 /**
- * The hook's run: reads the input, writes or removes the marker, and
- * returns what it prints on stdout (the additionalContext for Claude), or
- * null for nothing.
+ * The hook's run: takes the input the entry read (or reads it), writes or
+ * removes the marker, and returns what it prints on stdout (the
+ * additionalContext for Claude), or null for nothing. On ExitPlanMode it
+ * throws whatever kept the marker from being written.
  */
-export async function run() {
-  const text = await main()
+export async function run(input) {
+  const text = await main(input)
   return text === null ? null : contextOutput(event, text)
+}
+
+/**
+ * How long the entry's fallback may take after run() threw: the slice
+ * holdBack kept, given back, with whatever is left of the rest. null when no
+ * budget was started: the entry then uses its own bound.
+ */
+export function fallbackWindowMs() {
+  const left = releaseHeld()
+  return Number.isFinite(left) ? Math.max(0, Math.floor(left)) : null
 }

@@ -8,10 +8,21 @@
 // would still pass against an answer shaped for the old one. Every call,
 // answered or refused, is appended to FAKE_GH_LOG as one JSON line.
 //
+// The host a call goes to is gh's: `--hostname <host>` right after `api
+// graphql`, which githubClient always sends, else GH_HOST, else github.com
+// (Copilot review of #26, fifth round). A client that forgets the flag is
+// answered from the host gh would pick, so a spec sees the read land on the
+// wrong GitHub instead of a refusal. The log line of every call records the
+// host, and the GH_HOST and GH_REPO the process saw.
+//
 // FAKE_GH_FIXTURE names a JSON file:
 //   {
 //     repo?: 'owner/name',                 the only repository answered
 //                                          (default geazioliveira/marketo-sandbox)
+//     host?: string,                       the host this fixture answers for
+//                                          (default github.com)
+//     hosts?: { [host]: Fixture },         what each other host answers; a
+//                                          host with none is refused (exit 97)
 //     viewer?:  Answer & { login },
 //     issues?:  { [number]: Answer & { labels: string[], labelsTotal?, lastCommentBody: string | null } },
 //     threads?: { [id]: Answer & { lastAuthor: string | null } },
@@ -36,8 +47,9 @@ const argv = process.argv.slice(2)
 const prFields =
   'number state headRefOid commits(last: 1) { nodes { commit { oid checkSuites(first: 100) { totalCount nodes { workflowRun { workflow { name } } checkRuns(first: 100, filterBy: { checkType: LATEST }) { totalCount nodes { name status conclusion startedAt } } } } } } } reviews(last: 100) { totalCount nodes { state submittedAt commit { oid } author { __typename login ... on Bot { databaseId } } body } } reviewRequests(first: 100) { totalCount nodes { requestedReviewer { __typename ... on Bot { databaseId } } } } reviewThreads(first: 100) { totalCount nodes { isResolved } }'
 
-// The copy of githubCalls: each call is `api graphql`, its variables in this
-// order (`-F` for number, `-f` for the rest), then `-f query=<query>`.
+// The copy of githubCalls: each call is `api graphql --hostname <host>`, its
+// variables in this order (`-F` for number, `-f` for the rest), then
+// `-f query=<query>`.
 const calls = {
   viewer: { variables: [], query: 'query { viewer { login } }' },
   issueState: {
@@ -70,11 +82,26 @@ const calls = {
   },
 }
 
+/** The host gh sends the call to: --hostname, else GH_HOST, else github.com. */
+function hostOf() {
+  const flag = argv[2] === '--hostname' ? argv[3] : undefined
+  const chosen = flag ?? process.env.GH_HOST
+  return String(
+    chosen === undefined || chosen === '' ? 'github.com' : chosen,
+  ).toLowerCase()
+}
+
 function record(entry) {
   if (process.env.FAKE_GH_LOG)
     appendFileSync(
       process.env.FAKE_GH_LOG,
-      `${JSON.stringify({ argv, ...entry })}\n`,
+      `${JSON.stringify({
+        argv,
+        host: hostOf(),
+        envHost: process.env.GH_HOST ?? null,
+        envRepo: process.env.GH_REPO ?? null,
+        ...entry,
+      })}\n`,
     )
 }
 
@@ -87,17 +114,20 @@ function refuse(violation) {
 /** The call argv names, and its variables, or null. */
 function match() {
   if (argv[0] !== 'api' || argv[1] !== 'graphql') return null
+  // `--hostname <host>` right after `api graphql`, or nothing there.
+  const from = argv[2] === '--hostname' ? 4 : 2
+  if (from === 4 && !/^[a-z0-9.-]+$/i.test(argv[3] ?? '')) return null
   const last = argv.at(-1) ?? ''
   if (argv.at(-2) !== '-f' || !last.startsWith('query=')) return null
   const query = last.slice('query='.length)
   const name = Object.keys(calls).find((key) => calls[key].query === query)
   if (name === undefined) return null
   const { variables } = calls[name]
-  if (argv.length !== 4 + 2 * variables.length) return null
+  if (argv.length !== from + 2 + 2 * variables.length) return null
   const values = {}
   for (const [i, variable] of variables.entries()) {
-    const flag = argv[2 + 2 * i]
-    const pair = argv[3 + 2 * i]
+    const flag = argv[from + 2 * i]
+    const pair = argv[from + 1 + 2 * i]
     if (flag !== (variable === 'number' ? '-F' : '-f')) return null
     if (!pair.startsWith(`${variable}=`)) return null
     values[variable] = pair.slice(variable.length + 1)
@@ -268,14 +298,19 @@ function answerFor(fixture, name, values) {
 }
 
 async function main() {
-  let fixture
+  let root
   try {
-    fixture = JSON.parse(
-      readFileSync(process.env.FAKE_GH_FIXTURE ?? '', 'utf8'),
-    )
+    root = JSON.parse(readFileSync(process.env.FAKE_GH_FIXTURE ?? '', 'utf8'))
   } catch {
     return refuse('FAKE_GH_FIXTURE ausente ou ilegível')
   }
+  const host = hostOf()
+  const fixture =
+    host === String(root.host ?? 'github.com').toLowerCase()
+      ? root
+      : root.hosts?.[host]
+  if (fixture === undefined)
+    return refuse(`host inesperado: ${host}, sem resposta na fixture`)
   if (
     process.env.GH_PROMPT_DISABLED !== '1' ||
     process.env.GH_NO_UPDATE_NOTIFIER !== '1'

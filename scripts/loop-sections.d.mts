@@ -323,6 +323,12 @@ export declare const gateCacheFile: string
 export declare const gateCacheSchema: number
 export declare const gateTtlHours: number
 export declare const planPendingPrefix: string
+/**
+ * planPendingPrefix, the session id encoded, and `.json`: [A-Za-z0-9-] kept,
+ * every other UTF-8 byte (`_` included) as `_XX` in uppercase hex, a lone
+ * surrogate as `_uXXXX`, and no id at all as `_`. Injective, so two sessions
+ * never share a marker.
+ */
 export declare function planPendingFile(
   sessionId: string | null | undefined,
 ): string

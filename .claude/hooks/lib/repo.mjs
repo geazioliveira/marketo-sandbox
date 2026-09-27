@@ -329,13 +329,19 @@ export function pendingPlanExists(gitDir, sessionId) {
 
 /**
  * Writes the marker whole or not at all: a half-written file would still
- * close the cache, but a reader of its content would see garbage.
+ * close the cache, but a reader of its content would see garbage. A write
+ * that fails throws, and leaves no scratch file behind.
  */
 export function writePendingPlan(gitDir, sessionId, data) {
   const target = pendingPlanPath(gitDir, sessionId)
   const scratch = `${target}.${process.pid}.tmp`
-  writeFileSync(scratch, `${JSON.stringify(data, null, 2)}\n`)
-  renameSync(scratch, target)
+  try {
+    writeFileSync(scratch, `${JSON.stringify(data, null, 2)}\n`)
+    renameSync(scratch, target)
+  } catch (error) {
+    rmSync(scratch, { force: true })
+    throw error
+  }
   return target
 }
 

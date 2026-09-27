@@ -74,11 +74,20 @@ interface Github {
 
 interface GhRulesLib {
   githubCalls: Record<string, { variables: string[]; query: string }>
-  githubCallArgv(name: string, values?: Record<string, unknown>): string[]
+  githubCallArgv(
+    name: string,
+    values?: Record<string, unknown>,
+    host?: string,
+  ): string[]
   githubClient(options?: {
     env?: NodeJS.ProcessEnv
     timeoutMs?: number
+    host?: string
   }): Github
+  githubClients(options?: {
+    env?: NodeJS.ProcessEnv
+    timeoutMs?: number
+  }): (host: string) => Github
   ghDecision(command: unknown, ctx: GhCtx): Promise<Decision>
   ghAliasDefinitions(
     command: unknown,
@@ -99,7 +108,9 @@ interface GhCtx {
   cwd: string
   repo: SeenRepo | null
   permissionMode?: string
-  github: Github
+  github?: Github
+  /** The client for the host a command's reads go to (fifth round). */
+  githubFor?: (host: string) => Github
   cwdKnown?: boolean
   env?: Record<string, string | undefined>
   files?: (file: string) => { known: boolean; text: string | null } | undefined
@@ -1657,10 +1668,12 @@ describe('githubClient against the strict fake', () => {
     expect(
       gh
         .githubCallArgv('issueState', { owner: 'o', name: 'n', number: 3 })
-        .slice(0, 8),
+        .slice(0, 10),
     ).toEqual([
       'api',
       'graphql',
+      '--hostname',
+      'github.com',
       '-f',
       'owner=o',
       '-f',
@@ -1668,7 +1681,55 @@ describe('githubClient against the strict fake', () => {
       '-F',
       'number=3',
     ])
+    expect(
+      gh.githubCallArgv('viewer', {}, 'ghe.example.com').slice(0, 4),
+    ).toEqual(['api', 'graphql', '--hostname', 'ghe.example.com'])
   })
+
+  fakeTest(
+    'reads the host it is bound to, never the GH_HOST or GH_REPO it inherits (Copilot review of #26, fifth round)',
+    async ({ fake }) => {
+      const f = fake({
+        viewer: { login: 'na-github-com' },
+        hosts: { 'ghe.example.com': { viewer: { login: 'na-empresa' } } },
+      })
+      const env = {
+        ...f.env,
+        GH_HOST: 'ghe.example.com',
+        GH_REPO: 'ghe.example.com/alguem/outro',
+      }
+      expect(gh.githubClient({ env }).viewer()).toEqual({
+        ok: true,
+        value: 'na-github-com',
+      })
+      expect(
+        gh.githubClient({ env: f.env, host: 'ghe.example.com' }).viewer(),
+      ).toEqual({ ok: true, value: 'na-empresa' })
+      const clients = gh.githubClients({ env })
+      expect(clients('github.com')).toBe(clients('github.com'))
+      expect(clients('github.com').viewer()).toEqual({
+        ok: true,
+        value: 'na-github-com',
+      })
+      expect(f.calls()).toEqual([
+        expect.objectContaining({
+          host: 'github.com',
+          envHost: 'github.com',
+          envRepo: null,
+        }),
+        expect.objectContaining({
+          host: 'ghe.example.com',
+          envHost: 'ghe.example.com',
+          envRepo: null,
+        }),
+        expect.objectContaining({
+          host: 'github.com',
+          envHost: 'github.com',
+          envRepo: null,
+        }),
+      ])
+    },
+  )
 
   fakeTest(
     'reads an issue’s newest comments and the account’s newest issues, for plan-to-issue (Copilot review of #26)',
@@ -3074,5 +3135,120 @@ describe('the GitHub host a gh command talks to (Copilot review of #26, third ro
       ),
     )
     expect(github.calls).toEqual([])
+  })
+})
+
+describe('the host each live read goes to (Copilot review of #26, fifth round)', () => {
+  const transition = '--remove-label needs-triage --add-label ready-for-human'
+  const resolve = `-f query='mutation { resolveReviewThread(input: {threadId: "PRRT_1"}) { thread { isResolved } } }'`
+  // Claude Code's environment, as guard-bash hands it on: an enterprise host.
+  const env = { GH_HOST: 'ghe.example.com' }
+
+  /** A client factory that records the host of each client it hands out. */
+  function recorder(github: Stub) {
+    const hosts: string[] = []
+    return {
+      hosts,
+      githubFor: (host: string) => {
+        hosts.push(host)
+        return github
+      },
+    }
+  }
+
+  it.each([
+    [
+      'the label transition, GH_HOST=github.com on the command',
+      `GH_HOST=github.com gh issue edit 5 ${transition}`,
+      { issueState: issueAnswer() },
+    ],
+    [
+      'gh pr merge, -R github.com/OWNER/REPO',
+      `gh pr merge 7 -R github.com/${PROJECT}`,
+      { prMergeState: mergeAnswer() },
+    ],
+    [
+      'gh pr merge, the PR URL',
+      `gh pr merge https://github.com/${PROJECT}/pull/7`,
+      { prMergeState: mergeAnswer() },
+    ],
+    [
+      'resolveReviewThread, --hostname github.com',
+      `gh api graphql --hostname github.com ${resolve}`,
+      {
+        threadLastAuthor: { ok: true, value: 'geazioliveira' },
+        viewer: { ok: true, value: 'geazioliveira' },
+      },
+    ],
+    [
+      'resolveReviewThread, GH_HOST=github.com on the command',
+      `GH_HOST=github.com gh api graphql ${resolve}`,
+      {
+        threadLastAuthor: { ok: true, value: 'geazioliveira' },
+        viewer: { ok: true, value: 'geazioliveira' },
+      },
+    ],
+  ])(
+    'reads %s on github.com, over an inherited enterprise GH_HOST',
+    async (_, text, answers) => {
+      const github = stub(answers)
+      const { hosts, githubFor } = recorder(github)
+      await judge(text, { github, extra: { env, githubFor } })
+      expect(github.calls.length).toBeGreaterThan(0)
+      expect(new Set(hosts)).toEqual(new Set(['github.com']))
+    },
+  )
+
+  it.each<[string, string, Record<string, string>]>([
+    ['--hostname "$H"', `gh api graphql --hostname "$H" ${resolve}`, {}],
+    ['GH_HOST=$H on the command', `GH_HOST=$H gh api graphql ${resolve}`, {}],
+    [
+      'GH_HOST=$(…) inherited',
+      `gh api graphql ${resolve}`,
+      { GH_HOST: '$(cat /etc/host)' },
+    ],
+  ])(
+    'reads nothing for resolveReviewThread on a host it cannot read (%s), and asks, critical',
+    async (_, text, inherited) => {
+      const github = stub({
+        threadLastAuthor: { ok: true, value: 'geazioliveira' },
+        viewer: { ok: true, value: 'geazioliveira' },
+      })
+      const { githubFor } = recorder(github)
+      expectAsk(
+        await judge(text, { github, extra: { env: inherited, githubFor } }),
+        {
+          critical: true,
+          reason:
+            /não consegui confirmar que a última resposta da thread é sua \(não consegui ler em que GitHub/,
+        },
+      )
+      expect(github.calls).toEqual([])
+    },
+  )
+
+  it('reads an alias’s merge on the host of the command that runs it, and never for an alias being set', async () => {
+    const github = stub({ prMergeState: mergeAnswer() })
+    const { hosts, githubFor } = recorder(github)
+    const ghAliases = new Map([['mg', { known: true, text: 'pr merge' }]])
+    expectAsk(
+      await judge(`gh mg 7 -R github.com/${PROJECT}`, {
+        github,
+        extra: { env, githubFor, ghAliases },
+      }),
+      { critical: true, reason: /confira antes do merge/ },
+    )
+    expect(hosts).toEqual(['github.com'])
+    expect(github.calls).toEqual([['prMergeState', PROJECT, 7]])
+    // Set with no GH_HOST, the alias would merge this project's PR; it is
+    // still judged as written.
+    const setting = recorder(stub())
+    expectAsk(
+      await judge(`gh alias set m 'pr merge'`, {
+        extra: { githubFor: setting.githubFor },
+      }),
+      { critical: true },
+    )
+    expect(setting.hosts).toEqual([])
   })
 })

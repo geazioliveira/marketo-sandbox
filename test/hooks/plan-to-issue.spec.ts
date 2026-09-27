@@ -1,5 +1,6 @@
 import {
   appendFileSync,
+  chmodSync,
   cpSync,
   existsSync,
   mkdirSync,
@@ -22,6 +23,7 @@ import {
   planPendingPrefix,
 } from '../../scripts/loop-sections.mjs'
 import {
+  gitShim,
   type HookRepo,
   hookRepo,
   type HookRepoOptions,
@@ -338,20 +340,23 @@ describe.concurrent('plan-to-issue on ExitPlanMode', () => {
     expect(existsSync(repo.markerPath(SESSION))).toBe(false)
   })
 
-  test('says so, and exits 0, when git cannot run to find the git dir', async ({
+  test('says plainly that nothing was written, through exit 2, when git cannot run to find the git dir (Copilot review of #26, fifth round)', async ({
     fresh,
     scratch,
     expect,
   }) => {
-    const repo = await fresh({ branch: BRANCH })
+    const repo = await fresh({ branch: BRANCH, cache: true })
     const run = await exitPlanMode(
       repo,
       { toolInput: { plan: '# Plano' } },
       { env: { ...repo.env(), PATH: scratch() } },
     )
-    expect(run.status).toBe(0)
-    expect(contextOf(run)).toContain('o hook plan-to-issue falhou')
-    expect(contextOf(run)).toContain('Publique o plano numa issue')
+    // PostToolUse: exit 2 shows stderr to Claude.
+    expect(run.status).toBe(2)
+    expect(run.stdout).toBe('')
+    expect(run.stderr).toContain('Nada foi gravado')
+    expect(run.stderr).toContain('Não construa')
+    expect(existsSync(repo.markerPath(SESSION))).toBe(false)
   })
 })
 
@@ -1401,29 +1406,40 @@ describe.concurrent(
       ])
     })
 
+    // Each comment is built when its test runs: later() taken at collection
+    // would already be in the past in a long run, and the marker would stay
+    // for the wrong reason.
     test.for([
       [
         'a # Plano comment from before the marker',
-        { body: planComment, createdAt: earlier(), viewerDidAuthor: true },
+        () => ({
+          body: planComment,
+          createdAt: earlier(),
+          viewerDidAuthor: true,
+        }),
       ],
       [
         'a # Plano comment of another account',
-        { body: planComment, createdAt: later(), viewerDidAuthor: false },
+        () => ({
+          body: planComment,
+          createdAt: later(),
+          viewerDidAuthor: false,
+        }),
       ],
       [
         'a comment that does not open with # Plano',
-        {
+        () => ({
           body: `Resumo.\n\n${planComment}`,
           createdAt: later(),
           viewerDidAuthor: true,
-        },
+        }),
       ],
     ] as const)(
       'keeps the marker for %s, and says so',
       async ([, found], { fresh, expect }) => {
         const repo = await pending(fresh)
         repo.write({ 'plano.md': planComment })
-        repo.setFixture({ comments: { 5: { comments: [found] } } })
+        repo.setFixture({ comments: { 5: { comments: [found()] } } })
         const run = await otherTool(repo, 'Monitor', comment, { taskId: 'b2' })
         expect(existsSync(repo.markerPath(SESSION))).toBe(true)
         expect(contextOf(run)).toContain('o marcador continua')
@@ -1805,6 +1821,187 @@ describe.concurrent(
   },
 )
 
+// ---------------------------------------------------------------------------
+// Fifth round of Copilot's review of #26
+
+describe.concurrent(
+  'plan-to-issue on Monitor and the terminal: GitHub is asked on the host gh publishes to (Copilot review of #26, fifth round)',
+  () => {
+    const ghe = 'ghe.example.com'
+    const issueBody = sectionsOf(featureSections)
+    const createCommand = `gh issue create --title 'Uma coisa' --label enhancement,${TO} --body-file issue.md`
+    // Built per test: later() is relative to the moment the test runs, not to
+    // when the file was collected, which is minutes earlier in a full run.
+    const createdIssue = () => ({
+      number: 30,
+      createdAt: later(),
+      title: 'Uma coisa',
+      body: issueBody,
+      repo: 'geazioliveira/marketo-sandbox',
+      labels: ['enhancement', TO],
+    })
+    const planned = () => ({
+      comments: {
+        5: {
+          comments: [
+            { body: planComment, createdAt: later(), viewerDidAuthor: true },
+          ],
+        },
+      },
+    })
+    const notPlanned = () => ({
+      comments: {
+        5: {
+          comments: [
+            { body: 'Antes.', createdAt: earlier(), viewerDidAuthor: true },
+          ],
+        },
+      },
+    })
+
+    /** Each GitHub read went to github.com, with the host set on gh itself. */
+    const readGithubCom = (repo: HookRepo, call: string) =>
+      expect(repo.calls()).toEqual([
+        expect.objectContaining({
+          call,
+          host: 'github.com',
+          envHost: 'github.com',
+          argv: expect.arrayContaining(['--hostname', 'github.com']),
+        }),
+      ])
+
+    test.for([
+      [
+        'GH_HOST=github.com on the command',
+        'GH_HOST=github.com gh issue comment 5 --body-file plano.md',
+      ],
+      [
+        '-R github.com/OWNER/REPO',
+        'gh issue comment 5 -R github.com/geazioliveira/marketo-sandbox --body-file plano.md',
+      ],
+    ])(
+      'a comment with %s, over an inherited enterprise GH_HOST, is not confirmed by the other GitHub',
+      async ([, command], { fresh, expect }) => {
+        const repo = await pending(fresh)
+        repo.write({ 'plano.md': planComment })
+        // The enterprise host shows a # Plano comment; github.com, where the
+        // command posts, does not.
+        repo.setFixture({ ...notPlanned(), hosts: { [ghe]: planned() } })
+        const run = await otherTool(
+          repo,
+          'Monitor',
+          command,
+          { taskId: 'b1', status: 'running' },
+          { env: repo.env({ GH_HOST: ghe }) },
+        )
+        expect(existsSync(repo.markerPath(SESSION))).toBe(true)
+        expect(cacheExists(repo)).toBe(true)
+        expect(contextOf(run)).toContain('o marcador continua')
+        readGithubCom(repo, 'issueComments')
+      },
+    )
+
+    test.for([
+      [
+        'GH_HOST=github.com on the command',
+        'GH_HOST=github.com gh issue comment 5 --body-file plano.md',
+      ],
+      // The issue's URL names its host, whatever GH_HOST says.
+      [
+        'the issue named by its URL',
+        `gh issue comment ${ISSUE_URL}/5 --body-file plano.md`,
+      ],
+    ])(
+      'a comment with %s, over an inherited enterprise GH_HOST, is confirmed on github.com',
+      async ([, command], { fresh, expect }) => {
+        const repo = await pending(fresh)
+        repo.write({ 'plano.md': planComment })
+        repo.setFixture({ ...planned(), hosts: { [ghe]: notPlanned() } })
+        const run = await otherTool(
+          repo,
+          'mcp__terminal__run_in_terminal',
+          command,
+          'Comando enviado ao terminal.',
+          { env: repo.env({ GH_HOST: ghe }) },
+        )
+        // The note first: when the marker stays, it says why.
+        expect(contextOf(run)).toContain('plano publicado na issue #5')
+        expect(existsSync(repo.markerPath(SESSION))).toBe(false)
+        readGithubCom(repo, 'issueComments')
+      },
+    )
+
+    test('an issue created over an inherited enterprise GH_HOST is looked for on github.com only', async ({
+      fresh,
+      expect,
+    }) => {
+      const repo = await pending(fresh)
+      repo.write({ 'issue.md': issueBody })
+      repo.setFixture({
+        viewerIssues: { issues: [] },
+        hosts: { [ghe]: { viewerIssues: { issues: [createdIssue()] } } },
+      })
+      const run = await otherTool(
+        repo,
+        'Monitor',
+        `GH_HOST=github.com ${createCommand}`,
+        { taskId: 'b1', status: 'running' },
+        { env: repo.env({ GH_HOST: ghe }) },
+      )
+      expect(existsSync(repo.markerPath(SESSION))).toBe(true)
+      expect(contextOf(run)).toContain('o marcador continua')
+      readGithubCom(repo, 'viewerIssues')
+    })
+
+    test('an issue created with -R github.com/OWNER/REPO is confirmed on github.com', async ({
+      fresh,
+      expect,
+    }) => {
+      const repo = await pending(fresh)
+      repo.write({ 'issue.md': issueBody })
+      repo.setFixture({
+        viewerIssues: { issues: [createdIssue()] },
+        hosts: { [ghe]: { viewerIssues: { issues: [] } } },
+      })
+      const run = await otherTool(
+        repo,
+        'mcp__terminal__run_in_terminal',
+        `${createCommand} -R github.com/geazioliveira/marketo-sandbox`,
+        'Comando enviado ao terminal.',
+        { env: repo.env({ GH_HOST: ghe }) },
+      )
+      // The note first: when the marker stays, it says why.
+      expect(contextOf(run)).toContain('plano publicado na issue #30')
+      expect(existsSync(repo.markerPath(SESSION))).toBe(false)
+      readGithubCom(repo, 'viewerIssues')
+    })
+
+    test.for([
+      ['a comment', 'GH_HOST=$H gh issue comment 5 --body-file plano.md'],
+      ['an issue', `GH_HOST=$H ${createCommand}`],
+    ])(
+      'keeps the marker for %s on a host it cannot read, and reads nothing',
+      async ([, command], { fresh, expect }) => {
+        const repo = await pending(fresh)
+        repo.write({ 'plano.md': planComment, 'issue.md': issueBody })
+        repo.setFixture({
+          ...planned(),
+          viewerIssues: { issues: [createdIssue()] },
+        })
+        const run = await otherTool(repo, 'Monitor', command, {
+          taskId: 'b1',
+          status: 'running',
+        })
+        expect(existsSync(repo.markerPath(SESSION))).toBe(true)
+        expect(contextOf(run)).toContain(
+          'não consegui ler em que issue, repositório ou host',
+        )
+        expect(repo.calls()).toEqual([])
+      },
+    )
+  },
+)
+
 describe.concurrent(
   'plan-to-issue when a library does not load (Copilot review of #26, fourth round)',
   () => {
@@ -1882,10 +2079,17 @@ describe.concurrent(
     }) => {
       const script = brokenTree(scratch())
       const repo = await fresh({ branch: BRANCH })
+      // The ids of the fifth round of Copilot's review of #26 too: `a/b`
+      // and `a_b` shared a file before, and the copy must not bring it back.
       for (const id of [
         'abc-123',
         '0f5e1c9a-9d2b-4a61-8c3e-7a1b2c3d4e5f',
         'sessão com/../barra',
+        'a/b',
+        'a_b',
+        'a_2Fb',
+        'セッション😀',
+        '\ud800',
         '',
         undefined,
       ]) {
@@ -1933,5 +2137,323 @@ describe.concurrent(
       expect(existsSync(repo.markerPath(SESSION))).toBe(true)
       expect(cacheExists(repo)).toBe(true)
     })
+  },
+)
+
+describe.concurrent(
+  'plan-to-issue fails closed on ExitPlanMode (Copilot review of #26, fifth round)',
+  () => {
+    // A directory mode keeps no one but root out: as root, the cases that
+    // need a git dir it cannot write have nothing to test.
+    const asRoot = process.getuid?.() === 0
+
+    /** A copy of the hooks whose plan-publication run() throws as it starts. */
+    const throwingTree = (root: string): string => {
+      const hooks = path.join(root, '.claude', 'hooks')
+      cpSync(hooksDir, hooks, { recursive: true })
+      mkdirSync(path.join(root, 'scripts'))
+      cpSync(
+        path.join(projectRoot, 'scripts', 'loop-sections.mjs'),
+        path.join(root, 'scripts', 'loop-sections.mjs'),
+      )
+      const lib = path.join(hooks, 'lib', 'plan-publication.mjs')
+      const text = readFileSync(lib, 'utf8')
+      const patched = text.replace(
+        'export async function run(',
+        "export async function run() {\n  throw new Error('falha de teste no run')\n}\n\nexport async function runOriginal(",
+      )
+      if (patched === text) throw new Error('run() não encontrado para trocar')
+      writeFileSync(lib, patched)
+      return path.join(hooks, 'plan-to-issue.mjs')
+    }
+
+    const runScript = (
+      script: string,
+      repo: HookRepo,
+      input: Record<string, unknown>,
+      cwd = repo.dir,
+    ) =>
+      spawnWith(process.execPath, [script], {
+        input: JSON.stringify({
+          session_id: SESSION,
+          transcript_path: path.join(repo.root, 'transcript.jsonl'),
+          cwd,
+          hook_event_name: 'PostToolUse',
+          ...input,
+        }),
+        env: repo.env(),
+        cwd,
+      })
+
+    const accepted = {
+      tool_name: 'ExitPlanMode',
+      tool_input: { plan: planComment },
+    }
+
+    /** loop-gate.json in a git dir, open for the branch, checked now. */
+    const writeCacheAt = (gitDir: string, branch: string) =>
+      writeFileSync(
+        path.join(gitDir, gateCacheFile),
+        `${JSON.stringify({
+          schema: 1,
+          repo: 'geazioliveira/marketo-sandbox',
+          branch,
+          issue: 5,
+          headSha: 'x',
+          open: true,
+          verified: true,
+          steps: [],
+          checkedAt: new Date().toISOString(),
+        })}\n`,
+      )
+
+    /** build-guard on an edit in `dir`, as this session. */
+    const editIn = (repo: HookRepo, dir: string) =>
+      repo.run(
+        'build-guard',
+        {
+          session_id: SESSION,
+          cwd: dir,
+          hook_event_name: 'PreToolUse',
+          permission_mode: 'default',
+          tool_name: 'Edit',
+          tool_input: {
+            file_path: path.join(dir, 'src', 'a.ts'),
+            old_string: 'a',
+            new_string: 'b',
+          },
+        },
+        { cwd: dir },
+      )
+
+    test('writes the marker when the budget runs out while the repository is read, and says what happened (finding 3)', async ({
+      fresh,
+      scratch,
+      expect,
+    }) => {
+      const repo = await fresh({ branch: BRANCH, cache: true })
+      // Only the repository lookup hangs; the short path of the fallback,
+      // `rev-parse --git-common-dir` alone, reaches the real git.
+      const bin = gitShim(
+        scratch(),
+        'case " $* " in *" --show-toplevel "*) exec sleep 30 ;; esac',
+      )
+      const env = repo.env({
+        PATH: [bin, repo.bin, process.env.PATH ?? ''].join(path.delimiter),
+        LOOP_HOOKS_BUDGET_MS: '4000',
+      })
+      const started = Date.now()
+      const run = await exitPlanMode(
+        repo,
+        { toolInput: { plan: planComment } },
+        { env },
+      )
+      expect(run.status).toBe(2)
+      expect(run.stdout).toBe('')
+      expect(existsSync(repo.markerPath(SESSION))).toBe(true)
+      expect(readMarker(repo)).toMatchObject({
+        schema: 1,
+        sessionId: SESSION,
+      })
+      expect(run.stderr).toContain(
+        'o prazo de 4 s do hook acabou antes de ler o repositório',
+      )
+      expect(run.stderr).toContain('marcado como pendente mesmo assim')
+      expect(run.stderr).not.toContain('continua como estava')
+      // The marker was written: the caches stay, closed by it.
+      expect(cacheExists(repo)).toBe(true)
+      expect(Date.now() - started).toBeLessThan(20_000)
+    })
+
+    test('when every git hangs, bounds the fallback git by the slice held back for it, and says nothing was written (finding 3)', async ({
+      fresh,
+      scratch,
+      expect,
+    }) => {
+      const repo = await fresh({ branch: BRANCH, cache: true })
+      const bin = gitShim(scratch(), 'exec sleep 30')
+      const env = repo.env({
+        PATH: [bin, repo.bin, process.env.PATH ?? ''].join(path.delimiter),
+        LOOP_HOOKS_BUDGET_MS: '6000',
+      })
+      const started = Date.now()
+      const run = await exitPlanMode(
+        repo,
+        { toolInput: { plan: planComment } },
+        { env },
+      )
+      const took = Date.now() - started
+      expect(run.status).toBe(2)
+      expect(run.stdout).toBe('')
+      expect(run.stderr).toContain(
+        'o prazo de 6 s do hook acabou antes de ler o repositório',
+      )
+      expect(run.stderr).toContain('Nada foi gravado')
+      expect(run.stderr).toContain('Não construa')
+      // The repository lookup gets the budget less the third held back for
+      // the fallback (2000 ms), and the fallback's git gets that slice, less
+      // the little the lookup ran over: more than the 1 s floor it gets when
+      // nothing was held back, not the fallback's own 10 s, and never
+      // unbounded, which would outlast the hook's timeout in settings.json
+      // and leave Claude told nothing.
+      const gitMs = Number(
+        /o git não respondeu em (\d+) ms/.exec(run.stderr)?.[1],
+      )
+      expect(gitMs).toBeGreaterThan(1000)
+      expect(gitMs).toBeLessThanOrEqual(2000)
+      expect(existsSync(repo.markerPath(SESSION))).toBe(false)
+      // With no git dir, no cache can be found to remove: the message says
+      // not to build.
+      expect(cacheExists(repo)).toBe(true)
+      expect(took).toBeLessThan(15_000)
+    })
+
+    test('a run that throws still marks the accepted plan, and tells Claude through exit 2 (finding 4)', async ({
+      fresh,
+      scratch,
+      expect,
+    }) => {
+      const script = throwingTree(scratch())
+      const repo = await fresh({ branch: BRANCH, cache: true })
+      const run = await runScript(script, repo, accepted)
+      expect(run.status).toBe(2)
+      expect(run.stderr).toContain('falha de teste no run')
+      expect(run.stderr).toContain('marcado como pendente mesmo assim')
+      expect(existsSync(repo.markerPath(SESSION))).toBe(true)
+      expect(cacheExists(repo)).toBe(true)
+    })
+
+    test('a run that throws on a publication never removes the marker, and says so through exit 2 (finding 4)', async ({
+      fresh,
+      scratch,
+      expect,
+    }) => {
+      const script = throwingTree(scratch())
+      const repo = await pending(fresh)
+      repo.write({ 'plano.md': planComment })
+      const run = await runScript(script, repo, {
+        tool_name: 'Bash',
+        tool_input: { command: 'gh issue comment 5 --body-file plano.md' },
+        tool_response: {
+          stdout: `${ISSUE_URL}/5#issuecomment-50\n`,
+          stderr: '',
+          interrupted: false,
+          isImage: false,
+        },
+      })
+      expect(run.status).toBe(2)
+      expect(run.stderr).toContain('falha de teste no run')
+      expect(run.stderr).toContain('continua como estava')
+      expect(existsSync(repo.markerPath(SESSION))).toBe(true)
+      expect(cacheExists(repo)).toBe(true)
+    })
+
+    test('a marker path taken by a directory: neither write leaves its scratch file, and the caches go (finding 4)', async ({
+      fresh,
+      expect,
+    }) => {
+      const repo = await fresh({ branch: BRANCH, cache: true })
+      // A directory where the marker goes: the rename onto it fails, both in
+      // the library's write and in the fallback's, and each has written its
+      // scratch file first.
+      mkdirSync(path.join(repo.markerPath(SESSION), 'x'), { recursive: true })
+      const run = await exitPlanMode(repo, { toolInput: { plan: planComment } })
+      expect(run.status).toBe(2)
+      expect(run.stdout).toBe('')
+      expect(run.stderr).toContain(
+        'o marcador do plano aceito não pôde ser gravado nem pelo caminho de reserva',
+      )
+      expect(run.stderr).toContain('removi o cache do gate')
+      expect(cacheExists(repo)).toBe(false)
+      expect(
+        readdirSync(repo.gitDir).filter((name) => name.endsWith('.tmp')),
+      ).toEqual([])
+    })
+
+    test.skipIf(asRoot)(
+      'a git dir it cannot write: no marker, so the gate cache of every worktree goes, and build-guard denies (finding 4)',
+      async ({ fresh, expect }) => {
+        const repo = await fresh()
+        const worktree = await repo.addWorktree('wt-5', BRANCH)
+        writeCacheAt(worktree.gitDir, BRANCH)
+        chmodSync(repo.gitDir, 0o555)
+        try {
+          const run = await repo.run(
+            'plan-to-issue',
+            {
+              session_id: SESSION,
+              cwd: worktree.dir,
+              hook_event_name: 'PostToolUse',
+              ...accepted,
+            },
+            { cwd: worktree.dir },
+          )
+          expect(run.status).toBe(2)
+          expect(run.stdout).toBe('')
+          expect(existsSync(repo.markerPath(SESSION))).toBe(false)
+          expect(existsSync(path.join(worktree.gitDir, gateCacheFile))).toBe(
+            false,
+          )
+          expect(run.stderr).toContain(
+            'o marcador do plano aceito não pôde ser gravado nem pelo caminho de reserva',
+          )
+          expect(run.stderr).toContain('removi o cache do gate')
+          expect(run.stderr).toContain('Não rode npm run gate nem construa')
+          const edit = await editIn(repo, worktree.dir)
+          expect(edit.json?.hookSpecificOutput?.permissionDecision).toBe('deny')
+          expect(
+            edit.json?.hookSpecificOutput?.permissionDecisionReason,
+          ).toContain('npm run gate')
+        } finally {
+          chmodSync(repo.gitDir, 0o755)
+        }
+      },
+    )
+
+    test.skipIf(asRoot)(
+      'a cache it cannot remove is named, and the others go (finding 4)',
+      async ({ fresh, expect }) => {
+        const repo = await fresh({ branch: BRANCH, cache: true })
+        const worktree = await repo.addWorktree('wt-6', 'feature/6-outra')
+        writeCacheAt(worktree.gitDir, 'feature/6-outra')
+        chmodSync(repo.gitDir, 0o555)
+        try {
+          const run = await exitPlanMode(repo, {
+            toolInput: { plan: planComment },
+          })
+          expect(run.status).toBe(2)
+          expect(existsSync(repo.markerPath(SESSION))).toBe(false)
+          expect(existsSync(path.join(worktree.gitDir, gateCacheFile))).toBe(
+            false,
+          )
+          expect(cacheExists(repo)).toBe(true)
+          expect(run.stderr).toContain('não consegui remover')
+          expect(run.stderr).toContain(path.join(repo.gitDir, gateCacheFile))
+          expect(run.stderr).toContain('Não construa')
+        } finally {
+          chmodSync(repo.gitDir, 0o755)
+        }
+      },
+    )
+
+    test.skipIf(asRoot)(
+      'a run that throws, in a git dir it cannot write: nothing is written, and it says so plainly (finding 4)',
+      async ({ fresh, scratch, expect }) => {
+        const script = throwingTree(scratch())
+        const repo = await fresh({ branch: BRANCH, cache: true })
+        chmodSync(repo.gitDir, 0o555)
+        try {
+          const run = await runScript(script, repo, accepted)
+          expect(run.status).toBe(2)
+          expect(run.stderr).toContain('falha de teste no run')
+          expect(run.stderr).toContain('Nada foi gravado')
+          expect(run.stderr).toContain('Não construa')
+          expect(existsSync(repo.markerPath(SESSION))).toBe(false)
+          expect(cacheExists(repo)).toBe(true)
+        } finally {
+          chmodSync(repo.gitDir, 0o755)
+        }
+      },
+    )
   },
 )

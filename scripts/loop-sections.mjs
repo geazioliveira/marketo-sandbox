@@ -1207,13 +1207,37 @@ export const gateTtlHours = 8
 export const planPendingPrefix = 'loop-plan-pending-'
 
 /**
- * The file name of Claude Code session `sessionId`'s pending-plan marker.
- * Every character outside [A-Za-z0-9_-] becomes `_`, so a session id never
- * names a path outside the git dir.
+ * The file name of Claude Code session `sessionId`'s pending-plan marker:
+ * planPendingPrefix, the id encoded, and `.json`.
+ *
+ * The encoding keeps [A-Za-z0-9-] and writes every other UTF-8 byte, `_`
+ * included, as `_XX` in uppercase hex (a lone surrogate, which UTF-8 cannot
+ * hold, as `_u` and its code unit in four). So a session id never names a
+ * path outside the git dir, a UUID keeps its own spelling, and two ids never
+ * share a file: making each character outside the set `_` gave `a/b` and
+ * `a_b` one marker, and one session's publication removed the other's
+ * (Copilot review of #26, fifth round). No id at all (null, undefined, '')
+ * is a lone `_`, which no id encodes to: every `_` of an encoded id is
+ * followed by its escape.
+ *
+ * .claude/hooks/plan-to-issue.mjs keeps a copy for when this module fails to
+ * load; test/hooks/plan-to-issue.spec.ts holds the two equal.
  */
 export function planPendingFile(sessionId) {
-  const id = String(sessionId ?? '').replace(/[^A-Za-z0-9_-]/g, '_')
-  return `${planPendingPrefix}${id === '' ? '_' : id}.json`
+  const id = String(sessionId ?? '')
+  if (id === '') return `${planPendingPrefix}_.json`
+  const hex = (value, width) =>
+    value.toString(16).toUpperCase().padStart(width, '0')
+  let encoded = ''
+  for (const char of id) {
+    const code = char.codePointAt(0)
+    if (/^[A-Za-z0-9-]$/.test(char)) encoded += char
+    else if (code >= 0xd800 && code <= 0xdfff) encoded += `_u${hex(code, 4)}`
+    else
+      for (const byte of new TextEncoder().encode(char))
+        encoded += `_${hex(byte, 2)}`
+  }
+  return `${planPendingPrefix}${encoded}.json`
 }
 
 /**

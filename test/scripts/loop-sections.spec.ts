@@ -1460,14 +1460,77 @@ describe('gateStatus', () => {
 
   it('names one pending-plan marker per session, never a path', () => {
     expect(planPendingFile('3f2c-9a_B')).toBe(
-      'loop-plan-pending-3f2c-9a_B.json',
+      'loop-plan-pending-3f2c-9a_5FB.json',
     )
     expect(planPendingFile('../../etc/passwd')).toBe(
-      'loop-plan-pending-______etc_passwd.json',
+      'loop-plan-pending-_2E_2E_2F_2E_2E_2Fetc_2Fpasswd.json',
     )
     expect(planPendingFile('')).toBe('loop-plan-pending-_.json')
     expect(planPendingFile(undefined)).toBe('loop-plan-pending-_.json')
+    expect(planPendingFile(null)).toBe('loop-plan-pending-_.json')
     expect(planPendingFile('a/b').startsWith(planPendingPrefix)).toBe(true)
+  })
+
+  // Copilot review of #26, fifth round: `a/b` and `a_b` both became
+  // `a_b`, so one session's publication removed another session's marker.
+  const sessionIds = [
+    'a/b',
+    'a_b',
+    'a_2Fb',
+    'a_5Fb',
+    'a%2Fb',
+    'a-b',
+    'A-B',
+    'ab',
+    '_',
+    '__',
+    '_2F',
+    '-',
+    '0f5e1c9a-9d2b-4a61-8c3e-7a1b2c3d4e5f',
+    'sessão',
+    'sessão',
+    'セッション',
+    '😀',
+    '\ud800',
+    '\udc00',
+    '𐀀',
+    'a b',
+    'a.b',
+    '../x',
+    ' ',
+    '',
+  ]
+
+  it('names each session’s marker apart: the encoding is injective (Copilot review of #26, fifth round)', () => {
+    const names = sessionIds.map((id) => planPendingFile(id))
+    expect(new Set(names).size).toBe(sessionIds.length)
+  })
+
+  it('keeps a typical session id as it is, and every name inside the git dir', () => {
+    const uuid = '0f5e1c9a-9d2b-4a61-8c3e-7a1b2c3d4e5f'
+    expect(planPendingFile(uuid)).toBe(`loop-plan-pending-${uuid}.json`)
+    expect(planPendingFile('sessao-plano-1')).toBe(
+      'loop-plan-pending-sessao-plano-1.json',
+    )
+    for (const id of sessionIds) {
+      const name = planPendingFile(id)
+      expect(name.startsWith(planPendingPrefix)).toBe(true)
+      expect(name.endsWith('.json')).toBe(true)
+      expect(name).toMatch(/^[A-Za-z0-9_.-]+$/)
+      expect(path.basename(name)).toBe(name)
+    }
+  })
+
+  it('escapes every UTF-8 byte outside [A-Za-z0-9-] as _XX, and tells no id from an empty one', () => {
+    expect(planPendingFile('a_b')).toBe('loop-plan-pending-a_5Fb.json')
+    expect(planPendingFile('a/b')).toBe('loop-plan-pending-a_2Fb.json')
+    expect(planPendingFile('ã')).toBe('loop-plan-pending-_C3_A3.json')
+    expect(planPendingFile('😀')).toBe('loop-plan-pending-_F0_9F_98_80.json')
+    // Not UTF-8 at all: a lone surrogate keeps its own code unit.
+    expect(planPendingFile('\ud800')).toBe('loop-plan-pending-_uD800.json')
+    // No id at all, whatever form it takes, is `_`, which no id escapes to.
+    expect(planPendingFile('')).toBe(planPendingFile(undefined))
+    expect(planPendingFile('_')).not.toBe(planPendingFile(''))
   })
 
   it('is unverified when the issue was not read', () => {

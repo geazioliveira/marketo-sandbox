@@ -501,6 +501,35 @@ describe.concurrent('the pending-plan marker', () => {
     expect(path.basename(file).startsWith(planPendingPrefix)).toBe(true)
     expect(existsSync(path.join(repo.dir, 'escape'))).toBe(false)
   })
+
+  test('keeps sessions whose ids differ only in the characters it escapes apart (Copilot review of #26, fifth round)', async ({
+    expect,
+    fresh,
+  }) => {
+    const repo = await fresh()
+    for (const id of ['a/b', 'a_b', 'a_2Fb'])
+      lib.writePendingPlan(repo.gitDir, id, { sessionId: id })
+    // One session's publication clears its own marker, and only it.
+    lib.clearPendingPlan(repo.gitDir, 'a/b')
+    expect(lib.pendingPlanExists(repo.gitDir, 'a/b')).toBe(false)
+    expect(lib.pendingPlanExists(repo.gitDir, 'a_b')).toBe(true)
+    expect(lib.pendingPlanExists(repo.gitDir, 'a_2Fb')).toBe(true)
+  })
+
+  test('leaves no scratch file behind when the marker cannot be written', async ({
+    expect,
+    fresh,
+  }) => {
+    const repo = await fresh()
+    // A directory where the marker goes: the rename onto it fails.
+    mkdirSync(path.join(lib.pendingPlanPath(repo.gitDir, 's1'), 'x'), {
+      recursive: true,
+    })
+    expect(() => lib.writePendingPlan(repo.gitDir, 's1', {})).toThrow()
+    expect(
+      readdirSync(repo.gitDir).filter((name) => name.endsWith('.tmp')),
+    ).toEqual([])
+  })
 })
 
 describe('harness paths', () => {

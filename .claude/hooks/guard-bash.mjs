@@ -1558,7 +1558,10 @@ async function decide(input, libs) {
   const base = baseDirOf(input, toolInput)
   const parsed = shell.parseCommand(text)
   budget.startBudget('guard-bash')
-  const github = gh.githubClient()
+  // One live client per GitHub host, made when a rule first reads it: each
+  // command's reads go to the host that command goes to, never to the one
+  // the hook's own environment names (Copilot review of #26, fifth round).
+  const githubFor = gh.githubClients()
 
   // One repoAt per directory, and only when a rule asks for it: `gh issue
   // view` costs no git call, and a line of five gh commands costs one.
@@ -1715,7 +1718,7 @@ async function decide(input, libs) {
         cwd,
         cwdKnown: dirKnown,
         permissionMode: input.permission_mode,
-        github,
+        githubFor,
         env: process.env,
         files,
         ghAliases: state.ghAliases,
