@@ -1,0 +1,76 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash|Monitor|mcp__terminal__run_in_terminal",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"$CLAUDE_PROJECT_DIR/.claude/hooks/run.sh\" guard-bash",
+            "timeout": 60
+          }
+        ]
+      },
+      {
+        "matcher": "Edit|Write|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"$CLAUDE_PROJECT_DIR/.claude/hooks/run.sh\" build-guard",
+            "timeout": 90
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "ExitPlanMode|Bash|Monitor|mcp__terminal__run_in_terminal",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"$CLAUDE_PROJECT_DIR/.claude/hooks/run.sh\" plan-to-issue",
+            "timeout": 30
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"$CLAUDE_PROJECT_DIR/.claude/hooks/run.sh\" session-context",
+            "timeout": 30
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"$CLAUDE_PROJECT_DIR/.claude/hooks/run.sh\" session-context",
+            "timeout": 30
+          }
+        ]
+      }
+    ]
+  },
+  "permissions": {
+    "deny": [
+      "mcp__ccd_pr__set_auto_merge",
+      "Bash(gh pr merge *--admin*)",
+      "Edit(//**/.claude/settings.local.json)",
+      "Edit(//**/loop-gate.json)",
+      "Edit(//**/loop-plan-pending-*.json)"
+    ],
+    "ask": [
+      "mcp__Claude_Browser",
+      "mcp__claude-in-chrome",
+      "mcp__Control_Chrome",
+      "mcp__plugin_chrome-devtools-mcp_chrome-devtools",
+      "mcp__computer-use"
+    ]
+  }
+}

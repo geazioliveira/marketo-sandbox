@@ -4,6 +4,67 @@ Uma entrada por mudança mergeada, da mais nova para a mais antiga, escrita no p
 
 ---
 
+## 2026-09-28: Os hooks do Claude Code param o agente antes da ação, numa stack de 10 PRs (#5)
+
+**Fase**: Learn
+**Tipo**: Feature
+
+### O que foi construído / corrigido
+
+- **Quatro hooks de projeto em `.claude/hooks/`,** ligados pelo `.claude/settings.json`:
+  - o `guard-bash` julga, antes de cada comando, os `gh` e `git` que contornam o loop. Ele nega o Approve escrito pelo agente, `ready-for-agent`, toda escrita de label de estado menos a troca de `needs-triage` por `ready-for-human` depois de um `# Plano`, a PR sem `Closes #N.`, commit e push em `main`, os tokens de skip e resolver uma thread sem ter respondido nela. Pede confirmação antes de um merge, e o nega quando a revisão do Copilot, os pedidos pendentes, as threads ou os checks exigidos, lidos ao vivo, não estão em ordem;
+  - o `build-guard` só deixa editar fora de `context/intent/` com o cache do gate aberto para a branch, e nega em `main`;
+  - o `plan-to-issue` marca como pendente o plano aceito no plan mode até ele ser publicado numa issue;
+  - o `session-context` diz a branch, a issue e o estado do gate, e lembra que aprovação no chat não é Approve.
+- **Os hooks só restringem:** nenhum devolve `allow`, e em `bypassPermissions`, `dontAsk` e `auto` a confirmação crítica vira negação. O `run.sh` sai com 2 quando o script ou o `node` falta.
+- **O `gateStatus()`** fecha o cache enquanto existir o marcador de um plano pendente, por mais recente que seja o gate (`planPendingFile` e `pendingPlan`).
+- **A stack.** O código veio da `9377db6`, a cabeça da PR #26, que passou por dez revisões do Copilot e foi fechada pelo dono. Ele entrou sem reescrita em dez fatias, na ordem do grafo de imports, cada uma com sub-issue, PR, revisão e merge próprios: #42, #43, #44, #45, #47, #51, #52, #53, #54 e a da fatia 10. Nenhuma fatia registrou hook antes da última.
+- **As revisões das fatias 1 a 9** acharam 56 pontos em 17 revisões completas. Sete viraram correção:
+  - os testes do orçamento de tempo e o roteiro do intent (#42);
+  - o `git clean -x` que apagava a saída de emergência do dono e a pasta com arquivos do harness nomeada como pathspec (#45);
+  - as opções com valor do `gh repo edit` (#47);
+  - a seção vazia contada como plano publicado e o caminho de reserva num repositório de outro projeto (#54).
+
+  Cada correção de código tem teste e mutações que os testes pegam. Os outros achados viraram limite pelo critério do agente cooperativo, ou não procediam.
+- **As docs falam dos hooks no presente:** a camada 3, os limites e o critério do agente cooperativo na ADR 0002, a seção Os hooks do Claude Code e o que a stack mediu no fluxo, o README dos hooks, a rota no `AGENTS.md` e um teste de drift que confere o presente e que o fluxo nomeia cada hook que existe.
+- **Os critérios da #17** que ficaram para depois do merge foram marcados, com a evidência de cada um.
+
+### Números medidos
+
+- `npm run check`: 3.742 testes em 21 arquivos, dos quais 2.249 são dos hooks, em 12 arquivos de `test/hooks/`.
+- O código dos hooks tem 14,7 mil linhas; os testes, 18,6 mil, e o suporte deles, 1,0 mil.
+- O tamanho de cada PR, com `gh pr diff`: de 48.644 bytes (#53) a 222.324 (#45). A #47 falhou três vezes com 241.186 bytes e foi revisada com 179.248.
+- Os achados do Copilot por PR: 5 na #42, 8 na #43, 3 na #44, 27 na #45, 7 na #47, nenhum na #51, 2 na #52, nenhum na #53 e 4 na #54. Nenhuma fatia passou de três revisões completas.
+- Contra a `9377db6`, os arquivos de `.claude/hooks/` e `test/hooks/` só diferem pelas correções das revisões e pelos testes delas.
+- As duas sondas do plano foram negadas com os hooks ligados: a troca de label pelo `guard-bash` e o `Edit` numa sonda `claude/x` pelo `build-guard`.
+
+### Decisões tomadas
+
+- [0002: Enforcement soft do loop no GitHub Free](../decisions/0002-soft-enforcement-on-github-free.md): a camada 3 existe, com os limites dela e os do critério do agente cooperativo.
+- [0003: Revisão do Copilot na cabeça e nenhuma thread aberta antes do merge](../decisions/0003-copilot-review-and-no-open-threads-before-merge.md): os hooks fazem valer responder antes de resolver e conferem a revisão ao vivo antes do merge.
+- O plano de 10 fatias (Approve de 2026-09-28 11:42 UTC) e o critério do agente cooperativo (Approve de 09:15 UTC).
+
+### Patterns aplicados ou criados
+
+- [Corpus de comandos reais](../knowledge/patterns/real-command-corpus.md), novo, da PR #26
+- [Guarda que só reconhece o nome literal](../knowledge/anti-patterns/guard-by-literal-name.md), anti-pattern novo, da PR #26
+- [Uma PR que prende partes independentes](../knowledge/anti-patterns/one-pr-for-many-independent-parts.md), aplicado, com o limite de tamanho da revisão do Copilot
+- [O gate do loop](../knowledge/patterns/loop-gate.md) e [Revisão classificada por risco](../knowledge/patterns/risk-classified-review.md), atualizados
+
+### Aprendizados / surpresas
+
+- **O Copilot tem um limite de tamanho que não está documentado.** A PR #47, com 241.186 bytes de diff, recebeu três revisões "Copilot wasn't able to review any files", e a #45, com 222.324, foi revisada. Cortar a fatia resolveu na primeira tentativa, e as PRs de depois ficaram abaixo de 180 KiB, a margem adotada ali.
+- **O GitHub não liga uma PR de fatia à sub-issue quando muda a base dela para `main`.** Em todos os merges da stack, a PR de cima ficou sem vínculo até uma edição no corpo, que o cria na hora.
+- **Um merge com um rerun do `issue-link` em andamento deixou a auditoria de `main` ler um run vermelho** (#46, relato #48). O refresh re-roda o `issue-link` depois de cada resposta numa thread, e desde a fatia 3 o merge espera nenhum run em andamento.
+- **O critério do agente cooperativo encurtou as rodadas.** Na PR #26, cada achado virou correção, e foram dez rodadas. Na stack, 7 dos 56 achados viraram correção, e nenhuma fatia passou de três revisões completas.
+- **Um teste que lê um arquivo de uma fatia de cima vai com o arquivo.** Os testes do prazo do `guard-bash` e do `session-context` leem o `.claude/settings.json` e falharam na fatia deles até irem para a última.
+- **Cortar um spec entre blocos deixa imports sem uso na metade de baixo,** que o `lint` aponta: eles saem e voltam com a metade que os usa.
+- **Depois do merge de uma fatia de baixo, o gate em modo CI local precisa de um `git fetch`.** Com o `origin/main` velho, ele recusou o `pr-base` de uma fatia já liberada.
+- **Os avisos do monitor de CI chegaram depois dos merges,** com threads já respondidas. Cada um foi conferido contra o estado da PR antes de qualquer ação.
+- **Os hooks seguem o `.claude/settings.json` do checkout da sessão.** A primeira tentativa da sonda do `build-guard` trocou o worktree da sessão para uma branch cortada de `main`, que ainda não tinha o arquivo, e os hooks saíram com ele: o `Edit` passou. A sonda foi refeita num worktree próprio, e o limite foi para a ADR 0002.
+
+---
+
 ## 2026-09-27: Uma mudança grande pode vir numa stack de PRs, com uma sub-issue por fatia (#31, PR #33)
 
 **Fase**: Learn

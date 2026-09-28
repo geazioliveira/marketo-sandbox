@@ -1,4 +1,10 @@
-import { mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import {
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { type ExpectStatic, test as base } from 'vitest'
@@ -10,6 +16,7 @@ import {
 } from '../../scripts/loop-sections.mjs'
 import { cleanEnv } from '../support/clean-env'
 import {
+  gitShim,
   type HookRepo,
   hookRepo,
   type HookRepoOptions,
@@ -17,6 +24,7 @@ import {
   runHook,
   processTimeout,
 } from '../support/hooks'
+import { projectRoot } from '../support/temp-repo'
 
 /**
  * The session-context hook (.claude/hooks/session-context.mjs), on
@@ -348,3 +356,134 @@ describe.concurrent('session-context on errors', () => {
     }
   })
 })
+
+// ---------------------------------------------------------------------------
+// Seventh round of Copilot's review of #26
+
+/** The timeout .claude/settings.json gives session-context on an event, in ms. */
+function configuredTimeoutMs(event: string): number {
+  const settings = JSON.parse(
+    readFileSync(path.join(projectRoot, '.claude', 'settings.json'), 'utf8'),
+  ) as {
+    hooks: Record<string, { hooks: { command: string; timeout?: number }[] }[]>
+  }
+  const timeouts = settings.hooks[event]
+    .flatMap((group) => group.hooks)
+    .filter((hook) => hook.command.endsWith(' session-context'))
+    .map((hook) => hook.timeout ?? 60)
+  expect(timeouts.length).toBeGreaterThan(0)
+  return Math.min(...timeouts) * 1000
+}
+
+describe.concurrent(
+  'session-context with a git that does not answer (Copilot review of #26, seventh round)',
+  () => {
+    const LATE =
+      /^Não consegui ler a branch e o gate: o git não respondeu (?:a tempo|dentro do prazo de [\d.]+ s do hook)\. Conte o gate como fechado e rode npm run gate na branch antes de editar\.$/
+
+    /** The hook with a git first on PATH that runs `before` and then the real git. */
+    async function withGit(
+      repo: HookRepo,
+      dir: string,
+      before: string,
+      input: unknown,
+      extra: Record<string, string> = {},
+    ): Promise<{ run: HookRun; elapsed: number }> {
+      const env = repo.env(extra)
+      const bin = gitShim(dir, before)
+      const started = Date.now()
+      const run = await repo.run('session-context', input, {
+        env: { ...env, PATH: `${bin}${path.delimiter}${env.PATH ?? ''}` },
+      })
+      return { run, elapsed: Date.now() - started }
+    }
+
+    test('SessionStart, git hung: answers before the timeout, says the state could not be read, and still gives the owner rule', async ({
+      fresh,
+      scratch,
+      expect,
+    }) => {
+      const repo = await fresh({ branch: BRANCH, cache: true })
+      const { run, elapsed } = await withGit(
+        repo,
+        scratch(),
+        'exec sleep 120',
+        start(),
+      )
+      expect(run.status).toBe(0)
+      expect(elapsed).toBeLessThan(configuredTimeoutMs('SessionStart'))
+      expect(run.json?.hookSpecificOutput?.hookEventName).toBe('SessionStart')
+      const lines = contextOf(run).split('\n')
+      expect(lines).toHaveLength(2)
+      expect(lines[0]).toMatch(LATE)
+      expect(lines[1]).toBe(ownerRule)
+    })
+
+    test('SessionStart, git hung, with a budget shorter than one git: the budget ends the run', async ({
+      fresh,
+      scratch,
+      expect,
+    }) => {
+      const repo = await fresh({ branch: BRANCH, cache: true })
+      const { run, elapsed } = await withGit(
+        repo,
+        scratch(),
+        'exec sleep 120',
+        start(),
+        { LOOP_HOOKS_BUDGET_MS: '2000' },
+      )
+      expect(run.status).toBe(0)
+      // Before a git's own 10 s timeout: the budget, not the git, ended it.
+      expect(elapsed).toBeLessThan(9_000)
+      expect(contextOf(run).split('\n')[0]).toContain(
+        'o git não respondeu dentro do prazo de 2 s do hook',
+      )
+    })
+
+    test('SessionStart, git slow on every call: the budget, shared by every git, ends the run', async ({
+      fresh,
+      scratch,
+      expect,
+    }) => {
+      // Each git answers, but three of them take longer than the budget.
+      const repo = await fresh({ branch: BRANCH, cache: true })
+      const { run, elapsed } = await withGit(
+        repo,
+        scratch(),
+        'sleep 3 </dev/null >/dev/null 2>&1',
+        start(),
+        { LOOP_HOOKS_BUDGET_MS: '5000' },
+      )
+      expect(run.status).toBe(0)
+      expect(elapsed).toBeLessThan(configuredTimeoutMs('SessionStart'))
+      expect(contextOf(run).split('\n')).toEqual([
+        expect.stringContaining(
+          'o git não respondeu dentro do prazo de 5 s do hook',
+        ),
+        ownerRule,
+      ])
+    })
+
+    test('UserPromptSubmit, git hung: the reminder, before the timeout', async ({
+      fresh,
+      scratch,
+      expect,
+    }) => {
+      const repo = await fresh({ branch: BRANCH, cache: true })
+      const { run, elapsed } = await withGit(
+        repo,
+        scratch(),
+        'exec sleep 120',
+        prompt,
+      )
+      expect(run.status).toBe(0)
+      expect(elapsed).toBeLessThan(configuredTimeoutMs('UserPromptSubmit'))
+      expect(run.json).toEqual({
+        hookSpecificOutput: {
+          hookEventName: 'UserPromptSubmit',
+          additionalContext: REMINDER,
+        },
+      })
+    })
+  },
+)

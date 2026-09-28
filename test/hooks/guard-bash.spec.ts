@@ -27,6 +27,7 @@ import {
   setupTimeout,
   processTimeout,
 } from '../support/hooks'
+import { projectRoot } from '../support/temp-repo'
 
 /**
  * The shell guard (.claude/hooks/guard-bash.mjs), run as Claude Code runs
@@ -1890,6 +1891,39 @@ describe.concurrent('the time budget of a run (Copilot review of #26)', () => {
       await guard(`gh issue reopen 7 && ${transition(5)}`, { env: gh.env }),
       /reabrir uma issue/,
     )
+  })
+
+  test('answers before the timeout settings.json gives the hook, with the budget it ships with', async ({
+    live,
+  }) => {
+    // The hook's timeout as Claude Code reads it: past it, Claude Code kills
+    // the hook and runs the command undecided.
+    const settings = JSON.parse(
+      readFileSync(path.join(projectRoot, '.claude', 'settings.json'), 'utf8'),
+    ) as {
+      hooks: Record<
+        string,
+        { matcher?: string; hooks: { command: string; timeout: number }[] }[]
+      >
+    }
+    const timeoutMs =
+      (settings.hooks.PreToolUse ?? [])
+        .flatMap((group) => group.hooks)
+        .find((hook) => hook.command.endsWith(' guard-bash'))?.timeout ?? 0
+    expect(timeoutMs).toBeGreaterThan(0)
+    // Three reads that each run until gh's own timeout, 30 s: 90 s in all,
+    // past the hook's timeout, without a budget for the whole run.
+    const numbers = [5, 6, 7]
+    const gh = live(slowIssues(numbers), {
+      LOOP_HOOKS_GH_TIMEOUT_MS: '30000',
+      FAKE_GH_SLOW_MS: '120000',
+    })
+    const started = Date.now()
+    const run = await guard(numbers.map(transition).join(' && '), {
+      env: gh.env,
+    })
+    expect(Date.now() - started).toBeLessThan(timeoutMs * 1000)
+    expectCritical(run, /o prazo de \d+ s do hook acabou/)
   })
 })
 

@@ -46,7 +46,7 @@ Uma PR só é mergeada com uma revisão do Copilot no commit que é a cabeça de
    - as funções puras `copilotReviewOn`, `copilotRequested` e `openThreads`;
    - os comandos `copilotRequestCommand`, `refreshPrCommand` e `gateCiCommand`, que passam cada valor pela `shellWord` e põem entre aspas simples o que o shell leria como sintaxe.
 
-   O gate, a auditoria e os testes leem dali, e os hooks da #5 vão ler dali quando existirem.
+   O gate, a auditoria, os hooks da #5 e os testes leem dali.
 4. **O re-disparo tem duas etapas.** O `issue-link` só roda com eventos da PR, e uma revisão não é um deles.
    - **O sinal.** O `.github/workflows/review-signal.yml` (workflow `Sinal de revisão`) roda em `pull_request_review` (`submitted`, `dismissed`). Ele roda o YAML da própria PR, então tem `permissions: {}`, não faz checkout e só imprime o número da PR.
    - **O refresh.** O `issue-link-refresh.yml` roda de `main` e responde ao `workflow_run` do sinal, e só quando a run do sinal terminou com `success`. Ele também aceita um `workflow_dispatch` com o número da PR, disparado de `main` (`gh workflow run issue-link-refresh.yml --ref main -f pr=<n>`), que sozinho não é veredito fresco. Um `workflow_dispatch` roda o YAML e o script da ref em que foi disparado, então o job pula um disparo de outra ref; isso só pega acidentes, porque a cópia dessa ref pode tirar a guarda. Não é uma fronteira de confiança, nem precisa ser: só quem tem escrita no repositório dispara um `workflow_dispatch`, e quem tem escrita já pode rodar qualquer workflow por um push numa branch.
@@ -63,7 +63,7 @@ Uma PR só é mergeada com uma revisão do Copilot no commit que é a cabeça de
    2. logo depois do `gh pr create`, liga na PR o monitor de CI do app, com auto-fix e comentários;
    3. tira a PR de draft (`gh pr ready`) só com o Learn commitado. Sair de draft pede a revisão do Copilot, que assim cobre a cabeça final;
    4. depois de cada push, lê a timeline da PR (`gh api repos/geazioliveira/marketo-sandbox/issues/<n>/timeline`). Se ela não mostra um `review_requested` do Copilot depois da hora do push e nenhuma revisão do Copilot chega na cabeça nova em uns 10 min, pede a revisão de novo com `gh pr edit <n> --add-reviewer @copilot`. O agente não vê se "Review new pushes" está ligado na configuração do dono, então confere em vez de supor. Uma revisão que falhou também pede a revisão de novo;
-   5. responde em cada thread antes de resolvê-la. A resposta traz o SHA da correção (`ADDRESSED`), uma issue `#N` que fica com o achado (`WONT_FIX`) ou a evidência de que ele não procede (`INVALID`). Os hooks da #5 vão fazer isso valer; até lá é regra escrita;
+   5. responde em cada thread antes de resolvê-la. A resposta traz o SHA da correção (`ADDRESSED`), uma issue `#N` que fica com o achado (`WONT_FIX`) ou a evidência de que ele não procede (`INVALID`). Os hooks da #5 fazem isso valer numa sessão do Claude Code deste projeto: o `guard-bash` nega resolver uma thread cujo último comentário não é de quem resolve;
    6. depois de resolver, atualiza o check com `gh workflow run issue-link-refresh.yml --ref main -f pr=<n>`, porque resolver uma thread não dispara nada; esse disparo sozinho não é veredito fresco, porque o comando volta antes de o refresh rodar e um refresh que falha não aparece na PR;
    7. logo antes do merge, tira um veredito fresco: o gate em modo CI na cabeça da PR (`node scripts/gate.mjs --pr <n> --branch <branch>`), com saída 0, ou o `issue-link` da PR re-rodado (`gh run rerun <run-id>`) e acompanhado até o fim com `gh run watch <run-id> --exit-status`.
 
@@ -89,7 +89,7 @@ Uma PR só é mergeada com uma revisão do Copilot no commit que é a cabeça de
 | Exigir `APPROVED` | É preview, exige uma opção que pode não existir num repositório pessoal privado, e o Copilot deixa só `COMMENTED` por padrão: travaria todo merge |
 | Re-disparo numa etapa só, em `pull_request_review` | O YAML roda da própria PR, que poderia afrouxá-lo ou dar escrita ao token. Aqui, o que afeta o veredito vem de `main` |
 | Só renovação manual | Cada revisão deixaria o `issue-link` com o veredito velho até alguém lembrar de renová-lo. O sinal custa pouco runner e poupa esse passo |
-| Só o dono resolve as threads | Custa um clique do dono por thread. Uma resposta com o SHA, a issue ou a evidência antes de resolver deixa o mesmo registro, e os hooks da #5 vão fazer isso valer; até lá é regra escrita |
+| Só o dono resolve as threads | Custa um clique do dono por thread. Uma resposta com o SHA, a issue ou a evidência antes de resolver deixa o mesmo registro, e os hooks da #5 fazem isso valer numa sessão do Claude Code deste projeto; fora delas, é regra escrita |
 | Casar o Copilot pelo login | Uma organização tem esse login, e o REST escreve o nome do bot de dois jeitos |
 
 ## Consequências
@@ -98,7 +98,7 @@ Uma PR só é mergeada com uma revisão do Copilot no commit que é a cabeça de
   - nenhum merge acontece antes de o Copilot revisar a cabeça;
   - uma thread aberta aparece na saída do gate, com `path:line` e o link;
   - um merge sem a revisão ou com thread aberta vira uma issue da auditoria;
-  - os hooks da #5 vão encontrar os contratos prontos em `scripts/loop-sections.mjs`.
+  - os hooks da #5 leem os contratos de `scripts/loop-sections.mjs`, e o `guard-bash` confere ao vivo, antes de um `gh pr merge`, a revisão do Copilot na cabeça, os pedidos pendentes e as threads.
 - **Mais difícil**:
   - todo push depois da revisão pede uma revisão nova, e cada uma leva uns 6 min;
   - cada revisão gasta crédito de IA do Copilot e minutos de runner, o do Copilot, o do sinal e o do refresh;
@@ -123,3 +123,4 @@ Uma PR só é mergeada com uma revisão do Copilot no commit que é a cabeça de
 
 - **Criado**: 2026-09-25 (Fase: Build), do pedido do dono na #13 (#13)
 - **Status**: Accepted
+- **Atualizado**: 2026-09-28 (Fase: Build), os hooks da #5 passaram a fazer valer responder antes de resolver e a conferir a revisão ao vivo antes do merge (#5)
