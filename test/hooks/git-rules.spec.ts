@@ -1643,6 +1643,33 @@ describe('git writes to the worktree go through the gate (Copilot review of #26,
     },
   )
 
+  // git clean -x and -X remove ignored files, the owner's emergency exit
+  // among them (Copilot review of #45): a clean that holds it is denied even
+  // with the gate open, and one of another folder is judged as before.
+  it.each([
+    'git clean -fdx',
+    'git clean -fdX',
+    'git clean -f -x .',
+    'git clean -fx -- .claude',
+    'git clean -fdx :/',
+  ])(
+    'denies %s with the gate open: it removes .claude/settings.local.json',
+    (text) => {
+      for (const mode of ['default', 'auto']) {
+        const decision = write(text, open, mode)
+        expect(decision.decision, mode).toBe('deny')
+        expect(decision.reason, mode).toMatch(/a saída de emergência é do dono/)
+      }
+    },
+  )
+
+  it.each(['git clean -fd', 'git clean -f -x -- src', 'git clean -fdx src/'])(
+    'lets %s through with the gate open',
+    (text) => {
+      expect(write(text, open).decision).toBe('pass')
+    },
+  )
+
   it.each([
     'git checkout -- README.md',
     'git restore .',

@@ -28,7 +28,13 @@ import {
   skipCiTokens,
 } from '../../../scripts/loop-sections.mjs'
 import { afterSpawn, spawnTimeout } from './budget.mjs'
-import { editDecision, intentDir, within } from './edit-gate.mjs'
+import {
+  editDecision,
+  fold,
+  intentDir,
+  settingsLocal,
+  within,
+} from './edit-gate.mjs'
 import { ask, combine, deny, pass } from './io.mjs'
 import { isProject, realPathOf, repoFromRemote, trunk } from './repo.mjs'
 import { parseCommand, readBody } from './shell.mjs'
@@ -1789,10 +1795,18 @@ function writeOf(command, g, sub, env, files, read) {
       const listed = pathspecFile(command, g.dir, options, files)
       const paths = [...pathsOf(command, operands), ...(listed?.paths ?? [])]
       const unsure = listed?.unsure ? [listed.unsure] : []
-      if (paths.length > 0 || unsure.length > 0) return { paths, unsure }
+      // -x and -X make clean remove ignored files too (writeDecision).
+      const ignored =
+        sub === 'clean' && names.some((name) => name === '-x' || name === '-X')
+          ? { ignored: true }
+          : {}
+      if (paths.length > 0 || unsure.length > 0)
+        return { paths, unsure, ...ignored }
       // With no path, restore and clean take the worktree whole; rm and mv
       // refuse to run.
-      return sub === 'restore' || sub === 'clean' ? wholeTree() : null
+      return sub === 'restore' || sub === 'clean'
+        ? { ...wholeTree(), ...ignored }
+        : null
     }
     case 'apply': {
       const { options } = args()
@@ -2000,6 +2014,16 @@ function writeDecision(write, g, sub, found, ctx, env) {
       `não consegui saber em que branch o git ${sub} escreve no worktree: ${headMoved}; confira que ali o gate está aberto`,
     )
   const { relatives, unsure } = placeWrite(write, g, found, env)
+  // git clean -x and -X remove ignored files too, and the owner's
+  // .claude/settings.local.json is one of them (Copilot review of #45). When
+  // what is cleaned holds it, it is judged by name, so the rule that guards
+  // it applies. A clean of another folder does not reach it.
+  const holdsSettings = (relative) => {
+    const dir = fold(relative).replace(/\/$/, '')
+    return dir === '' || fold(settingsLocal).startsWith(`${dir}/`)
+  }
+  if (write.ignored === true && relatives.some(holdsSettings))
+    relatives.push(settingsLocal)
   if (relatives.length === 0) return pass()
   const decision = combine(
     [...new Set(relatives)].map((relative) =>

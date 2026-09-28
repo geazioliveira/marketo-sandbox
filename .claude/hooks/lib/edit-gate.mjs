@@ -38,7 +38,7 @@ const closedReason =
   'o gate está fechado: rode npm run gate e resolva o que ele aponta'
 
 /** The owner's emergency exit (disableAllHooks lives there), at any depth. */
-const settingsLocal = '.claude/settings.local.json'
+export const settingsLocal = '.claude/settings.local.json'
 
 /** Where the intent is written, before the gate can open. */
 export const intentDir = 'context/intent/'
