@@ -1366,19 +1366,64 @@ export const loopSteps = [
 export const gateCacheFile = 'loop-gate.json'
 export const gateCacheSchema = 1
 export const gateTtlHours = 8
-/** Will be written by the plan-to-issue hook (#5) when a plan is accepted in Claude Code and not yet posted. */
+/**
+ * The prefix of the pending-plan marker: the plan-to-issue hook (#5) is to
+ * write one, under the repository's common git dir, when a plan is accepted
+ * in Claude Code, and to remove it only once the plan is posted on an issue.
+ */
 export const planPendingPrefix = 'loop-plan-pending-'
 
 /**
- * How a hook reads the cache the gate wrote.
+ * The file name of Claude Code session `sessionId`'s pending-plan marker:
+ * planPendingPrefix, the id encoded, and `.json`.
+ *
+ * The encoding keeps [A-Za-z0-9-] and writes every other UTF-8 byte, `_`
+ * included, as `_XX` in uppercase hex (a lone surrogate, which UTF-8 cannot
+ * hold, as `_u` and its code unit in four). So a session id never names a
+ * path outside the git dir, a UUID keeps its own spelling, and two ids never
+ * share a file: making each character outside the set `_` gave `a/b` and
+ * `a_b` one marker, and one session's publication removed the other's
+ * (Copilot review of #26, fifth round). No id at all (null, undefined, '')
+ * is a lone `_`, which no id encodes to: every `_` of an encoded id is
+ * followed by its escape.
+ *
+ * The plan-to-issue hook (#5) is to keep a copy for when this module fails to
+ * load, held equal to this one by its test.
+ */
+export function planPendingFile(sessionId) {
+  const id = String(sessionId ?? '')
+  if (id === '') return `${planPendingPrefix}_.json`
+  const hex = (value, width) =>
+    value.toString(16).toUpperCase().padStart(width, '0')
+  let encoded = ''
+  for (const char of id) {
+    const code = char.codePointAt(0)
+    if (/^[A-Za-z0-9-]$/.test(char)) encoded += char
+    else if (code >= 0xd800 && code <= 0xdfff) encoded += `_u${hex(code, 4)}`
+    else
+      for (const byte of new TextEncoder().encode(char))
+        encoded += `_${hex(byte, 2)}`
+  }
+  return `${planPendingPrefix}${encoded}.json`
+}
+
+/**
+ * How a hook reads the cache the gate wrote. A plan accepted and not yet
+ * posted (`pendingPlan`: its marker exists) keeps the cache closed however
+ * recently the gate ran: the plan is published first, and only its
+ * publication removes the marker.
  * @param {object | null} cache the parsed loop-gate.json, or null
- * @param {{ branch: string, now?: number, pendingSince?: string | null }} context
+ * @param {{ branch: string, now?: number, pendingPlan?: boolean }} context
  * @returns {{ state: 'missing' | 'mismatch' | 'stale' | 'pending-plan' | 'unverified' | 'open' | 'closed', cache?: object }}
  */
 export function gateStatus(
   cache,
-  { branch, now = Date.now(), pendingSince = null },
+  { branch, now = Date.now(), pendingPlan = false },
 ) {
+  if (pendingPlan === true)
+    return cache == null
+      ? { state: 'pending-plan' }
+      : { state: 'pending-plan', cache }
   if (cache == null) return { state: 'missing' }
   if (
     cache.schema !== gateCacheSchema ||
@@ -1390,8 +1435,6 @@ export function gateStatus(
   const ageHours = (now - checked) / 36e5
   if (!(ageHours >= 0 && ageHours <= gateTtlHours))
     return { state: 'stale', cache }
-  if (pendingSince != null && String(pendingSince) > String(cache.checkedAt))
-    return { state: 'pending-plan', cache }
   if (cache.verified !== true) return { state: 'unverified', cache }
   return { state: cache.open === true ? 'open' : 'closed', cache }
 }
