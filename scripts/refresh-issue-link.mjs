@@ -80,7 +80,7 @@ const isBranchName = (text) =>
 // the merged PR #10), so only state OPEN is acted on below. The sub-issues
 // come with their own closing PRs: a slice of a stack (#31) is judged by its
 // parent, so an event on the parent changes their verdict too.
-const issueQuery = `query($owner: String!, $name: String!, $number: Int!) { repository(owner: $owner, name: $name) { issue(number: $number) { closedByPullRequestsReferences(first: ${pageSize}, includeClosedPrs: false) { totalCount nodes { number state headRefOid } } subIssues(first: ${subIssuePageSize}) { totalCount nodes { number closedByPullRequestsReferences(first: ${pageSize}, includeClosedPrs: false) { totalCount nodes { number state headRefOid } } } } } } }`
+const issueQuery = `query($owner: String!, $name: String!, $number: Int!) { repository(owner: $owner, name: $name) { issue(number: $number) { closedByPullRequestsReferences(first: ${pageSize}, includeClosedPrs: false) { totalCount nodes { number state headRefOid } } subIssues(first: ${subIssuePageSize}) { totalCount nodes { number repository { nameWithOwner } closedByPullRequestsReferences(first: ${pageSize}, includeClosedPrs: false) { totalCount nodes { number state headRefOid } } } } } } }`
 
 // PR mode: the PR as it is now, whatever the event carried.
 const pullQuery = `query($owner: String!, $name: String!, $number: Int!) { repository(owner: $owner, name: $name) { pullRequest(number: $number) { number state headRefOid } } }`
@@ -212,7 +212,7 @@ function readInput(env) {
  * of its sub-issues (#31). An answer with no subIssues (no sub-issue support)
  * reads as an issue with none.
  */
-function closingPulls({ owner, name, issue }) {
+function closingPulls({ owner, name, issue, repo }) {
   const payload = ghJson(`as PRs que fecham a #${issue}`, [
     'api',
     'graphql',
@@ -234,8 +234,16 @@ function closingPulls({ owner, name, issue }) {
     )
   const nodes = Array.isArray(refs.nodes) ? refs.nodes : []
   const subs = found?.subIssues
-  const children = (Array.isArray(subs?.nodes) ? subs.nodes : []).map(
-    (child) => {
+  // A sub-issue in another repository is no slice of a stack here, and its
+  // PRs run no issue-link of this repository: it is left out.
+  const here = String(repo ?? `${owner}/${name}`).toLowerCase()
+  const nodesOfSubs = Array.isArray(subs?.nodes) ? subs.nodes : []
+  const children = nodesOfSubs
+    .filter(
+      (child) =>
+        String(child?.repository?.nameWithOwner ?? '').toLowerCase() === here,
+    )
+    .map((child) => {
       const childRefs = child?.closedByPullRequestsReferences
       const childNodes = Array.isArray(childRefs?.nodes) ? childRefs.nodes : []
       return {
@@ -243,13 +251,14 @@ function closingPulls({ owner, name, issue }) {
         nodes: childNodes,
         total: Number(childRefs?.totalCount ?? childNodes.length),
       }
-    },
-  )
+    })
   return {
     nodes,
     total: Number(refs.totalCount ?? nodes.length),
     children,
-    childrenTotal: Number(subs?.totalCount ?? children.length),
+    // The page is judged against the sub-issues read, those of any repository.
+    childrenRead: nodesOfSubs.length,
+    childrenTotal: Number(subs?.totalCount ?? nodesOfSubs.length),
   }
 }
 
@@ -424,7 +433,8 @@ function refreshIssue(input, deadline, lines) {
     )
     return 0
   }
-  const { nodes, total, children, childrenTotal } = closingPulls(input)
+  const { nodes, total, children, childrenRead, childrenTotal } =
+    closingPulls(input)
   if (children.length > 0)
     lines.push(
       `A #${input.issue} tem ${children.length} sub-issue(s): o issue-link das PRs que as fecham também é re-rodado, porque uma fatia de stack é julgada pela mãe.`,
@@ -460,9 +470,9 @@ function refreshIssue(input, deadline, lines) {
     )
     exitCode = 1
   }
-  if (childrenTotal > children.length) {
+  if (childrenTotal > childrenRead) {
     lines.push(
-      `A #${input.issue} tem ${childrenTotal} sub-issues e só ${children.length} foram lidas; re-rode à mão o issue-link das PRs das outras.`,
+      `A #${input.issue} tem ${childrenTotal} sub-issues e só ${childrenRead} foram lidas; re-rode à mão o issue-link das PRs das outras.`,
     )
     exitCode = 1
   }

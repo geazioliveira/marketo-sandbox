@@ -615,7 +615,7 @@ describe.concurrent('scripts/refresh-issue-link.mjs', () => {
     type Pr = { number: number; state: string; headRefOid: string }
     /** The issue with no PR of its own, and its sub-issues with theirs. */
     const parentOf = (
-      children: { number: number; prs: Pr[]; total?: number }[],
+      children: { number: number; prs: Pr[]; total?: number; repo?: string }[],
       childrenTotal = children.length,
       own: Pr[] = [],
     ) => ({
@@ -623,8 +623,9 @@ describe.concurrent('scripts/refresh-issue-link.mjs', () => {
         closedByPullRequestsReferences: { totalCount: own.length, nodes: own },
         subIssues: {
           totalCount: childrenTotal,
-          nodes: children.map(({ number, prs, total }) => ({
+          nodes: children.map(({ number, prs, total, repo }) => ({
             number,
+            repository: { nameWithOwner: repo ?? REPO },
             closedByPullRequestsReferences: {
               totalCount: total ?? prs.length,
               nodes: prs,
@@ -711,6 +712,33 @@ describe.concurrent('scripts/refresh-issue-link.mjs', () => {
       expect(run.stdout).toContain(
         `Nenhuma PR aberta fecha a #${ISSUE} nem as sub-issues dela: nada a re-rodar.`,
       )
+    })
+
+    test('leaves out a sub-issue in another repository', async ({
+      expect,
+      scratch,
+    }) => {
+      const run = await scratch.refresh({
+        answers: {
+          ...parentOf([
+            { number: 43, prs: [openPr(12)] },
+            { number: 7, prs: [openPr(99, OTHER)], repo: 'alguem/outro' },
+          ]),
+          ...runsFor(HEAD, {
+            id: 4304,
+            status: 'completed',
+            conclusion: 'success',
+          }),
+          'rerun:4304': true,
+        },
+      })
+      expect(run.status, run.stdout).toBe(0)
+      expect(keys(run.calls)).toEqual([
+        `issue:${ISSUE}`,
+        `runs:${HEAD}`,
+        'rerun:4304',
+      ])
+      expect(run.stdout).toContain(`A #${ISSUE} tem 1 sub-issue(s)`)
     })
 
     test('goes red when there are more sub-issues than one page holds', async ({
