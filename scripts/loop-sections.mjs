@@ -518,42 +518,90 @@ export const stackSliceLabel = 'stack-slice'
 /** Lines a PR may change before the report-only pr-size step says it is past the reference. */
 export const prSizeLimit = 1500
 
-/** A list item's text, after its marker. */
-const stackItem = /^\s*(?:[-*+]|\d{1,9}[.)])\s+(.*)$/
+/**
+ * A top-level numbered list item, and its text. It starts at the first
+ * column: an indented one may sit inside the item above it, and is prose.
+ */
+const stackItem = /^\d{1,9}[.)][ \t]+(.*)$/
 /** A code span on one line: where a stack item names its branch. */
 const stackCode = /`([^`\n]+)`/g
+/** A heading line: it ends the list of the Stack section. */
+const headingLine = /^ {0,3}#{1,6}(?:[ \t]|$)/
 
 /**
  * The stack a plan declares: the branches its `Stack` section names, bottom
- * first. Each item of a list in that section names at most one branch, in a
- * code span, in a shape the contract accepts (parseBranch); an item that names
- * none is prose and is skipped. The section is read as the rendered issue
- * shows it (shownText), so a branch only inside an HTML comment names nothing.
- * `problems` lists what makes the declaration unusable: an item naming two
- * branches, a branch named twice, or a section that names none.
+ * first. The format is strict, and anything unclear refuses the stack rather
+ * than guess:
+ * - the section is titled exactly `Stack`, at the level of the plan's own
+ *   sections (that of Critérios de aceite): a `Stack de PRs`, or a `Stack`
+ *   nested under another section, is not it, and two of it are a problem;
+ * - the list is the section's numbered items at the first column, up to its first
+ *   subheading, outside code blocks and HTML comments (hiddenLines,
+ *   shownText); a bullet, a nested item or a paragraph is prose, so a note
+ *   that mentions a branch never becomes a slice;
+ * - each numbered item starts with the slice's branch in a code span, in a
+ *   shape the contract accepts (parseBranch), and names no other branch;
+ * - no branch comes twice, and no two branches name the same issue: one
+ *   issue has one branch (ADR 0001).
+ * `problems` lists what makes the declaration unusable; the gate refuses a
+ * slice of a stack with problems.
  * @returns {{ declared: boolean, branches: string[], problems: string[] }}
  */
 export function stackOf(planText) {
-  const section = findSection(planText, stackSection)
-  if (section === null) return { declared: false, branches: [], problems: [] }
+  const sections = parseSections(planText)
+  const level = pickSection(sections, 'Critérios de aceite')?.level ?? 2
+  const found = sections.filter(
+    (section) =>
+      section.level === level &&
+      foldHeading(section.title) === foldHeading(stackSection),
+  )
+  if (found.length === 0) return { declared: false, branches: [], problems: [] }
+  if (found.length > 1)
+    return {
+      declared: true,
+      branches: [],
+      problems: [`o plano tem ${found.length} seções ${stackSection}`],
+    }
   const branches = []
   const problems = []
-  for (const line of shownText(section.content).split(/\r?\n/)) {
-    const item = stackItem.exec(line)
+  const issueOf = new Map()
+  const lines = shownText(found[0].content).split(/\r?\n/)
+  const hidden = hiddenLines(lines)
+  for (let i = 0; i < lines.length; i += 1) {
+    if (hidden[i]) continue
+    if (headingLine.test(lines[i])) break
+    const item = stackItem.exec(lines[i])
     if (item === null) continue
-    const named = [...item[1].matchAll(stackCode)]
+    const text = item[1].trim()
+    const first = /^`([^`\n]+)`/.exec(text)?.[1]?.trim()
+    if (first === undefined || parseBranch(first) === null) {
+      problems.push(
+        `um item numerado da seção ${stackSection} não começa com uma branch: ${text}`,
+      )
+      continue
+    }
+    const named = [...text.matchAll(stackCode)]
       .map((match) => match[1].trim())
-      .filter((text) => parseBranch(text) !== null)
-    if (named.length === 0) continue
+      .filter((span) => parseBranch(span) !== null)
     if (named.length > 1) {
       problems.push(
         `um item da seção ${stackSection} cita mais de uma branch: ${named.join(', ')}`,
       )
       continue
     }
-    if (branches.includes(named[0]))
-      problems.push(`a seção ${stackSection} cita ${named[0]} mais de uma vez`)
-    else branches.push(named[0])
+    if (branches.includes(first)) {
+      problems.push(`a seção ${stackSection} cita ${first} mais de uma vez`)
+      continue
+    }
+    const issue = parseBranch(first).issue
+    if (issueOf.has(issue)) {
+      problems.push(
+        `a seção ${stackSection} cita duas branches da #${issue}: ${issueOf.get(issue)} e ${first}; uma issue tem uma branch só`,
+      )
+      continue
+    }
+    issueOf.set(issue, first)
+    branches.push(first)
   }
   if (branches.length === 0 && problems.length === 0)
     problems.push(`a seção ${stackSection} não cita nenhuma branch`)

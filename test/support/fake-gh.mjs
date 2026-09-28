@@ -36,7 +36,7 @@ const argv = process.argv.slice(2)
 const required = {
   issue: `{ repository { owner { login } issue {
     state body lastEditedAt
-    parent { number }
+    parent { number repository { nameWithOwner } }
     labels { totalCount nodes { name } }
     comments { totalCount nodes { body createdAt lastEditedAt author { __typename login } } }
     timelineItems { totalCount nodes {

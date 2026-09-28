@@ -2029,7 +2029,7 @@ describe('openThreads', () => {
 
 describe('a stack declared in a parent plan (#31)', () => {
   const plan = (stack: string) =>
-    `# Plano\n\n## Plano\n\nFatias abaixo.\n\n## ${stackSection}\n\n${stack}\n\n## Riscos\n\nHIGH.`
+    `# Plano\n\n## Critérios de aceite\n\n- [ ] Uma coisa.\n\n## Plano\n\nFatias abaixo.\n\n## ${stackSection}\n\n${stack}\n\n## Riscos\n\nHIGH.`
 
   it('reads the branches of the Stack section, bottom first', () => {
     expect(
@@ -2049,26 +2049,60 @@ describe('a stack declared in a parent plan (#31)', () => {
     })
   })
 
-  it('reads bulleted items as well as numbered ones', () => {
-    expect(
-      stackOf(plan('- `feature/32-a`\n* `feature/33-b`\n+ `feature/34-c`'))
-        .branches,
-    ).toEqual(['feature/32-a', 'feature/33-b', 'feature/34-c'])
-  })
-
-  it('skips prose, code spans that are no branch, and a branch only in an HTML comment', () => {
+  it('takes bullets, indented items, code blocks and HTML comments as prose', () => {
     expect(
       stackOf(
         plan(
-          'Texto com `feature/31-nao-e-item`.\n\n1. `npm run gate` antes\n2. `feature/32-a`\n3. <!-- `feature/99-escondida` --> nada',
+          [
+            'Depende de:',
+            '',
+            '- `feature/30-algo`, já em main.',
+            '',
+            '1. `feature/32-a`',
+            '   1. `feature/31-aninhada`',
+            '2. `feature/33-b`',
+            '<!-- 3. `feature/99-escondida` -->',
+            '```',
+            '3. `feature/98-no-codigo`',
+            '```',
+            '',
+            'Notas:',
+            '',
+            '- a `feature/39-antiga` não entra na stack.',
+          ].join('\n'),
         ),
       ),
-    ).toEqual({ declared: true, branches: ['feature/32-a'], problems: [] })
+    ).toEqual({
+      declared: true,
+      branches: ['feature/32-a', 'feature/33-b'],
+      problems: [],
+    })
   })
 
-  it('refuses an item that names two branches, a branch named twice, and a section with none', () => {
+  it('stops the list at the first subheading of the section', () => {
     expect(
-      stackOf(plan('1. `feature/32-a` e `feature/33-b`')).problems,
+      stackOf(
+        plan('1. `feature/32-a`\n\n### Não fazer\n\n1. `feature/46-fora`'),
+      ).branches,
+    ).toEqual(['feature/32-a'])
+  })
+
+  it('refuses a numbered item that does not start with a branch', () => {
+    expect(
+      stackOf(plan('1. Primeiro, o contexto.\n2. `feature/33-b`')).problems,
+    ).toEqual([
+      'um item numerado da seção Stack não começa com uma branch: Primeiro, o contexto.',
+    ])
+    expect(
+      stackOf(plan('1. `feature/32-a`\n2. ~~`feature/33-b`~~')).problems,
+    ).toEqual([
+      'um item numerado da seção Stack não começa com uma branch: ~~`feature/33-b`~~',
+    ])
+  })
+
+  it('refuses an item with two branches, a branch named twice, two branches of one issue, and a section with none', () => {
+    expect(
+      stackOf(plan('1. `feature/32-a` (antes `feature/33-b`)')).problems,
     ).toEqual([
       'um item da seção Stack cita mais de uma branch: feature/32-a, feature/33-b',
     ])
@@ -2076,9 +2110,39 @@ describe('a stack declared in a parent plan (#31)', () => {
       stackOf(plan('1. `feature/32-a`\n2. `feature/33-b`\n3. `feature/32-a`'))
         .problems,
     ).toEqual(['a seção Stack cita feature/32-a mais de uma vez'])
+    expect(stackOf(plan('1. `feature/32-a`\n2. `fix/32-b`')).problems).toEqual([
+      'a seção Stack cita duas branches da #32: feature/32-a e fix/32-b; uma issue tem uma branch só',
+    ])
     expect(stackOf(plan('Só texto.')).problems).toEqual([
       'a seção Stack não cita nenhuma branch',
     ])
+  })
+
+  it('takes only a section titled exactly Stack, at the level of the plan’s sections', () => {
+    const criteria = '## Critérios de aceite\n\n- [ ] Uma coisa.\n\n'
+    expect(
+      stackOf(`${criteria}## Stack de PRs\n\n1. \`feature/32-a\``).declared,
+    ).toBe(false)
+    expect(
+      stackOf(`${criteria}## Stacktrace do erro\n\n1. \`feature/32-a\``)
+        .declared,
+    ).toBe(false)
+    expect(
+      stackOf(
+        `${criteria}## Fora de escopo\n\n### Stack\n\n1. \`feature/32-a\``,
+      ).declared,
+    ).toBe(false)
+    // A plan from an issue form has its sections one level down.
+    expect(
+      stackOf(
+        '### Critérios de aceite\n\n- [ ] x\n\n### Stack\n\n1. `feature/32-a`',
+      ).branches,
+    ).toEqual(['feature/32-a'])
+    expect(
+      stackOf(
+        `${criteria}## Stack\n\n1. \`feature/32-a\`\n\n## Stack\n\n1. \`feature/33-b\``,
+      ).problems,
+    ).toEqual(['o plano tem 2 seções Stack'])
   })
 
   it('declares no stack in a plan without the section', () => {

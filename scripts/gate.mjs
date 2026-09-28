@@ -71,7 +71,7 @@ const changelogPath = 'context/evolution/changelog.md'
 // category label past the first page. 100 is the most one page may ask for.
 const page = 100
 
-const issueQuery = `query($owner: String!, $name: String!, $number: Int!) { repository(owner: $owner, name: $name) { owner { login } issue(number: $number) { number state body lastEditedAt parent { number } labels(first: ${page}) { totalCount nodes { name } } comments(last: ${page}) { totalCount nodes { body createdAt lastEditedAt author { __typename login } } } timelineItems(last: ${page}, itemTypes: [LABELED_EVENT, REOPENED_EVENT, COMMENT_DELETED_EVENT]) { totalCount nodes { __typename ... on LabeledEvent { createdAt actor { __typename login } label { name } } ... on ReopenedEvent { createdAt } ... on CommentDeletedEvent { createdAt } } } } } }`
+const issueQuery = `query($owner: String!, $name: String!, $number: Int!) { repository(owner: $owner, name: $name) { owner { login } issue(number: $number) { number state body lastEditedAt parent { number repository { nameWithOwner } } labels(first: ${page}) { totalCount nodes { name } } comments(last: ${page}) { totalCount nodes { body createdAt lastEditedAt author { __typename login } } } timelineItems(last: ${page}, itemTypes: [LABELED_EVENT, REOPENED_EVENT, COMMENT_DELETED_EVENT]) { totalCount nodes { __typename ... on LabeledEvent { createdAt actor { __typename login } label { name } } ... on ReopenedEvent { createdAt } ... on CommentDeletedEvent { createdAt } } } } } }`
 
 // The reviews come newest last, so the last page holds the newest; a Copilot
 // review is told apart by its author's type and database id, which only a Bot
@@ -722,10 +722,24 @@ function main() {
     let parentProblem = null
     if (sliceAsked) {
       const parentNumber = issue.parent?.number
+      const parentRepo = issue.parent?.repository?.nameWithOwner
       if (!Number.isInteger(parentNumber))
         parentProblem = {
           refused: true,
           detail: `a #${number} tem a label ${stackSliceLabel}, mas não é sub-issue de nenhuma issue: uma fatia é filha da issue mãe da stack`,
+        }
+      // A stack lives in one repository: a parent elsewhere is refused, not
+      // read as the issue of the same number here.
+      else if (
+        String(parentRepo ?? '').toLowerCase() !==
+        String(facts.repo).toLowerCase()
+      )
+        parentProblem = {
+          refused: true,
+          detail:
+            parentRepo === undefined || parentRepo === null
+              ? `o GitHub não disse de que repositório é a mãe #${parentNumber} da fatia #${number}`
+              : `a mãe da fatia #${number} é ${parentRepo}#${parentNumber}, de outro repositório: uma stack fica num repositório só`,
         }
       else {
         const parentFetched = graphql(issueQuery, {
@@ -752,6 +766,16 @@ function main() {
           sliceOf = parentNumber
         } else {
           const failed = parentFetched.ok ? 'missing' : parentFetched.kind
+          // A parent not read leaves the verdict unverified, as an issue not
+          // read does: the hooks must not take it for an open gate.
+          if (failed === 'unreachable') {
+            facts.verified = false
+            if (!ci)
+              tail.push(
+                '',
+                `Aviso: a mãe #${parentNumber} não foi lida (GitHub inacessível). Os passos marcados com ? não foram verificados; rode o gate de novo com rede.`,
+              )
+          }
           parentProblem = {
             refused: failed === 'missing' || failed === 'unverified',
             detail:
@@ -973,6 +997,14 @@ function main() {
       } else {
         // A slice is cited in the parent's Stack, which also gives its place.
         const stack = stackOf(plan.text)
+        // The parent is no slice of its own stack.
+        const ownBranch = stack.branches.find(
+          (listed) => parseBranch(listed)?.issue === sliceOf,
+        )
+        if (ownBranch !== undefined)
+          stack.problems.push(
+            `a seção ${stackSection} cita ${ownBranch}, uma branch da própria mãe #${sliceOf}: a mãe não é fatia da stack dela`,
+          )
         const position =
           stack.problems.length === 0
             ? slicePosition(stack.branches, branch)
@@ -1297,8 +1329,18 @@ function main() {
   // the last, citing the parent; in the other slices both only report.
   const intentBlocks = learnBlocks && (slice === null || slice.position.first)
   const learnHere = learnBlocks && (slice === null || slice.position.last)
+  // Above the first slice, the intent no longer catches a branch cut from
+  // work outside the stack; every own commit citing this slice's issue does,
+  // so there it blocks too.
+  const citeBlocks = learnBlocks && slice !== null && !slice.position.first
   const blocksOf = (id) =>
-    id === 'intent-first' ? intentBlocks : id === 'learn' ? learnHere : false
+    id === 'intent-first'
+      ? intentBlocks
+      : id === 'learn'
+        ? learnHere
+        : id === 'commits-cite-issue'
+          ? citeBlocks
+          : false
   if (facts.headSha === null) {
     set('stacked', 'no', 'HEAD não tem commit', { blocks: true })
     for (const id of [
@@ -1380,13 +1422,14 @@ function main() {
     const shaOf = new Map()
     // A slice of a stack (#31) shares history with the slices below it, by
     // design: their refs are not foreign, and their commits are not this
-    // slice's own. The slices above it hold all of HEAD, so they are not
-    // foreign either, and they take nothing from the own commits. Only this
-    // repository's refs count, local or on origin; a copy under another
-    // remote is judged like any other ref.
+    // slice's own. A slice above was cut from this one: it is not foreign
+    // when every commit it shares with HEAD, outside origin/main and the
+    // slices below, cites this slice's issue, and it takes nothing from the
+    // own commits. Only this repository's refs count, local or on origin; a
+    // copy under another remote is judged like any other ref.
     const stackLower = new Set(slice?.position.lower ?? [])
     const stackUpper = new Set(slice?.position.upper ?? [])
-    const lowerRefs = []
+    const stackRef = (ref) => /^refs\/(?:heads|remotes\/origin)\//.test(ref)
     const candidates = (
       gitOut(
         'for-each-ref',
@@ -1403,15 +1446,30 @@ function main() {
         const space = line.indexOf(' ')
         return { sha: line.slice(0, space), ref: line.slice(space + 1) }
       })
+    const lowerRefs = candidates
+      .map(({ ref }) => ref)
+      .filter((ref) => stackRef(ref) && stackLower.has(refName(ref)))
+    const cutFromHere = (sha) => {
+      const shared = gitOut('merge-base', facts.headSha, sha)
+      if (shared === null) return true
+      const sharedOwn = commitsIn([
+        shared,
+        `^${originMain}`,
+        ...lowerRefs.map((ref) => `^${ref}`),
+      ])
+      return (
+        sharedOwn !== null &&
+        sharedOwn
+          .filter((commit) => commit.parents.length <= 1)
+          .every((commit) => cites.test(commit.message))
+      )
+    }
     for (const { sha, ref } of candidates) {
       if (ref.endsWith('/HEAD') || ref === originTrunk || ownRefs.has(ref))
         continue
-      if (/^refs\/(?:heads|remotes\/origin)\//.test(ref)) {
-        if (stackLower.has(refName(ref))) {
-          lowerRefs.push(ref)
-          continue
-        }
-        if (stackUpper.has(refName(ref))) continue
+      if (stackRef(ref)) {
+        if (stackLower.has(refName(ref))) continue
+        if (stackUpper.has(refName(ref)) && cutFromHere(sha)) continue
       }
       const other = parseBranch(refName(ref))
       const sameIssue = other?.issue === number
@@ -1553,6 +1611,26 @@ function main() {
         : [...stackProblems, ...(remedy === null ? [] : [remedy])].join('; '),
       { blocks: true },
     )
+
+    // A slice above the first points at main only once every slice below is
+    // merged there. Before that, merging it would bring the slices below, and
+    // their gate, into main through this PR.
+    if (
+      ci &&
+      pr !== null &&
+      slice !== null &&
+      !slice.position.first &&
+      pr.baseRefName === trunk &&
+      lowerRefs.length > 0
+    ) {
+      const pending = [...new Set(lowerRefs.map(refName))]
+      set(
+        'pr-base',
+        'no',
+        `a PR aponta para ${trunk}, mas ${pending.length === 1 ? `a fatia de baixo ${pending[0]} ainda não foi mergeada` : `as fatias de baixo ${pending.join(', ')} ainda não foram mergeadas`} em ${trunk}: até lá, a base desta é a fatia logo abaixo (${slice.position.below}), com a PR em draft`,
+        { blocks: true },
+      )
+    }
 
     const base = gitOut('merge-base', 'HEAD', originMain)
     const behind =
@@ -1699,6 +1777,7 @@ function main() {
                 (commit) => `${short(commit.sha)} ${firstLine(commit.message)}`,
               )
               .join('; ')}${silent.length > 3 ? '; …' : ''}`,
+      { blocks: citeBlocks },
     )
   }
 
