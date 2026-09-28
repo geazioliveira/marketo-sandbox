@@ -316,6 +316,28 @@ export interface IoLib {
   contextOutput(event: string, text: string): string
 }
 
+/** .claude/hooks/lib/budget.mjs: one time budget for a whole run of a hook. */
+export interface BudgetLib {
+  hookBudgetsMs: Readonly<Record<string, number>>
+  budgetVariable: string
+  BudgetExhausted: new (
+    step: string,
+    budgetMs: number | null,
+  ) => Error & { budgetMs: number | null }
+  startBudget(name: string, env?: Record<string, string | undefined>): number
+  holdBack(ms: number): number
+  releaseHeld(): number
+  remainingMs(): number
+  checkBudget(step: string): void
+  spawnTimeout(ownMs: number, step: string): number
+  afterSpawn(
+    run: { error?: { code?: string } | null; signal?: string | null } | null,
+    ownMs: number,
+    usedMs: number,
+    step: string,
+  ): void
+}
+
 export interface RepoInfo {
   top: string
   gitDir: string
