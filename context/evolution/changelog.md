@@ -4,6 +4,100 @@ Uma entrada por mudança mergeada, da mais nova para a mais antiga, escrita no p
 
 ---
 
+## 2026-09-27: Uma mudança grande pode vir numa stack de PRs, com uma sub-issue por fatia (#31, PR #33)
+
+**Fase**: Learn
+**Tipo**: Process
+
+### O que foi construído / corrigido
+
+- **A stack no contrato.** O plano vigente da issue mãe declara a stack numa seção `## Stack`: a lista numerada das branches das fatias, de baixo para cima (`stackOf`, `slicePosition`). Cada fatia é uma sub-issue da mãe, com a label de categoria e `stack-slice` e sem label de estado.
+- **O gate julga uma fatia pela mãe.** O estado, as seções, os critérios e o Approve vêm do plano vigente da mãe, e toda revogação do Approve da mãe vale para todas as fatias. A branch precisa estar na `Stack`, e toda branch da `Stack` precisa ser de uma fatia da mãe: uma sub-issue dela, deste repositório, com `stack-slice`. A mãe precisa ser deste repositório, estar aberta, ter exatamente uma label de categoria e não ser ela mesma uma fatia, e uma mãe que não se lê deixa o veredito não verificado.
+- **Os passos numa fatia.**
+  - `pr-base` aceita a fatia logo abaixo só em draft, e `main` na primeira fatia ou, nas outras, depois de as de baixo mergearem.
+  - `stacked` não conta como estranhas as fatias de baixo nem o merge delas, e isenta uma fatia de cima só quando ela foi cortada desta.
+  - `intent-first` bloqueia só na primeira fatia, e `learn` só na última, citando a mãe. `commits-cite-issue` bloqueia acima da primeira fatia, no CI fora de draft.
+- **O `pr-size`**, um passo novo que só relata as linhas alteradas da PR contra a base, com 1.500 de referência.
+- **O refresh** re-roda também as PRs abertas das sub-issues deste repositório com `stack-slice` quando há um evento na mãe.
+- **A label `stack-slice`** foi criada. A ADR 0001, o ciclo de vida de issue e branch, o gate do loop, o fluxo, o glossário e o `AGENTS.md` descrevem como montar, revisar, atualizar e mergear uma stack, e "fatia" ficou reservada para a fatia de uma stack.
+- **A verificação adversarial**, antes da PR, achou dez pontos. Nove foram corrigidos com caso de teste:
+  - a ordem do merge de baixo para cima;
+  - os commits das fatias acima da primeira;
+  - a isenção condicional da fatia de cima;
+  - o formato estrito da `Stack`;
+  - a mãe que não se lê;
+  - duas branches de uma issue;
+  - a mãe de outro repositório;
+  - as sub-issues de outro repositório no refresh;
+  - os casos de teste que faltavam.
+
+  O décimo é de antes da #31 e virou a #32.
+- **As quatro revisões do Copilot** na PR #33 acharam nove pontos, cinco em threads e quatro só no resumo. Oito foram corrigidos com caso de teste:
+  - uma fatia de cima cortada de uma fatia de baixo, que uma lista vazia de commits fazia passar por cortada desta;
+  - uma ref que o git não consegue comparar com o HEAD, que uma fatia de cima isentava e o teste geral do `stacked` deixava passar;
+  - uma branch da `Stack` que não é de uma fatia da mãe, que passava por fatia de baixo ou de cima;
+  - a mãe que também é fatia;
+  - a mãe sem categoria ou com duas, cujo plano era julgado como de feature;
+  - as falhas de leitura da mãe que o cache guardava como verificadas;
+  - o code span de mais de uma crase na `Stack`;
+  - o refresh das sub-issues que não são fatias.
+
+  O nono era a contagem de rodadas da #26 no intent, que dizia nove.
+- **A segunda rodada adversarial**, antes do merge, teve duas lentes.
+  - **O que passa sem dever** achou três brechas, cada uma corrigida com caso de teste:
+    - uma fatia de baixo sem ref, ou com a ref ainda em `main`, contava como mergeada, e agora conta só com a sub-issue fechada;
+    - a reabertura de uma fatia, e uma retirada ou uma revisão postada nela, não revogavam o Approve da mãe para ela;
+    - um `git rev-list --first-parent` que falhava virava "nenhum commit próprio".
+
+    O quarto ponto dessa lente ficou registrado como limite: o refresh não re-roda as fatias irmãs depois de um evento numa fatia.
+  - **O fluxo documentado de ponta a ponta** achou seis bloqueios, todos corrigidos:
+    - toda PR de cima em draft falhava no `pr-closes`, porque o GitHub só liga as palavras de fechamento numa PR para `main`, e agora o gate lê o corpo;
+    - um commit sem número numa fatia de baixo, trazido pela de cima, travava a de baixo sem conserto possível;
+    - uma fatia de cima cortada antes do primeiro commit da de baixo travava a de baixo;
+    - a `## Stack` era ignorada num plano do form;
+    - o conserto de recorte de uma fatia mandava cortar de `main`, e o `pr-size` sugeria uma stack a uma fatia.
+
+### Números medidos
+
+- **Os testes**, contados com `npx vitest list --json`: 1.402 em `main` (`63f69ec`) e 1.487 depois da segunda rodada adversarial.
+  - O `gate.spec.ts` foi de 293 para 357: 56 casos no bloco da stack, 7 mutações novas do gh falso e um caso novo do `stacked` fora da stack.
+  - O `loop-sections.spec.ts` foi de 447 para 460, o `refresh-issue-link.spec.ts` de 65 para 72 e o `drift.spec.ts` de 184 para 185.
+- **Os checks**: `npm run check` com saída 0, 1.487 testes em 9 arquivos, o `check:context` sem problemas e as linhas "are current" do `check:all`; o e2e com 33.
+- **As mutações**: cada uma das 19 mutações das correções das revisões do Copilot, e das 13 da segunda rodada adversarial, derruba pelo menos um caso. Uma checagem estrutural da isenção da fatia de cima saiu porque a mutação dela sobreviveu: o `foreignMerges` e a citação da sub-issue de cima já pegavam o que ela pegaria.
+- **O tamanho desta PR**, contado com `git diff --numstat origin/main...HEAD`:
+  - antes do Learn, 2.887 linhas alteradas contra `main`, o que o `pr-size` relatou na própria PR;
+  - em `2646749`, depois da quarta revisão do Copilot, 3.679 (+3.503 −176) com `--diff-algorithm=minimal`, 2.339 delas em testes e 1.017 em `scripts/`. Nessa cabeça, o algoritmo padrão do git alinha mal o `gate.spec.ts` e dá 4.055 (+3.691 −364), com as mesmas mudanças;
+  - em `ea4d92a`, depois da segunda rodada adversarial, 4.356 (+4.166 −190) com `--diff-algorithm=minimal`, 2.823 delas em testes e 1.196 em `scripts/`, e 4.714 com o algoritmo padrão.
+
+  As duas contagens passam da referência de 1.500.
+- **A PR #26**, que motivou a issue: +34.550 −61 em 50 arquivos, e dez revisões do Copilot, com 6, 6, 11, 4, 5, 3, 2, 1, 1 e 2 comentários.
+
+### Decisões tomadas
+
+- [0001: Context Mesh no repositório e loop issue-first](../decisions/0001-context-mesh-in-the-repository.md): PRs podem ser empilhadas numa stack declarada no plano da mãe, com uma sub-issue por fatia.
+- As cinco recomendações do plano da #31 ficaram:
+  - a seção `Stack` e a label `stack-slice`;
+  - a PR de cima em draft até a de baixo mergear;
+  - o `intent-first` na primeira fatia e o `learn` na última;
+  - o `pr-size` só relatado, com 1.500 linhas;
+  - a ordem: a #31, a stack da #5 e a #30.
+
+### Patterns aplicados ou criados
+
+- [Uma PR que prende partes independentes](../knowledge/anti-patterns/one-pr-for-many-independent-parts.md), novo.
+- [O gate do loop](../knowledge/patterns/loop-gate.md) e [o ciclo de vida de issue e branch](../knowledge/patterns/issue-branch-lifecycle.md), com as seções da stack.
+
+### Aprendizados / surpresas
+
+- **Prosa que cita uma branch não pode virar regra.** A primeira versão da `Stack` aceitava qualquer item de lista com uma branch, então uma nota do plano que citasse uma branch a punha na stack e a isentava do `stacked`. O formato estrito separa a lista da prosa.
+- **Uma isenção precisa de uma condição que a feche.** Isentar de uma vez as fatias de cima abria o `stacked` para uma fatia de baixo que trouxesse os commits da de cima.
+- **A ordem do merge precisa ser conferida, e não só escrita.** Sem o `pr-base` olhar as fatias de baixo, uma fatia de cima apontada para `main` levaria as de baixo junto, sem o gate delas.
+- **Uma isenção não pode nascer de uma falha, nem de uma lista vazia.** O `cutFromHere` tomava um `git merge-base` que falhou por prova de que a fatia de cima foi cortada desta, e o teste geral do `stacked`, de antes da #31, tomava a mesma falha por "nada em comum". Só a saída 1 do git diz que não há commit em comum, e qualquer outra falha agora bloqueia. Depois, o `every` de uma lista vazia também passava por prova de corte; a isenção agora pede pelo menos um commit desta fatia, como o `headCitesIssue` já pedia.
+- **Percorrer o fluxo documentado acha o que a caça a brechas não acha.** As revisões do Copilot e a primeira rodada adversarial procuravam o que passa sem dever, e cada correção apertava uma regra. A rodada que percorreu o fluxo de ponta a ponta achou seis bloqueios de fluxo legítimo. Dois eram graves: a PR em draft sem vínculo e o deadlock de um commit sem número. Uma regra que bloqueia pede os dois olhares antes do merge.
+- **Quem empresta as regras de outra issue precisa conferir que ela é o que diz ser.** O gate lia da mãe o estado, o plano e o Approve, mas não conferia que ela fosse uma raiz (uma categoria só e nenhum `stack-slice`), nem que as branches da `Stack` fossem de fatias dela. As revisões do Copilot acharam as três faltas.
+
+---
+
 ## 2026-09-26: Os geradores falham sem Prettier, se declaram gerados e rodam no CI (#7)
 
 **Fase**: Learn

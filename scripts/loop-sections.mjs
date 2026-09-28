@@ -497,6 +497,143 @@ export function planCitesBranch(planText, branch, kind) {
 }
 
 // ---------------------------------------------------------------------------
+// Stacks (#31)
+//
+// A change too big for one PR is delivered as a stack: small PRs, each one on
+// top of the one below, each with its own review and merge. Each slice is a
+// sub-issue of the parent issue, and each slice's PR closes its own sub-issue,
+// so the link between a PR and an issue, and the audit of main, stay as they
+// are. The parent's current plan declares the stack in a `Stack` section: the
+// slices' branches, bottom first. A sub-issue that carries stackSliceLabel,
+// and no state label, is judged by its parent: the state label, the plan and
+// the Approve are the parent's, and its branch must be in that Stack. Every
+// revocation of the parent's Approve therefore holds for all its slices.
+
+/** The optional section of a parent's plan that declares its stack. */
+export const stackSection = 'Stack'
+
+/** A slice's sub-issue carries it in place of a state label: its state and Approve are the parent's. */
+export const stackSliceLabel = 'stack-slice'
+
+/** Lines a PR may change before the report-only pr-size step says it is past the reference. */
+export const prSizeLimit = 1500
+
+/**
+ * A top-level numbered list item, and its text. It starts at the first
+ * column: an indented one may sit inside the item above it, and is prose.
+ */
+const stackItem = /^\d{1,9}[.)][ \t]+(.*)$/
+/**
+ * A code span on one line, where a stack item names its branch: a run of
+ * backticks, text with none, and a run of the same length, as CommonMark
+ * reads it (`x` or ``x``). A branch never holds a backtick, so a span whose
+ * text has one names no branch.
+ */
+const stackCode = /(?<!`)(`+)([^`\n]+)\1(?!`)/g
+/** The code span a stack item starts with (stackCode). */
+const stackFirstCode = /^(`+)([^`\n]+)\1(?!`)/
+/** A heading line: it ends the list of the Stack section. */
+const headingLine = /^ {0,3}#{1,6}(?:[ \t]|$)/
+
+/**
+ * The stack a plan declares: the branches its `Stack` section names, bottom
+ * first. The format is strict, and anything unclear refuses the stack rather
+ * than guess:
+ * - the section is titled exactly `Stack`, at any heading level: `## Stack`
+ *   in a plan comment, `###` or `####` in a plan from an issue form, whose
+ *   fields are `###`. A `Stack de PRs` is not it, and two of it are a problem;
+ * - the list is the section's numbered items at the first column, up to its first
+ *   subheading, outside code blocks and HTML comments (hiddenLines,
+ *   shownText); a bullet, a nested item or a paragraph is prose, so a note
+ *   that mentions a branch never becomes a slice;
+ * - each numbered item starts with the slice's branch in a code span, in a
+ *   shape the contract accepts (parseBranch), and names no other branch;
+ * - no branch comes twice, and no two branches name the same issue: one
+ *   issue has one branch (ADR 0001).
+ * `problems` lists what makes the declaration unusable; the gate refuses a
+ * slice of a stack with problems.
+ * @returns {{ declared: boolean, branches: string[], problems: string[] }}
+ */
+export function stackOf(planText) {
+  const found = parseSections(planText).filter(
+    (section) => foldHeading(section.title) === foldHeading(stackSection),
+  )
+  if (found.length === 0) return { declared: false, branches: [], problems: [] }
+  if (found.length > 1)
+    return {
+      declared: true,
+      branches: [],
+      problems: [`o plano tem ${found.length} seções ${stackSection}`],
+    }
+  const branches = []
+  const problems = []
+  const issueOf = new Map()
+  const lines = shownText(found[0].content).split(/\r?\n/)
+  const hidden = hiddenLines(lines)
+  for (let i = 0; i < lines.length; i += 1) {
+    if (hidden[i]) continue
+    if (headingLine.test(lines[i])) break
+    const item = stackItem.exec(lines[i])
+    if (item === null) continue
+    const text = item[1].trim()
+    const first = stackFirstCode.exec(text)?.[2]?.trim()
+    if (first === undefined || parseBranch(first) === null) {
+      problems.push(
+        `um item numerado da seção ${stackSection} não começa com uma branch: ${text}`,
+      )
+      continue
+    }
+    const named = [...text.matchAll(stackCode)]
+      .map((match) => match[2].trim())
+      .filter((span) => parseBranch(span) !== null)
+    if (named.length > 1) {
+      problems.push(
+        `um item da seção ${stackSection} cita mais de uma branch: ${named.join(', ')}`,
+      )
+      continue
+    }
+    if (branches.includes(first)) {
+      problems.push(`a seção ${stackSection} cita ${first} mais de uma vez`)
+      continue
+    }
+    const issue = parseBranch(first).issue
+    if (issueOf.has(issue)) {
+      problems.push(
+        `a seção ${stackSection} cita duas branches da #${issue}: ${issueOf.get(issue)} e ${first}; uma issue tem uma branch só`,
+      )
+      continue
+    }
+    issueOf.set(issue, first)
+    branches.push(first)
+  }
+  if (branches.length === 0 && problems.length === 0)
+    problems.push(`a seção ${stackSection} não cita nenhuma branch`)
+  return { declared: true, branches, problems }
+}
+
+/**
+ * Where a branch sits in a stack's branches (stackOf), bottom first: its
+ * index, whether it is the first slice (the bottom, which carries the intent)
+ * or the last (the top, which carries the Learn), the branch right below it,
+ * and the branches below and above it. null when the stack does not name it.
+ * @returns {{ index: number, count: number, first: boolean, last: boolean, below: string | null, lower: string[], upper: string[] } | null}
+ */
+export function slicePosition(branches, branch) {
+  const list = Array.isArray(branches) ? branches : []
+  const index = list.indexOf(branch)
+  if (index < 0) return null
+  return {
+    index,
+    count: list.length,
+    first: index === 0,
+    last: index === list.length - 1,
+    below: index > 0 ? list[index - 1] : null,
+    lower: list.slice(0, index),
+    upper: list.slice(index + 1),
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Plan, Approve, withdrawal
 
 // Each is matched against the first non-empty line, already trimmed
@@ -804,6 +941,37 @@ export function approveState({
 
 /** The PR body's first non-empty line, exactly. English: GitHub only reads English keywords. */
 export const closesLine = /^Closes #([1-9]\d*)\.$/
+
+/**
+ * A closing keyword and the issue it names, the forms GitHub links: `#N`,
+ * `owner/repo#N` and the issue's URL, with an optional colon after the
+ * keyword.
+ */
+const closingReference =
+  /\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?):?[ \t]+(?:https:\/\/github\.com\/([\w.-]+\/[\w.-]+)\/issues\/|([\w.-]+\/[\w.-]+)#|#)([1-9]\d*)(?![\w-])/gi
+
+/**
+ * The issues a PR body closes, read from its text as GitHub would link them
+ * (#31): GitHub links closing keywords only on a PR to the default branch, so
+ * a slice's draft PR on the slice below has no link yet, and the gate reads
+ * its body instead. HTML comments are left out, as GitHub renders none; code
+ * is read, so a keyword shown in code counts, on the side that blocks. Each
+ * issue once, in the order found; `repo` is null for a bare `#N`.
+ * @returns {{ repo: string | null, number: number }[]}
+ */
+export function closingRefsOf(body) {
+  const found = []
+  const seen = new Set()
+  for (const match of shownText(body).matchAll(closingReference)) {
+    const repo = match[1] ?? match[2] ?? null
+    const number = Number(match[3])
+    const key = `${String(repo ?? '').toLowerCase()}#${number}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    found.push({ repo, number })
+  }
+  return found
+}
 
 /**
  * The checks a merge requires, by workflow and job, as GitHub shows them
@@ -1162,6 +1330,7 @@ export const stepIds = [
   'pr-first-line',
   'copilot-review',
   'review-threads',
+  'pr-size',
   'issue-open',
   'kind',
   'state-label',

@@ -14,7 +14,7 @@ npm run gate
 
 1. **Issue.** O plano nasce numa issue de `geazioliveira/marketo-sandbox`, com as seções listadas abaixo, a label de categoria e a label `ready-for-human`. Os forms de issue aplicam as duas. Um relato sem plano entra com `needs-triage`; quando o agente publica o plano, troca `needs-triage` por `ready-for-human` no mesmo passo.
 2. **Approve.** O dono lê o plano no GitHub, comenta `# Owner Approve` com as próprias palavras e, depois desse comentário, move a label de `ready-for-human` para `ready-for-agent`. A ordem importa: o gate só aceita um `ready-for-agent` aplicado depois do Approve em vigor. O agente nunca faz nenhum dos dois.
-3. **Branch.** Uma branch para a issue, cortada do `origin/main`, como manda o [ciclo de vida de issue e branch](../../context/knowledge/patterns/issue-branch-lifecycle.md). Uma issue tem uma branch só: outra branch da mesma issue que compartilhe história não publicada com esta bloqueia o gate, e só esta branch e a cópia dela em `origin` ficam de fora ([o passo `stacked`](../../context/knowledge/patterns/loop-gate.md#o-passo-stacked)). Rode `npm run gate` aqui: ele precisa estar aberto antes do primeiro commit.
+3. **Branch.** Uma branch para a issue, cortada do `origin/main`, como manda o [ciclo de vida de issue e branch](../../context/knowledge/patterns/issue-branch-lifecycle.md). Uma issue tem uma branch só: outra branch da mesma issue que compartilhe história não publicada com esta bloqueia o gate, e só esta branch e a cópia dela em `origin` ficam de fora ([o passo `stacked`](../../context/knowledge/patterns/loop-gate.md#o-passo-stacked)). Numa stack, cada fatia é cortada da fatia logo abaixo ([Stack de PRs](#stack-de-prs)). Rode `npm run gate` aqui: ele precisa estar aberto antes do primeiro commit.
 4. **Intent.** O primeiro commit toca só `context/intent/`: cria ou atualiza o `feature-<slug>.md` ou o `bug-<slug>.md` da issue, com status `In Progress`.
 5. **Build.** Implementa o plano aprovado, commit por commit, cada mensagem terminando com `Refs #N`. Se algo muda o plano, pare (veja a seção sobre o plan mode).
 6. **Learn.** Na mesma branch, antes de a PR sair de draft: o intent ganha Resultados e o status final (`Completed` ou `Resolved`), o [changelog](../../context/evolution/changelog.md) ganha uma entrada cujo heading cita `(#N)`, e as decisões e os patterns novos entram em `context/`.
@@ -117,7 +117,7 @@ Exemplos de primeira linha que não é nenhuma das três acima. Um teste confere
 
 ## Labels
 
-Toda issue aberta tem exatamente uma label de categoria (`bug` ou `enhancement`) e exatamente uma label de estado. A issue de acompanhamento (#1) fica fora dessa regra.
+Toda issue aberta tem exatamente uma label de categoria (`bug` ou `enhancement`) e exatamente uma label de estado. A issue de acompanhamento (#1) fica fora dessa regra, e uma fatia de stack também: ela leva `stack-slice` no lugar da label de estado, porque o estado dela é o da mãe ([Stack de PRs](#stack-de-prs)).
 
 O contrato `agentPlanLabelTransition` em [scripts/loop-sections.mjs](../../scripts/loop-sections.mjs) registra a única edição de label de estado que o agente pode fazer: ao publicar um plano completo como `# Plano` numa issue em `needs-triage`, seja nova ou já existente, troca `needs-triage` por `ready-for-human`. Os hooks da #5 ainda irão chegar e deverão permitir só essa exceção; `ready-for-agent` continua exclusivo do dono.
 
@@ -128,6 +128,7 @@ O contrato `agentPlanLabelTransition` em [scripts/loop-sections.mjs](../../scrip
 | `ready-for-human` | Há um plano publicado que precisa da validação do dono | O form de issue ou o agente ao criar uma issue com plano ou publicar `# Plano` numa issue em `needs-triage`. O dono a remove depois do Approve |
 | `ready-for-agent` | Especificada e aprovada pelo dono: o agente pode construir | Só o dono, depois do Approve, e de novo depois de cada novo Approve |
 | `wontfix` | Não será feita (decisão do dono) | Só o dono |
+| `stack-slice` | Fatia de uma stack: o estado e o Approve são os da issue mãe | O agente, no `gh issue create --parent <mãe>` de cada fatia (#31). Não é label de estado |
 
 A label de categoria é aplicada pelo form de issue, pelo agente no `gh issue create` ou pela auditoria de `main` (sempre `bug`). Trocá-la depois é do dono.
 
@@ -223,13 +224,59 @@ gh issue comment <n> --repo geazioliveira/marketo-sandbox --body "Fechada pela P
 - **Os checks exigidos são `Qualidade / check` e `Vínculo com issue / issue-link`**, nomeados por workflow e job. Um job chamado `check` ou `issue-link` que venha de outro workflow não conta: uma PR consegue acrescentar um. E o `issue-link` que conta é o do evento `pull_request_target`, que roda o `.github/workflows/issue-link.yml` de `main` (`gh pr checks --json` mostra o `event`): uma PR consegue acrescentar um workflow de mesmo nome que roda em `pull_request`. No plano Free, o GitHub não consegue torná-los obrigatórios ([ADR 0002](../../context/decisions/0002-soft-enforcement-on-github-free.md)), então a regra é esta: nenhuma PR é mergeada com um check exigido vermelho, e um check ausente conta como vermelho.
 - **A revisão do Copilot na cabeça e nenhuma thread aberta.** Desde a #13, o `issue-link` também exige, fora de draft, uma revisão do Copilot no commit que é a cabeça da PR e nenhuma thread de revisão aberta, de qualquer autor, inclusive as desatualizadas ([ADR 0003](../../context/decisions/0003-copilot-review-and-no-open-threads-before-merge.md)). O caminho até lá está em [A revisão do Copilot e as threads](#a-revisão-do-copilot-e-as-threads). Não há bypass: com o Copilot fora do ar, a PR espera.
 - **Veredito fresco antes do merge.** O `issue-link` só roda com eventos da PR. Os eventos da issue (o Approve retirado, um `# Plano` novo, a label movida, uma reabertura) e as revisões dependem do refresh (abaixo), e resolver ou reabrir uma thread de revisão não dispara nada, então um verde pode estar velho. Logo antes de mergear, tire um veredito fresco de um destes dois jeitos: rode `node scripts/gate.mjs --pr <p> --branch <branch>` num checkout da head da PR, com `origin/main` buscado, e exija saída 0; ou re-rode o job `issue-link` da PR, a run do evento `pull_request_target` (`gh run rerun <run-id>`), e acompanhe-o até o fim com `gh run watch <run-id> --exit-status`, que também precisa sair com 0. Um disparo do refresh (`gh workflow run issue-link-refresh.yml --ref main -f pr=<n>`) sozinho não é veredito fresco: o comando volta antes de o refresh rodar, e um refresh que falha não aparece na PR.
-- **O refresh não dispensa o veredito fresco.** Desde a #3, o workflow `Atualiza vínculo com issue` (`.github/workflows/issue-link-refresh.yml`) re-executa o `issue-link` das PRs abertas que fecham a issue, a run do evento `pull_request_target`, a cada label, comentário, edição, fechamento ou reabertura nela. Ele ainda não foi provado ao vivo: se o `GITHUB_TOKEN` consegue pedir o rerun só se mede no primeiro evento de issue depois do merge da #3. Desde a #13, ele também re-executa o `issue-link` de uma PR depois de uma revisão nela, pelo sinal de revisão, e a pedido, com `gh workflow run issue-link-refresh.yml --ref main -f pr=<n>`, que sozinho não é veredito fresco ([A revisão do Copilot e as threads](#a-revisão-do-copilot-e-as-threads)). O disparo é de `main` (`--ref main`): um `workflow_dispatch` roda o YAML e o script da ref em que foi disparado, e o job pula um disparo de outra ref. E ele não cobre tudo: uma run do `issue-link` ainda na fila ou em andamento é consultada a cada 15 s e esperada por até 4 minutos e, se não termina, o refresh fica vermelho sem re-executá-la; o GitHub re-executa uma run no máximo 50 vezes, e só por 30 dias; vincular a issue pela barra lateral da PR não dispara nada; e resolver uma thread também não. Por isso a regra acima fica, pelo menos até o refresh ser provado ao vivo e a [ADR 0002](../../context/decisions/0002-soft-enforcement-on-github-free.md) registrar a medição.
+- **O refresh não dispensa o veredito fresco.** Desde a #3, o workflow `Atualiza vínculo com issue` (`.github/workflows/issue-link-refresh.yml`) re-executa o `issue-link` das PRs abertas que fecham a issue, a run do evento `pull_request_target`, a cada label, comentário, edição, fechamento ou reabertura nela. Desde a #31, também o das PRs que fecham as sub-issues dela com a label `stack-slice`, porque uma fatia de stack é julgada pela mãe. Uma sub-issue com as labels lidas pela metade entra também, porque a label pode estar entre as que ficaram sem ler. Ficam de fora a PR de uma fatia com base na fatia de baixo, que o GitHub não liga à sub-issue, e as fatias irmãs de uma fatia que recebeu o evento. Ele ainda não foi provado ao vivo: se o `GITHUB_TOKEN` consegue pedir o rerun só se mede no primeiro evento de issue depois do merge da #3. Desde a #13, ele também re-executa o `issue-link` de uma PR depois de uma revisão nela, pelo sinal de revisão, e a pedido, com `gh workflow run issue-link-refresh.yml --ref main -f pr=<n>`, que sozinho não é veredito fresco ([A revisão do Copilot e as threads](#a-revisão-do-copilot-e-as-threads)). O disparo é de `main` (`--ref main`): um `workflow_dispatch` roda o YAML e o script da ref em que foi disparado, e o job pula um disparo de outra ref. E ele não cobre tudo: uma run do `issue-link` ainda na fila ou em andamento é consultada a cada 15 s e esperada por até 4 minutos e, se não termina, o refresh fica vermelho sem re-executá-la; o GitHub re-executa uma run no máximo 50 vezes, e só por 30 dias; vincular a issue pela barra lateral da PR não dispara nada; e resolver uma thread também não. Por isso a regra acima fica, pelo menos até o refresh ser provado ao vivo e a [ADR 0002](../../context/decisions/0002-soft-enforcement-on-github-free.md) registrar a medição.
 - **Nenhum token de pular CI.** Nem o título da PR, nem o corpo da PR, nem mensagem de commit nenhuma levam, escritos literalmente, `[skip ci]`, `[ci skip]`, `[no ci]`, `[skip actions]` ou `[actions skip]` (a lista é `skipCiTokens`, em `scripts/loop-sections.mjs`), nem um último parágrafo com o trailer `skip-checks: true` (`skipChecksTrailer`), que o GitHub também obedece. A mensagem do merge commit é o título mais o corpo da PR (`PR_TITLE` e `PR_BODY`), então um desses tokens ali faz o push do merge em `main` não disparar nem o `Qualidade / check` nem a auditoria de `main`, que só o julga na execução seguinte. Na mensagem do commit da head, ele deixa a PR sem o `Qualidade / check`, e a auditoria registra o merge (`PR #P mergeada sem Qualidade / check verde`). Para citar um token, descreva-o sem os colchetes.
 - **Exceção de bootstrap, só na #2.** A PR da #2 cria o `issue-link`, e por isso não tem esse check no servidor: o workflow ainda não está em `main` ([ADR 0002](../../context/decisions/0002-soft-enforcement-on-github-free.md)). Só nela, a saída do gate em modo CI rodado localmente, colada em "Verificação", faz as vezes do `issue-link`, e o veredito fresco é essa execução refeita logo antes do merge, com saída 0. Da PR da #3 em diante, o `issue-link` do servidor é exigido.
 - **PR que mexe em workflow é HIGH.** Uma PR que toca `.github/workflows/**` é revisada como risco HIGH, seja qual for o risco do plano. O `check.yml` roda em `pull_request`, com o YAML e o `package.json` da própria PR, então a PR consegue afrouxar o próprio `check`. Só o `issue-link`, que vem de `main`, não pode ser afrouxado pela PR.
+- **O tamanho da PR é só relatado.** O passo `pr-size` do `issue-link` dá as linhas alteradas contra a base, com 1.500 como referência (`prSizeLimit`). Acima disso, ele fica sem [x] e sugere quebrar a mudança numa stack ([Stack de PRs](#stack-de-prs)), mas não bloqueia.
 - **Merge só por merge commit** (`gh pr merge --merge`). Squash e rebase estão desligados no repositório, e o título e o corpo do merge commit vêm da PR, então o `Closes #N.` chega ao histórico de `main`.
 - **Quem mergeia.** O dono deu ao agente uma autorização permanente para mergear, na #2, em 2026-09-24, na resposta à pergunta 3: "Pode mergiar, se já está tudo ok e validado, não vejo problema." Ela vale quando as três condições se cumprem: os checks exigidos estão verdes, o veredito fresco saiu com 0 e a revisão está feita. Desde a #13, o veredito fresco só sai com 0 com a revisão do Copilot na cabeça e nenhuma thread aberta. Faltando uma, o agente não mergeia. O dono revoga a autorização com um comentário, e a partir dele o agente para de mergear.
 - **Depois do merge**, comente na issue o número da PR e o SHA do merge. A issue fecha sozinha pelo `Closes #N.`, e a branch remota é apagada pelo repositório.
+
+## Stack de PRs
+
+Uma mudança grande demais para uma PR vem numa stack: PRs pequenas, uma sobre a outra, cada uma com revisão e merge próprios (#31). O [ciclo de vida de issue e branch](../../context/knowledge/patterns/issue-branch-lifecycle.md#numa-stack) dá as regras, e [o gate do loop](../../context/knowledge/patterns/loop-gate.md#uma-fatia-de-stack), o que ele confere.
+
+1. **As sub-issues.** Uma por fatia, filha da issue mãe, com a label de categoria e `stack-slice`, sem label de estado. A mãe leva a categoria e o estado, como toda issue, e nunca `stack-slice`:
+
+   ```sh
+   gh issue create --repo geazioliveira/marketo-sandbox --parent <mãe> --title "<fatia>" --label enhancement --label stack-slice --body "Fatia da stack da #<mãe>."
+   ```
+
+2. **O plano da mãe.** Um `# Plano` na mãe com as seções de sempre e uma seção `## Stack`, uma só, com as branches das fatias, de baixo para cima: uma lista numerada, na primeira coluna, cada item começando com a branch num code span. Um bullet ou um parágrafo na seção é prosa e não vira fatia. Bloqueiam a stack um item numerado que não começa com uma branch e a branch de uma issue que não é fatia da mãe (sub-issue dela, deste repositório, com `stack-slice`):
+
+   ```markdown
+   ## Stack
+
+   1. `feature/<sub-1>-<slug>`
+   2. `feature/<sub-2>-<slug>`
+   ```
+
+   O dono aprova a mãe, e o Approve vale para todas as fatias. Um `# Plano` novo na mãe revoga o Approve de todas.
+3. **As branches.** A primeira é cortada do `origin/main`, e cada outra, da fatia logo abaixo:
+
+   ```sh
+   git fetch origin && git switch -c <fatia> origin/<fatia de baixo>
+   git branch --unset-upstream
+   ```
+
+   O intent vai no primeiro commit da primeira fatia, e o Learn, com a entrada do changelog citando a mãe, na última. Todo commit de uma fatia cita a sub-issue dela (`Refs #<sub>`): acima da primeira fatia, isso bloqueia no CI.
+4. **As PRs.** Cada uma fecha só a sua sub-issue (`Closes #<sub>.`). A primeira aponta para `main`. Cada outra aponta para a fatia de baixo e fica em draft até ela ser mergeada; o gate só aceita `main` como base dela depois de toda fatia de baixo mergeada:
+
+   ```sh
+   gh pr create --repo geazioliveira/marketo-sandbox --draft --base <fatia de baixo> --title "<título>" --body-file <corpo>
+   ```
+
+   A revisão do Copilot de uma fatia em draft é pedida à mão, com `gh pr edit <n> --add-reviewer @copilot`. Com a base na fatia de baixo, o GitHub não liga a PR à sub-issue, e o gate lê o `Closes #<sub>.` do corpo. Quando a PR passa a apontar para `main`, vale o vínculo do GitHub. Se ele não aparecer, edite o corpo da PR para o GitHub ler as palavras de fechamento de novo (não medido ao vivo).
+5. **Atualizar uma fatia.** Uma correção numa fatia de baixo sobe para a de cima por merge, nunca por rebase nem force-push:
+
+   ```sh
+   git fetch origin && git merge origin/<fatia de baixo>
+   ```
+
+   Nunca o contrário: a fatia de cima trazida para a de baixo, por merge ou fast-forward, bloqueia o `stacked` da de baixo.
+
+6. **O merge.** De baixo para cima, cada uma com as condições de sempre ([Pull requests e merge](#pull-requests-e-merge)). Quando a branch de baixo é apagada no merge, o GitHub aponta a PR de cima para `main`. Se não apontar, use `gh pr edit <n> --base main`. Então a PR sai de draft (`gh pr ready`) e segue. Depois do merge da última fatia, a mãe recebe um comentário com as PRs e os SHAs dos merges, e o dono a fecha.
 
 ## A revisão do Copilot e as threads
 

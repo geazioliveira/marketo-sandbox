@@ -44,11 +44,17 @@ import {
   parseBranch,
   parseSections,
   planCitesBranch,
+  prSizeLimit,
   readyLabel,
   refreshPrCommand,
   reviewRuleSince,
   shellWord,
   sectionsFor,
+  slicePosition,
+  stackOf,
+  closingRefsOf,
+  stackSection,
+  stackSliceLabel,
   stepIds,
   stateLabels,
   type GateCache,
@@ -2022,6 +2028,247 @@ describe('openThreads', () => {
   })
 })
 
+describe('the issues a PR body closes, read from its text (#31)', () => {
+  it('reads every keyword GitHub links, in each form', () => {
+    expect(
+      closingRefsOf(
+        'Closes #44.\n\nfixes: #45, Resolved dono/repo#7 e close https://github.com/dono/repo/issues/8',
+      ),
+    ).toEqual([
+      { repo: null, number: 44 },
+      { repo: null, number: 45 },
+      { repo: 'dono/repo', number: 7 },
+      { repo: 'dono/repo', number: 8 },
+    ])
+  })
+
+  it('counts each issue once, and nothing that is not a keyword and an issue', () => {
+    expect(closingRefsOf('Closes #44.\n\nCloses #44 de novo.')).toEqual([
+      { repo: null, number: 44 },
+    ])
+    for (const body of [
+      'Refs #44.',
+      'Enclosed #44.',
+      'Closes #0.',
+      'Closes #44a.',
+      'Closes # 44.',
+      '',
+      null,
+    ])
+      expect(closingRefsOf(body), String(body)).toEqual([])
+  })
+
+  it('leaves out HTML comments and reads code, on the side that blocks', () => {
+    expect(
+      closingRefsOf(
+        'Closes #44.\n\n<!-- não use Closes #99 aqui -->\n\n```\nCloses #98\n```',
+      ),
+    ).toEqual([
+      { repo: null, number: 44 },
+      { repo: null, number: 98 },
+    ])
+  })
+})
+
+describe('a stack declared in a parent plan (#31)', () => {
+  const plan = (stack: string) =>
+    `# Plano\n\n## Critérios de aceite\n\n- [ ] Uma coisa.\n\n## Plano\n\nFatias abaixo.\n\n## ${stackSection}\n\n${stack}\n\n## Riscos\n\nHIGH.`
+
+  it('reads the branches of the Stack section, bottom first', () => {
+    expect(
+      stackOf(
+        plan(
+          'De baixo para cima:\n\n1. `feature/32-hooks-base`, a base\n2. `feature/33-hooks-shell`\n3. `fix/34-um-bug` (bug)',
+        ),
+      ),
+    ).toEqual({
+      declared: true,
+      branches: [
+        'feature/32-hooks-base',
+        'feature/33-hooks-shell',
+        'fix/34-um-bug',
+      ],
+      problems: [],
+    })
+  })
+
+  it('takes bullets, indented items, code blocks and HTML comments as prose', () => {
+    expect(
+      stackOf(
+        plan(
+          [
+            'Depende de:',
+            '',
+            '- `feature/30-algo`, já em main.',
+            '',
+            '1. `feature/32-a`',
+            '   1. `feature/31-aninhada`',
+            '2. `feature/33-b`',
+            '<!-- 3. `feature/99-escondida` -->',
+            '```',
+            '3. `feature/98-no-codigo`',
+            '```',
+            '',
+            'Notas:',
+            '',
+            '- a `feature/39-antiga` não entra na stack.',
+          ].join('\n'),
+        ),
+      ),
+    ).toEqual({
+      declared: true,
+      branches: ['feature/32-a', 'feature/33-b'],
+      problems: [],
+    })
+  })
+
+  it('reads a branch in a code span of any number of backticks, as CommonMark does', () => {
+    expect(
+      stackOf(
+        plan(
+          '1. ``feature/32-a``\n2. ```feature/33-b```, a do meio\n3. `` feature/34-c ``',
+        ),
+      ),
+    ).toEqual({
+      declared: true,
+      branches: ['feature/32-a', 'feature/33-b', 'feature/34-c'],
+      problems: [],
+    })
+    // Runs of different lengths make no code span: the backticks are text.
+    expect(stackOf(plan('1. ``feature/32-a`')).problems).toEqual([
+      'um item numerado da seção Stack não começa com uma branch: ``feature/32-a`',
+    ])
+    expect(stackOf(plan('1. `feature/32-a``')).problems).toEqual([
+      'um item numerado da seção Stack não começa com uma branch: `feature/32-a``',
+    ])
+    // A second branch in a longer span is still a second branch.
+    expect(
+      stackOf(plan('1. `feature/32-a` (antes ``feature/33-b``)')).problems,
+    ).toEqual([
+      'um item da seção Stack cita mais de uma branch: feature/32-a, feature/33-b',
+    ])
+  })
+
+  it('stops the list at the first subheading of the section', () => {
+    expect(
+      stackOf(
+        plan('1. `feature/32-a`\n\n### Não fazer\n\n1. `feature/46-fora`'),
+      ).branches,
+    ).toEqual(['feature/32-a'])
+  })
+
+  it('refuses a numbered item that does not start with a branch', () => {
+    expect(
+      stackOf(plan('1. Primeiro, o contexto.\n2. `feature/33-b`')).problems,
+    ).toEqual([
+      'um item numerado da seção Stack não começa com uma branch: Primeiro, o contexto.',
+    ])
+    expect(
+      stackOf(plan('1. `feature/32-a`\n2. ~~`feature/33-b`~~')).problems,
+    ).toEqual([
+      'um item numerado da seção Stack não começa com uma branch: ~~`feature/33-b`~~',
+    ])
+  })
+
+  it('refuses an item with two branches, a branch named twice, two branches of one issue, and a section with none', () => {
+    expect(
+      stackOf(plan('1. `feature/32-a` (antes `feature/33-b`)')).problems,
+    ).toEqual([
+      'um item da seção Stack cita mais de uma branch: feature/32-a, feature/33-b',
+    ])
+    expect(
+      stackOf(plan('1. `feature/32-a`\n2. `feature/33-b`\n3. `feature/32-a`'))
+        .problems,
+    ).toEqual(['a seção Stack cita feature/32-a mais de uma vez'])
+    expect(stackOf(plan('1. `feature/32-a`\n2. `fix/32-b`')).problems).toEqual([
+      'a seção Stack cita duas branches da #32: feature/32-a e fix/32-b; uma issue tem uma branch só',
+    ])
+    expect(stackOf(plan('Só texto.')).problems).toEqual([
+      'a seção Stack não cita nenhuma branch',
+    ])
+  })
+
+  it('takes only a section titled exactly Stack, at any heading level, and only one', () => {
+    const criteria = '## Critérios de aceite\n\n- [ ] Uma coisa.\n\n'
+    expect(
+      stackOf(`${criteria}## Stack de PRs\n\n1. \`feature/32-a\``).declared,
+    ).toBe(false)
+    expect(
+      stackOf(`${criteria}## Stacktrace do erro\n\n1. \`feature/32-a\``)
+        .declared,
+    ).toBe(false)
+    // A plan from an issue form has its fields at ###, and a heading inside a
+    // field at ####; the workflow's example is ## Stack. All of them count.
+    for (const plan of [
+      '### Critérios de aceite\n\n- [ ] x\n\n### Stack\n\n1. `feature/32-a`',
+      '### Critérios de aceite\n\n- [ ] x\n\n## Stack\n\n1. `feature/32-a`',
+      '### Plano\n\nAs fatias:\n\n#### Stack\n\n1. `feature/32-a`\n\n### Riscos\n\nHIGH.',
+      `${criteria}## Fora de escopo\n\n### Stack\n\n1. \`feature/32-a\``,
+    ])
+      expect(stackOf(plan).branches, plan).toEqual(['feature/32-a'])
+    expect(
+      stackOf(
+        `${criteria}## Stack\n\n1. \`feature/32-a\`\n\n## Stack\n\n1. \`feature/33-b\``,
+      ).problems,
+    ).toEqual(['o plano tem 2 seções Stack'])
+    expect(
+      stackOf(
+        `${criteria}## Stack\n\n1. \`feature/32-a\`\n\n### Stack\n\n1. \`feature/33-b\``,
+      ).problems,
+    ).toEqual(['o plano tem 2 seções Stack'])
+  })
+
+  it('declares no stack in a plan without the section', () => {
+    expect(stackOf('# Plano\n\n## Plano\n\n`feature/32-a`')).toEqual({
+      declared: false,
+      branches: [],
+      problems: [],
+    })
+    for (const text of [null, undefined, ''])
+      expect(stackOf(text).declared).toBe(false)
+  })
+
+  it('places a branch in its stack', () => {
+    const branches = ['feature/32-a', 'feature/33-b', 'feature/34-c']
+    expect(slicePosition(branches, 'feature/32-a')).toEqual({
+      index: 0,
+      count: 3,
+      first: true,
+      last: false,
+      below: null,
+      lower: [],
+      upper: ['feature/33-b', 'feature/34-c'],
+    })
+    expect(slicePosition(branches, 'feature/33-b')).toEqual({
+      index: 1,
+      count: 3,
+      first: false,
+      last: false,
+      below: 'feature/32-a',
+      lower: ['feature/32-a'],
+      upper: ['feature/34-c'],
+    })
+    expect(slicePosition(branches, 'feature/34-c')).toMatchObject({
+      first: false,
+      last: true,
+      below: 'feature/33-b',
+      upper: [],
+    })
+    expect(slicePosition(['feature/32-a'], 'feature/32-a')).toMatchObject({
+      first: true,
+      last: true,
+    })
+    expect(slicePosition(branches, 'feature/35-d')).toBeNull()
+    expect(slicePosition(null, 'feature/32-a')).toBeNull()
+  })
+
+  it('names the slice label and the size reference', () => {
+    expect(stackSliceLabel).toBe('stack-slice')
+    expect(stateLabels).not.toContain(stackSliceLabel)
+    expect(prSizeLimit).toBe(1500)
+  })
+})
+
 describe('the step ids and the declarations', () => {
   it('pins the gate’s step ids and their order', () => {
     // A step removed or renamed here is a change to every hook and CI reader.
@@ -2033,6 +2280,7 @@ describe('the step ids and the declarations', () => {
       'pr-first-line',
       'copilot-review',
       'review-threads',
+      'pr-size',
       'issue-open',
       'kind',
       'state-label',

@@ -22,7 +22,10 @@
 // is caught.
 //
 // FAKE_GH_FIXTURE names a JSON file:
-//   { owner, name, issue?: Answer, pr?: Answer }
+//   { owner, name, issue?: Answer, parent?: Answer, pr?: Answer }
+//   parent answers a second issue query: the parent a slice of a stack (#31)
+//   is judged by. An issue query is answered by whichever of issue and parent
+//   has the number asked for.
 //   Answer = { number, mode: 'ok' | 'missing' | 'auth' | 'unreachable', data? }
 import { appendFileSync, readFileSync } from 'node:fs'
 
@@ -33,6 +36,7 @@ const argv = process.argv.slice(2)
 const required = {
   issue: `{ repository { owner { login } issue {
     state body lastEditedAt
+    parent { number repository { nameWithOwner } }
     labels { totalCount nodes { name } }
     comments { totalCount nodes { body createdAt lastEditedAt author { __typename login } } }
     timelineItems { totalCount nodes {
@@ -41,9 +45,14 @@ const required = {
       ... on ReopenedEvent { createdAt }
       ... on CommentDeletedEvent { createdAt }
     } }
+    subIssues { totalCount nodes {
+      number state repository { nameWithOwner }
+      labels { totalCount nodes { name } }
+    } }
   } } }`,
   pr: `{ repository { pullRequest {
     baseRefName headRefName headRefOid isDraft body
+    additions deletions changedFiles
     closingIssuesReferences { totalCount nodes { number repository { nameWithOwner } } }
     reviews { totalCount nodes {
       state submittedAt commit { oid }
@@ -382,10 +391,18 @@ function answer() {
         `timelineItems deve filtrar itemTypes: [${itemTypes.join(', ')}], recebeu ${JSON.stringify(types)}`,
       )
   }
-  const expected = fixture[kind]
-  if (expected == null) return refuse(`nenhuma resposta de ${kind} neste caso`)
-  if (number !== `number=${expected.number}`)
-    return refuse(`${kind} inesperada: ${number}, esperada ${expected.number}`)
+  const answers = (
+    kind === 'issue' ? [fixture.issue, fixture.parent] : [fixture.pr]
+  ).filter((answer) => answer != null)
+  if (answers.length === 0)
+    return refuse(`nenhuma resposta de ${kind} neste caso`)
+  const expected = answers.find(
+    (answer) => number === `number=${answer.number}`,
+  )
+  if (expected === undefined)
+    return refuse(
+      `${kind} inesperada: ${number}, esperada ${answers.map((answer) => answer.number).join(' ou ')}`,
+    )
 
   record({ kind, number: expected.number, mode: expected.mode })
   if (expected.mode === 'ok') {

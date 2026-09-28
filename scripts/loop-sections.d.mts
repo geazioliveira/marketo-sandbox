@@ -94,6 +94,32 @@ export declare function planCitesBranch(
   kind: Kind | string | null | undefined,
 ): { heading: string; section: boolean; cited: boolean }
 
+// Stacks (#31)
+
+export interface SlicePosition {
+  index: number
+  count: number
+  first: boolean
+  last: boolean
+  below: string | null
+  lower: string[]
+  upper: string[]
+}
+
+export declare const stackSection: string
+export declare const stackSliceLabel: string
+export declare const prSizeLimit: number
+
+export declare function stackOf(planText: string | null | undefined): {
+  declared: boolean
+  branches: string[]
+  problems: string[]
+}
+export declare function slicePosition(
+  branches: readonly string[] | null | undefined,
+  branch: string,
+): SlicePosition | null
+
 // Plan, Approve, withdrawal
 
 export interface Actor {
@@ -170,6 +196,9 @@ export declare function approveState(input: {
 // Pull requests, checks, changelog
 
 export declare const closesLine: RegExp
+export declare function closingRefsOf(
+  body: string | null | undefined,
+): { repo: string | null; number: number }[]
 export interface RequiredCheck {
   workflow: string
   job: string
