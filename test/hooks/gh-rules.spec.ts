@@ -2079,3 +2079,1809 @@ describe('the fake refuses anything but the documented calls', () => {
     expect(f.calls()[0].violation).toMatch(/argv inesperado/)
   })
 })
+
+describe('gh api (review of #5)', () => {
+  const comments = `-f body='# Owner Approve'`
+
+  it('fills :owner and :repo as gh does', async () => {
+    expectDeny(
+      await judge(`gh api repos/:owner/:repo/issues/5/comments ${comments}`),
+      opening,
+    )
+    expectPass(
+      await judge(`gh api repos/:owner/:repo/issues/5/comments ${comments}`, {
+        repo: { ...project(), repo: 'alguem/outro' },
+      }),
+    )
+  })
+
+  it('counts a placeholder it cannot fill as this project', async () => {
+    expectDeny(
+      await judge(`gh api repos/:owner/:repo/issues/5/comments ${comments}`, {
+        repo: null,
+      }),
+      opening,
+    )
+    expectDeny(
+      await judge(`gh api repos/{owner}/{repo}/issues/5/comments ${comments}`, {
+        repo: { ...project(), repo: 'alguem/outro' },
+        extra: { cwdKnown: false },
+      }),
+      opening,
+    )
+  })
+
+  it('fills the placeholders from GH_REPO', async () => {
+    expectPass(
+      await judge(`gh api repos/{owner}/{repo}/issues/5/comments ${comments}`, {
+        extra: { env: { GH_REPO: 'alguem/outro' } },
+      }),
+    )
+  })
+
+  it('judges a POST to an issue like a PATCH', async () => {
+    const issue = `gh api repos/${PROJECT}/issues/5`
+    expectDeny(await judge(`${issue} -f state=open`), /reabrir uma issue/)
+    expectDeny(
+      await judge(`${issue} -f 'labels[]=ready-for-agent'`),
+      /o campo labels troca todas as labels/,
+    )
+    expectDeny(await judge(`${issue} -f body='# Owner Approve'`), opening)
+    expectPass(await judge(`${issue} -f title='Outro título'`))
+  })
+
+  it.each([
+    [
+      'a comma after the name',
+      'mergePullRequest,(input: {pullRequestId: "PR_1"}) { clientMutationId }',
+      /use gh pr merge/,
+    ],
+    [
+      'a comment before the arguments',
+      'mergePullRequest #x\n(input: {pullRequestId: "PR_1"}) { clientMutationId }',
+      /use gh pr merge/,
+    ],
+    [
+      'commas around labels by id',
+      'addLabelsToLabelable ,(input: {labelableId: "I_1", labelIds: ["L_1"]}) { clientMutationId }',
+      /labels por id/,
+    ],
+    [
+      'a comma before addComment',
+      'addComment,(input: {subjectId: "I_1", body: "# Owner Approve\\n\\nok"}) { clientMutationId }',
+      opening,
+    ],
+  ])('denies a mutation called with %s', async (_, body, reason) => {
+    expectDeny(
+      await judge(`gh api graphql -f query='mutation { ${body} }'`),
+      reason,
+    )
+  })
+
+  it('keeps # and commas inside strings as text', async () => {
+    expectPass(
+      await judge(
+        `gh api graphql -f query='mutation { addComment(input: {subjectId: "I_1", body: "#5, recado"}) { clientMutationId } }'`,
+      ),
+    )
+    expectPass(
+      await judge(
+        `gh api graphql -f query='query { search(query: "mergePullRequest(", type: ISSUE) { issueCount } }'`,
+      ),
+    )
+  })
+
+  it('judges a mutation wherever the command runs: node ids are global', async () => {
+    const merge = `gh api graphql -f query='mutation { mergePullRequest(input: {pullRequestId: "PR_1"}) { clientMutationId } }'`
+    expectDeny(
+      await judge(merge, { repo: { ...project(), repo: 'alguem/outro' } }),
+      /use gh pr merge/,
+    )
+    expectDeny(await judge(merge, { repo: null }), /use gh pr merge/)
+    expectPass(await judge(`${merge} --hostname ghe.example.com`))
+    expectPass(
+      await judge(merge, { extra: { env: { GH_HOST: 'ghe.example.com' } } }),
+    )
+    expectDeny(await judge(merge, { extra: { env: { GH_HOST: '$H' } } }))
+  })
+})
+
+describe('the directory and the environment a gh command runs in (review of #5)', () => {
+  const elsewhere = { ...project(), repo: 'alguem/outro' }
+
+  it('judges a directory it could not read as this project', async () => {
+    expectDeny(
+      await judge('gh issue edit 5 --add-label ready-for-agent', {
+        repo: elsewhere,
+        extra: { cwdKnown: false },
+      }),
+      /ready-for-agent são do dono/,
+    )
+    expectDeny(
+      await judge('gh issue reopen 5', {
+        repo: { ...elsewhere, repoKnown: false },
+      }),
+    )
+  })
+
+  it('follows GH_REPO the command inherits', async () => {
+    expectPass(
+      await judge('gh issue reopen 5', {
+        extra: { env: { GH_REPO: 'alguem/outro' } },
+      }),
+    )
+    expectDeny(
+      await judge(`gh issue comment 5 -b '# Owner Approve'`, {
+        repo: null,
+        extra: { env: { GH_REPO: PROJECT } },
+      }),
+      opening,
+    )
+    expectPass(
+      await judge('GH_REPO=alguem/outro gh issue reopen 5', {
+        extra: { env: { GH_REPO: PROJECT } },
+      }),
+    )
+  })
+
+  it('asks when an earlier command moved HEAD and the branch decides', async () => {
+    const moved = { ...project(), branch: null, branchKnown: false }
+    expectAsk(
+      await judge(`gh pr create --body 'Closes #5.'`, { repo: moved }),
+      {
+        critical: true,
+        reason: /não consegui ler a branch da PR/,
+      },
+    )
+    expectPass(
+      await judge(`gh pr create -H ${BRANCH} --body 'Closes #5.'`, {
+        repo: moved,
+      }),
+    )
+    const github = stub()
+    expectAsk(await judge('gh pr merge --squash', { repo: moved, github }), {
+      critical: true,
+      reason: /a branch em que ele roda não pôde ser lida/,
+    })
+    expect(github.calls).toEqual([])
+    expectAsk(await judge(`gh pr edit --body 'Closes #5.'`, { repo: moved }), {
+      critical: true,
+      reason: /não consegui saber a branch da PR/,
+    })
+    expectPass(await judge(`gh pr edit 7 --body 'Closes #5.'`, { repo: moved }))
+  })
+
+  it('reads a body file as an earlier command of the line left it', async () => {
+    const files = (file: string) =>
+      path.basename(file) === 'b.md'
+        ? { known: true, text: '# Owner Approve\n\nok\n' }
+        : undefined
+    expectDeny(
+      await judge('gh issue comment 5 --body-file b.md', { extra: { files } }),
+      opening,
+    )
+    expectDeny(
+      await judge('gh issue comment 5 -F - < b.md', { extra: { files } }),
+      opening,
+    )
+    expectDeny(
+      await judge(`gh api repos/${PROJECT}/issues/5/comments -F body=@b.md`, {
+        extra: { files },
+      }),
+      opening,
+    )
+    const unknownFile = () => ({ known: false, text: null })
+    expectAsk(
+      await judge('gh issue comment 5 --body-file b.md', {
+        extra: { files: unknownFile },
+      }),
+      { critical: true, reason: unreadBody },
+    )
+  })
+})
+
+describe('gh aliases (review of #5)', () => {
+  const config = (dir: string, aliases: string) => {
+    mkdirSync(path.join(dir, 'gh'), { recursive: true })
+    writeFileSync(
+      path.join(dir, 'gh', 'config.yml'),
+      `version: 1\n# Aliases\naliases:\n${aliases}\npager:\n`,
+    )
+    return { XDG_CONFIG_HOME: dir }
+  }
+  const aliases = [
+    '    co: pr checkout',
+    '    i: issue',
+    '    k: |',
+    '        pr merge --auto',
+    '    e: |',
+    '        issue edit',
+    `    q: '!gh issue edit "$1" --add-label ready-for-agent'`,
+    '    r: issue edit $1 --add-label ready-for-agent',
+    '    v: "issue view"',
+    `    g: '!git push origin HEAD:main'`,
+  ].join('\n')
+
+  test.for([
+    [
+      'an alias of a group',
+      'gh i edit 5 --add-label ready-for-agent',
+      /o alias i do gh é "issue": .*ready-for-agent são do dono/,
+    ],
+    [
+      'a block alias',
+      'gh k 7',
+      /o alias k do gh é "pr merge --auto": o merge automático/,
+    ],
+    [
+      'a block alias given arguments',
+      'gh e 5 --add-label ready-for-agent',
+      /o alias e do gh é "issue edit": .*ready-for-agent são do dono/,
+    ],
+    ['a shell alias', 'gh q 5', /o alias q do gh é "!gh issue edit/],
+    ['an alias that takes $1', 'gh r 5', /ready-for-agent são do dono/],
+  ] as const)(
+    'denies %s from gh’s config',
+    async ([, text, reason], { scratch }) => {
+      const env = config(scratch(), aliases)
+      expectDeny(await judge(text, { extra: { env } }), reason)
+    },
+  )
+
+  test('passes an alias of a harmless command, and a word that is no alias', async ({
+    scratch,
+  }) => {
+    const env = config(scratch(), aliases)
+    expectPass(await judge('gh v 5', { extra: { env } }))
+    expectPass(await judge('gh extensao-qualquer x', { extra: { env } }))
+    expectPass(await judge('gh co 7', { extra: { env } }))
+    expectPass(await judge('gh co 7', { extra: { env: {} } }))
+  })
+
+  test('asks for a shell alias that runs git, unless guard-bash judges it', async ({
+    scratch,
+  }) => {
+    const env = config(scratch(), aliases)
+    expectAsk(await judge('gh g', { extra: { env } }), {
+      critical: true,
+      reason: /o alias g do gh roda git/,
+    })
+    const judged: unknown[] = []
+    expectDeny(
+      await judge('gh g', {
+        extra: {
+          env,
+          judgeOther: async (command) => {
+            judged.push((command as { argv: string[] }).argv)
+            return io.deny('negado pelo guard-bash')
+          },
+        },
+      }),
+      /o alias g do gh é .*negado pelo guard-bash/,
+    )
+    expect(judged).toEqual([['git', 'push', 'origin', 'HEAD:main']])
+  })
+
+  test('asks when gh’s config cannot be read', async ({ scratch }) => {
+    const env = config(scratch(), '    x: [issue]\n  torto')
+    expectAsk(await judge('gh x edit 5', { extra: { env } }), {
+      critical: true,
+      reason: /não consegui ler os aliases do gh/,
+    })
+    expectPass(await judge('gh issue view 5', { extra: { env } }))
+  })
+
+  it('reads an alias an earlier command of the line set, before the config', async () => {
+    const ghAliases = new Map([
+      ['j', { known: true, text: 'issue' }],
+      ['i', null],
+      ['u', { known: false, text: null }],
+    ])
+    expectDeny(
+      await judge('gh j edit 5 --add-label ready-for-agent', {
+        extra: { ghAliases },
+      }),
+    )
+    expectPass(
+      await judge('gh i edit 5 --add-label ready-for-agent', {
+        extra: { ghAliases },
+      }),
+    )
+    expectAsk(await judge('gh u 5', { extra: { ghAliases } }), {
+      critical: true,
+      reason: /não consegui ler o alias u do gh/,
+    })
+  })
+
+  it('judges gh alias set - from its stdin', async () => {
+    expectDeny(
+      await judge("gh alias set k - <<'EOF'\npr merge --admin\nEOF"),
+      /o alias k faria o que o hook confere/,
+    )
+    expectPass(await judge("gh alias set v - <<'EOF'\nissue view\nEOF"))
+    // An expansion it cannot read (a pipe) asks, critical: it may be one
+    // the rule refuses (Copilot review of #26, third round).
+    expectAsk(await judge('cat x | gh alias set k -'), {
+      critical: true,
+      reason: /não consegui ler o que o alias k do gh roda/,
+    })
+  })
+
+  test('judges each alias gh alias import brings', async ({ scratch }) => {
+    const dir = scratch()
+    writeFileSync(
+      path.join(dir, 'ruins.yml'),
+      'm: pr merge --admin\nv: issue view\n',
+    )
+    writeFileSync(path.join(dir, 'boas.yml'), "v: issue view\nl: 'pr list'\n")
+    expectDeny(
+      await judge('gh alias import ruins.yml', { cwd: dir }),
+      /o gh alias import traria aliases .*o alias m do gh é "pr merge --admin"/,
+    )
+    expectPass(await judge('gh alias import boas.yml', { cwd: dir }))
+    expectDeny(
+      await judge("gh alias import - <<'EOF'\nr: issue reopen 5\nEOF", {
+        cwd: dir,
+      }),
+      /reabrir uma issue/,
+    )
+    expectAsk(await judge('gh alias import nao-existe.yml', { cwd: dir }), {
+      critical: true,
+      reason: /não consegui ler os aliases que o gh alias import traz/,
+    })
+  })
+
+  test('lists what a gh alias command defines for the rest of the line', async ({
+    scratch,
+  }) => {
+    const dir = scratch()
+    writeFileSync(path.join(dir, 'a.yml'), 'x: issue\n')
+    const defined = (text: string) =>
+      gh.ghAliasDefinitions(shell.parseCommand(text).commands[0], { cwd: dir })
+    expect(defined('gh alias set i issue')).toEqual([
+      ['i', { known: true, text: 'issue' }],
+    ])
+    expect(defined("gh alias set --shell s 'gh issue view'")).toEqual([
+      ['s', { known: true, text: '!gh issue view' }],
+    ])
+    expect(defined("gh alias set k - <<'EOF'\npr merge\nEOF")).toEqual([
+      ['k', { known: true, text: 'pr merge\n' }],
+    ])
+    expect(defined('gh alias set i "$E"')).toEqual([
+      ['i', { known: false, text: null }],
+    ])
+    expect(defined('gh alias import a.yml')).toEqual([
+      ['x', { known: true, text: 'issue' }],
+    ])
+    expect(defined('gh alias delete i')).toEqual([['i', null]])
+    expect(defined('gh alias set "$N" issue')).toEqual([])
+    expect(defined('gh alias list')).toEqual([])
+    expect(defined('gh issue view 5')).toEqual([])
+  })
+
+  test('tells which gh commands check another branch out', async ({
+    scratch,
+  }) => {
+    const env = config(scratch(), aliases)
+    const moves = (text: string, extra: Partial<GhCtx> = {}) =>
+      gh.ghMovesHead(shell.parseCommand(text).commands[0], {
+        cwd: tmpdir(),
+        env,
+        ...extra,
+      })
+    expect(moves('gh pr checkout 7')).toBe(true)
+    expect(moves('gh co 7')).toBe(true)
+    expect(moves('gh g')).toBe(true)
+    expect(moves('gh pr "$V" 7')).toBe(true)
+    expect(
+      moves('gh x 7', {
+        ghAliases: new Map([['x', { known: true, text: 'pr checkout' }]]),
+      }),
+    ).toBe(true)
+    expect(moves('gh pr view 7')).toBe(false)
+    expect(moves('gh i view 5')).toBe(false)
+    expect(moves('gh issue view 5')).toBe(false)
+  })
+})
+
+describe('a repository it cannot read is never this project for a pass (Copilot review of #26)', () => {
+  const transition = '--remove-label needs-triage --add-label ready-for-human'
+  const unplaced = /não consegui ler em que repositório o comando troca/
+
+  it.each([
+    ['-R of a variable', `gh issue edit 5 -R "$REPO" ${transition}`],
+    ['--repo= of a variable', `gh issue edit 5 "--repo=$REPO" ${transition}`],
+    ['GH_REPO of a variable', `GH_REPO=$DESTINO gh issue edit 5 ${transition}`],
+  ])(
+    'asks, critical, before reading an issue named through %s',
+    async (_, text) => {
+      const github = stub({ issueState: issueAnswer() })
+      expectAsk(await judge(text, { github }), {
+        critical: true,
+        reason: unplaced,
+      })
+      expect(github.calls).toEqual([])
+    },
+  )
+
+  it('asks the same after a directory or a remote it could not read', async () => {
+    const github = stub({ issueState: issueAnswer() })
+    expectAsk(
+      await judge(`gh issue edit 5 ${transition}`, {
+        github,
+        extra: { cwdKnown: false },
+      }),
+      { critical: true, reason: unplaced },
+    )
+    expectAsk(
+      await judge(`gh issue edit 5 ${transition}`, {
+        github,
+        repo: { ...project(), remoteKnown: false },
+      }),
+      { critical: true, reason: unplaced },
+    )
+    expect(github.calls).toEqual([])
+  })
+
+  it('keeps the denies that do not depend on the repository', async () => {
+    const github = stub()
+    expectDeny(
+      await judge('gh issue edit 5 -R "$REPO" --add-label ready-for-agent', {
+        github,
+      }),
+      /ready-for-agent são do dono/,
+    )
+    expectDeny(await judge('gh issue reopen 5 -R "$REPO"', { github }))
+    expect(github.calls).toEqual([])
+  })
+
+  it('asks, critical, before reading a PR in a repository it cannot read', async () => {
+    const github = stub({
+      prMergeState: mergeAnswer({ checksOk: false, checksDetail: 'vermelho' }),
+    })
+    expectAsk(await judge('gh pr merge 7 -R "$REPO" --squash', { github }), {
+      critical: true,
+      reason: /o repositório da PR não pôde ser lido/,
+    })
+    expect(github.calls).toEqual([])
+  })
+
+  it('judges a remote changed to one it can read by that repository', async () => {
+    expectPass(
+      await judge('gh issue reopen 5', {
+        repo: { ...project(), repo: 'alguem/outro' },
+      }),
+    )
+    expectDeny(
+      await judge('gh issue reopen 5', {
+        repo: { ...project(), repo: null, remoteKnown: false },
+      }),
+    )
+    expectDeny(
+      await judge(
+        `gh api repos/{owner}/{repo}/issues/5/labels -f 'labels[]=ready-for-agent'`,
+        { repo: { ...project(), repo: 'alguem/outro', remoteKnown: false } },
+      ),
+      /label de estado/,
+    )
+  })
+})
+
+describe('a PR created through the API (Copilot review of #26)', () => {
+  const repoPath = `repos/${PROJECT}`
+  const noBody =
+    /a PR precisa de um corpo cuja primeira linha é exatamente "Closes #5\."/
+  const unreadPrBody = /não consegui ler o corpo da PR/
+
+  it.each([
+    [
+      'POST by its fields',
+      `gh api ${repoPath}/pulls -f head=${BRANCH} -f base=main -f title=T`,
+    ],
+    [
+      '-X POST with placeholders',
+      `gh api -X POST repos/{owner}/{repo}/pulls -f head=${BRANCH} -f base=main -f title=T`,
+    ],
+    [
+      'an issue turned into a PR',
+      `gh api ${repoPath}/pulls -f head=${BRANCH} -f base=main -F issue=5`,
+    ],
+  ])('denies a REST %s with no body, as gh pr create does', async (_, text) => {
+    expectDeny(await judge(text), noBody)
+  })
+
+  test('reads the body from --input, and asks only when it cannot read it', async ({
+    scratch,
+  }) => {
+    const dir = scratch()
+    const pr = { head: BRANCH, base: 'main', title: 'T' }
+    writeFileSync(path.join(dir, 'sem-corpo.json'), JSON.stringify(pr))
+    writeFileSync(
+      path.join(dir, 'com-corpo.json'),
+      JSON.stringify({ ...pr, body: 'Closes #5.\n\nTexto.' }),
+    )
+    expectDeny(
+      await judge(`gh api ${repoPath}/pulls --input sem-corpo.json`, {
+        cwd: dir,
+      }),
+      noBody,
+    )
+    expectPass(
+      await judge(`gh api ${repoPath}/pulls --input com-corpo.json`, {
+        cwd: dir,
+      }),
+    )
+    expectAsk(
+      await judge(
+        `gh api ${repoPath}/pulls -f head=${BRANCH} -f base=main -f body="$CORPO"`,
+      ),
+      { critical: true, reason: unreadPrBody },
+    )
+  })
+
+  const create = (fields: string) =>
+    `gh api graphql -f query='mutation { createPullRequest(input: {repositoryId: "R_1", baseRefName: "main", ${fields}}) { pullRequest { url } } }'`
+
+  it('denies createPullRequest through GraphQL with no body', async () => {
+    expectDeny(
+      await judge(create(`headRefName: "${BRANCH}", title: "T"`)),
+      noBody,
+    )
+  })
+
+  it('holds createPullRequest to the rest of the gh pr create rules', async () => {
+    expectDeny(
+      await judge(
+        create(`headRefName: "claude/x", title: "T", body: "Closes #5."`),
+      ),
+      /a PR sai de uma branch/,
+    )
+    expectDeny(
+      await judge(
+        create(`headRefName: "${BRANCH}", title: "T", body: "Resumo"`),
+      ),
+      /exatamente "Closes #5\."; hoje é "Resumo"/,
+    )
+    expectDeny(
+      await judge(
+        create(`headRefName: "${BRANCH}", title: "T", body: "Closes #7."`),
+      ),
+      /fecha a #7, mas a branch é da #5/,
+    )
+    expectDeny(
+      await judge(
+        create(
+          `headRefName: "${BRANCH}", title: "T [skip ci]", body: "Closes #5."`,
+        ),
+      ),
+      /a PR traz "\[skip ci\]"/,
+    )
+    expectPass(
+      await judge(
+        create(
+          `headRefName: "${BRANCH}", title: "T", body: "Closes #5.\\n\\nTexto."`,
+        ),
+      ),
+    )
+  })
+
+  it('reads createPullRequest through variables, and asks for a body it cannot read', async () => {
+    const query =
+      'mutation($head: String!, $body: String) { createPullRequest(input: {repositoryId: "R_1", baseRefName: "main", headRefName: $head, title: "T", body: $body}) { pullRequest { url } } }'
+    expectPass(
+      await judge(
+        `gh api graphql -f head=${BRANCH} -f body='Closes #5.' -f query='${query}'`,
+      ),
+    )
+    expectAsk(
+      await judge(`gh api graphql -f head=${BRANCH} -f query='${query}'`),
+      { critical: true, reason: unreadPrBody },
+    )
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Third round of Copilot's review of #26
+
+describe('a value it cannot read asks, critical, where the rule would refuse (Copilot review of #26, third round)', () => {
+  const repoPath = `repos/${PROJECT}`
+
+  it.each([
+    [
+      'a label of gh issue create',
+      'gh issue create -t T -b corpo -l "$LABEL"',
+      /não consegui ler as labels do comando/,
+    ],
+    [
+      'the name of gh label edit',
+      'gh label edit "$LABEL" --color fff',
+      /não consegui ler as labels do comando/,
+    ],
+    [
+      'an added label of gh issue edit',
+      'gh issue edit 5 --add-label "$LABEL"',
+      /não consegui ler as labels do comando/,
+    ],
+    [
+      'the file gh issue create --recover restores',
+      'gh issue create --recover rascunho.json',
+      /--recover traz corpo e labels/,
+    ],
+    [
+      'the title of gh pr create',
+      `gh pr create --title "$TITLE" --body 'Closes #5.'`,
+      /não consegui ler o título da PR/,
+    ],
+    [
+      'the title of gh pr edit',
+      'gh pr edit 7 -t "$TITLE"',
+      /não consegui ler o título da PR/,
+    ],
+    [
+      'the --input of the labels endpoint',
+      `gh api ${repoPath}/issues/5/labels --input "$BODY"`,
+      /não consegui ler as labels do comando/,
+    ],
+    [
+      'the --input of a REST issue edit',
+      `gh api -X PATCH ${repoPath}/issues/5 --input "$BODY"`,
+      /não consegui ler o que o gh api muda na issue/,
+    ],
+    [
+      'the state of a REST issue edit',
+      `gh api -X PATCH ${repoPath}/issues/5 -f state="$STATE"`,
+      /não consegui ler o estado que o gh api põe na issue/,
+    ],
+    [
+      'the labels of a REST issue create',
+      `gh api ${repoPath}/issues -f title=T -f body=corpo -f 'labels[]'="$LABEL"`,
+      /não consegui ler as labels do comando/,
+    ],
+    [
+      'the name of a REST label create',
+      `gh api ${repoPath}/labels -f name="$LABEL" -f color=fff`,
+      /não consegui ler as labels do comando/,
+    ],
+    [
+      'the title of a REST pull request',
+      `gh api ${repoPath}/pulls -f head=feature/5-x -f base=main -f title="$TITLE" -f 'body=Closes #5.'`,
+      /não consegui ler o título da PR/,
+    ],
+    [
+      'the title of a REST pull request edit',
+      `gh api -X PATCH ${repoPath}/pulls/7 -f title="$TITLE"`,
+      /não consegui ler o título da PR/,
+    ],
+    [
+      'a GraphQL state sent by no variable',
+      `gh api graphql -f query='mutation($s: IssueState!) { updateIssue(input: {id: "I_1", state: $s}) { issue { id } } }'`,
+      /não consegui ler o estado que a mutation põe na issue/,
+    ],
+    [
+      'a GraphQL state behind an expansion',
+      `gh api graphql -f s="$STATE" -f query='mutation($s: IssueState!) { updateIssue(input: {id: "I_1", state: $s}) { issue { id } } }'`,
+      /não consegui ler o estado que a mutation põe na issue/,
+    ],
+    [
+      'a GraphQL title of updatePullRequest',
+      `gh api graphql -f t="$TITLE" -f query='mutation($t: String!) { updatePullRequest(input: {pullRequestId: "PR_1", title: $t}) { pullRequest { id } } }'`,
+      /não consegui ler o título da PR/,
+    ],
+    ['a comment body', 'gh issue comment 5 --body "$BODY"', unreadBody],
+    [
+      'the thread resolveReviewThread resolves',
+      `gh api graphql -f query='mutation($id: ID!) { resolveReviewThread(input: {threadId: $id}) { thread { id } } }'`,
+      /não consegui ler a thread que o resolveReviewThread resolve/,
+    ],
+    [
+      'the expansion of an alias being set',
+      'gh alias set x "$EXPANSAO"',
+      /não consegui ler o que o alias x do gh roda/,
+    ],
+    [
+      'the body of gh pr edit',
+      'gh pr edit 7 --body "$BODY"',
+      /não consegui ler o novo corpo da PR/,
+    ],
+    [
+      'the body of a REST pull request edit',
+      `gh api -X PATCH ${repoPath}/pulls/7 -f body="$BODY"`,
+      /não consegui ler o novo corpo da PR/,
+    ],
+    [
+      'a GraphQL call from an --input it cannot read',
+      'gh api graphql --input "$F"',
+      /não consegui ler a chamada GraphQL do gh api/,
+    ],
+    [
+      'the file gh pr create --recover restores, next to a readable body',
+      `gh pr create --recover f --title T --body 'Closes #5.'`,
+      /gh pr create --recover traz título e corpo/,
+    ],
+    [
+      'an earlier --body of gh pr create, which gh drops',
+      `gh pr create --title T --body "$X" --body 'Closes #5.'`,
+      /não consegui ler o corpo da PR para conferir que não traz/,
+    ],
+    [
+      'the aliases gh alias import reads from a pipe',
+      'cat x | gh alias import',
+      /não consegui ler os aliases que o gh alias import traz/,
+    ],
+    [
+      'an alias gh alias import brings and it cannot read',
+      "gh alias import - <<'EOF'\nm: [pr, merge]\nEOF",
+      /não consegui ler o alias m que o gh alias import traz/,
+    ],
+  ])('asks, critical, for %s', async (_, text, reason) => {
+    const github = stub()
+    expectAsk(await judge(text, { github }), { critical: true, reason })
+    expect(github.calls).toEqual([])
+  })
+
+  it('asks, critical, for a merge subject or body it cannot read, next to the live read', async () => {
+    const github = stub({ prMergeState: mergeAnswer() })
+    const decision = await judge(
+      'gh pr merge 7 --squash --subject "$SUBJECT"',
+      {
+        github,
+      },
+    )
+    expectAsk(decision, {
+      critical: true,
+      reason: /não consegui ler o assunto do merge/,
+    })
+    expect(decision.reason).toMatch(/confira antes do merge/)
+    const red = stub({
+      prMergeState: mergeAnswer({ checksOk: false, checksDetail: 'vermelho' }),
+    })
+    expectDeny(
+      await judge('gh pr merge 7 --squash --body "$BODY"', { github: red }),
+      /não está pronto/,
+    )
+  })
+
+  it('names the merge body it cannot read, next to the live read', async () => {
+    const github = stub({ prMergeState: mergeAnswer() })
+    expectAsk(
+      await judge('gh pr merge 7 --squash --body "$BODY"', { github }),
+      { critical: true, reason: /não consegui ler o corpo do merge/ },
+    )
+  })
+
+  describe('a gh api field whose key it cannot read', () => {
+    it.each([
+      [
+        'a REST issue edit',
+        `gh api -X PATCH ${repoPath}/issues/5 -f "$F"`,
+        /não consegui ler o que o gh api muda na issue/,
+      ],
+      [
+        'a REST issue edit, the key behind an expansion',
+        `gh api -X PATCH ${repoPath}/issues/5 -f "$K"=open`,
+        /não consegui ler o que o gh api muda na issue/,
+      ],
+      [
+        'the labels endpoint',
+        `gh api ${repoPath}/issues/5/labels -F "$K"=x`,
+        /não consegui ler as labels do comando/,
+      ],
+      [
+        'a REST issue create',
+        `gh api ${repoPath}/issues -f title=T -f body=corpo -f "$K"=x`,
+        /não consegui ler as labels do comando/,
+      ],
+      [
+        'a REST label create',
+        `gh api ${repoPath}/labels --raw-field "$K"=x`,
+        /não consegui ler as labels do comando/,
+      ],
+      [
+        'a REST comment',
+        `gh api ${repoPath}/issues/5/comments --field "$K"=x`,
+        unreadBody,
+      ],
+      [
+        'a GraphQL call',
+        'gh api graphql -f "$Q"',
+        /não consegui ler a chamada GraphQL do gh api/,
+      ],
+    ])(
+      'asks, critical, on %s: it may be state or labels (Copilot review of #26, third round)',
+      async (_, text, reason) => {
+        expectAsk(await judge(text), { critical: true, reason })
+      },
+    )
+
+    it('leaves alone a route whose body no rule reads, and a field gh refuses', async () => {
+      expectPass(await judge(`gh api -X GET ${repoPath}/issues -f "$K"=x`))
+      expectPass(
+        await judge(`gh api ${repoPath}/pulls/7/comments/9/replies -f "$K"=x`),
+      )
+      // A readable field with no `=` makes gh stop before any request.
+      expectPass(await judge(`gh api -X PATCH ${repoPath}/issues/5 -f state`))
+      // With --input, the fields go to the query string, not the body.
+      expectDeny(
+        await judge(
+          `gh api -X PATCH ${repoPath}/issues/5 --input - -f "$K"=x <<'EOF'\n{"state": "open"}\nEOF`,
+        ),
+        /reabrir uma issue/,
+      )
+    })
+  })
+
+  it('reads gh alias import with no file from its stdin, as gh does (Copilot review of #26, third round)', async () => {
+    expectDeny(
+      await judge("gh alias import <<'EOF'\nr: issue reopen 5\nEOF"),
+      /reabrir uma issue/,
+    )
+    expectPass(await judge("gh alias import <<'EOF'\nv: issue view\nEOF"))
+    expect(
+      gh.ghAliasDefinitions(
+        shell.parseCommand("gh alias import <<'EOF'\nx: issue\nEOF")
+          .commands[0],
+        { cwd: tmpdir() },
+      ),
+    ).toEqual([['x', { known: true, text: 'issue' }]])
+  })
+
+  it('asks, critical, for an alias it cannot follow to its end', async () => {
+    const chain = new Map(
+      Array.from({ length: 7 }, (_, k) => [
+        `a${k}`,
+        { known: true, text: `a${k + 1}` },
+      ]),
+    )
+    chain.set('a7', { known: true, text: 'issue view' })
+    expectAsk(await judge('gh a0 5', { extra: { ghAliases: chain } }), {
+      critical: true,
+      reason: /leva a aliases demais/,
+    })
+    const ghAliases = new Map([
+      ['t', { known: true, text: 'issue comment 5 --body "sem fim' }],
+      ['p', { known: true, text: '!$CMD issue list' }],
+    ])
+    expectAsk(await judge('gh t', { extra: { ghAliases } }), {
+      critical: true,
+      reason: /não consegui ler o alias t do gh \("/,
+    })
+    expectAsk(await judge('gh p', { extra: { ghAliases } }), {
+      critical: true,
+      reason: /roda um programa que o hook não consegue ler/,
+    })
+  })
+
+  it('asks, critical, when the live read of the label transition fails', async () => {
+    const github = stub({ issueState: failure() })
+    expectAsk(
+      await judge(
+        'gh issue edit 5 --remove-label needs-triage --add-label ready-for-human',
+        { github },
+      ),
+      { critical: true, reason: /não consegui confirmar que a issue está em/ },
+    )
+  })
+
+  it('asks, critical, for the transition in a repository it cannot read', async () => {
+    const github = stub({ issueState: issueAnswer() })
+    expectAsk(
+      await judge(
+        'gh issue edit 5 -R "$REPO" --remove-label needs-triage --add-label ready-for-human',
+        { github },
+      ),
+      {
+        critical: true,
+        reason: /não consegui ler em que repositório o comando troca/,
+      },
+    )
+    expect(github.calls).toEqual([])
+  })
+
+  it('asks, critical, for a title --fill takes from the commits', async () => {
+    expectAsk(await judge(`gh pr create --fill --body 'Closes #5.'`), {
+      critical: true,
+      reason: /--fill sem --title/,
+    })
+    expectPass(
+      await judge(`gh pr create --fill --title Hooks --body 'Closes #5.'`),
+    )
+  })
+
+  it('keeps a plain ask where the rule itself only asks', async () => {
+    expectAsk(await judge('gh issue edit 5 --body "Novo corpo, legível."'), {
+      reason: /editar o corpo da issue depois do Approve o revoga/,
+    })
+    expectAsk(await judge('gh issue comment 5 --edit-last -b "Recado."'), {
+      reason: /editar um comentário depois do Approve o revoga/,
+    })
+    expectAsk(await judge(`gh api -X DELETE ${repoPath}/issues/comments/9`), {
+      reason: /apagar um comentário depois do Approve o revoga/,
+    })
+  })
+
+  describe('the forms a session writes stay readable, and pass', () => {
+    it('reads a body in "$(cat <<\'EOF\' … EOF)"', async () => {
+      expectPass(
+        await judge(
+          `gh pr create --title "Hooks do loop" --body "$(cat <<'EOF'\nCloses #5.\n\nO resto.\nEOF\n)"`,
+        ),
+      )
+      expectPass(
+        await judge(
+          `gh issue comment 5 --body "$(cat <<'EOF'\nRecado com $5 e \`crases\`.\nEOF\n)"`,
+        ),
+      )
+      expectDeny(
+        await judge(
+          `gh issue comment 5 --body "$(cat <<'EOF'\n# Owner Approve\nEOF\n)"`,
+        ),
+        opening,
+      )
+      expectDeny(
+        await judge(
+          `gh pr create --title "Hooks" --body "$(cat <<'EOF'\nCloses #5.\n\n[skip ci]\nEOF\n)"`,
+        ),
+        /skip ci/,
+      )
+    })
+
+    test('reads a title and a body file the line assigned', async ({
+      scratch,
+    }) => {
+      const dir = scratch()
+      writeFileSync(path.join(dir, 'pr.md'), 'Closes #5.\n\nTexto.\n')
+      expectPass(
+        await judge(
+          `T='Hooks do loop'; P=${dir}/pr.md; gh pr create --title "$T" --body-file "$P"`,
+        ),
+      )
+      expectPass(await judge(`gh pr create --title T --body-file ${dir}/pr.md`))
+      expectPass(await judge(`gh issue comment 5 -F - <<'EOF'\nRecado.\nEOF`))
+    })
+  })
+})
+
+describe('the GitHub host a gh command talks to (Copilot review of #26, third round)', () => {
+  const transition = '--remove-label needs-triage --add-label ready-for-human'
+
+  it('passes the transition on another host without reading this project’s issue', async () => {
+    const github = stub()
+    expectPass(
+      await judge(
+        `GH_HOST=ghe.example.com GH_REPO=geazioliveira/marketo-sandbox gh issue edit 5 ${transition}`,
+        { github },
+      ),
+    )
+    expectPass(
+      await judge(
+        `GH_HOST=ghe.example.com gh issue edit 5 -R geazioliveira/marketo-sandbox ${transition}`,
+        { github },
+      ),
+    )
+    expect(github.calls).toEqual([])
+  })
+
+  it('reads GH_HOST inherited from the environment, for -R and for the remotes', async () => {
+    const github = stub()
+    const env = { GH_HOST: 'ghe.example.com' }
+    expectPass(
+      await judge(`gh issue edit 5 ${transition}`, { github, extra: { env } }),
+    )
+    expectPass(await judge('gh issue reopen 5', { github, extra: { env } }))
+    expectPass(
+      await judge('gh issue reopen 5 -R geazioliveira/marketo-sandbox', {
+        github,
+        extra: { env },
+      }),
+    )
+    expect(github.calls).toEqual([])
+  })
+
+  it('asks, critical, before any live read when GH_HOST cannot be read', async () => {
+    const github = stub({ issueState: issueAnswer() })
+    expectAsk(
+      await judge(`GH_HOST=$HOST gh issue edit 5 ${transition}`, { github }),
+      {
+        critical: true,
+        reason: /não consegui ler em que repositório o comando troca/,
+      },
+    )
+    expectAsk(
+      await judge(`gh issue edit 5 ${transition}`, {
+        github,
+        extra: { env: { GH_HOST: '$(cat /etc/host)' } },
+      }),
+      { critical: true },
+    )
+    expect(github.calls).toEqual([])
+    expectDeny(await judge('GH_HOST=$HOST gh issue reopen 5', { github }))
+  })
+
+  it.each([
+    ['-R', `GH_HOST=$HOST gh issue edit 5 -R ${PROJECT} ${transition}`],
+    [
+      'GH_REPO',
+      `GH_HOST=$HOST GH_REPO=${PROJECT} gh issue edit 5 ${transition}`,
+    ],
+  ])(
+    'asks, critical, for a repository named with %s on a host it cannot read: it may be github.com',
+    async (_, text) => {
+      const github = stub({ issueState: issueAnswer() })
+      expectAsk(await judge(text, { github }), {
+        critical: true,
+        reason: /não consegui ler em que repositório o comando troca/,
+      })
+      expect(github.calls).toEqual([])
+    },
+  )
+
+  it('reads github.com however gh spells it, on the command, GH_HOST or -R', async () => {
+    const github = stub({ issueState: issueAnswer() })
+    expectPass(
+      await judge(`GH_HOST=GitHub.com gh issue edit 5 ${transition}`, {
+        github,
+      }),
+    )
+    expect(github.calls).toEqual([['issueState', PROJECT, 5]])
+    for (const repo of [
+      'www.github.com/geazioliveira/marketo-sandbox',
+      'https://www.github.com/geazioliveira/marketo-sandbox',
+      'github.com/geazioliveira/marketo-sandbox',
+      'git@github.com:geazioliveira/marketo-sandbox.git',
+    ])
+      expectDeny(
+        await judge(
+          `GH_HOST=ghe.example.com gh issue edit 5 -R ${repo} --add-label ready-for-agent`,
+        ),
+        /ready-for-agent são do dono/,
+      )
+    expectDeny(
+      await judge(
+        `GH_HOST=api.github.com gh api -X PATCH repos/${PROJECT}/issues/5 -f state=open`,
+      ),
+      /reabrir uma issue/,
+    )
+  })
+
+  it('passes a repository on another host named with -R HOST/OWNER/REPO', async () => {
+    const github = stub()
+    expectPass(
+      await judge(
+        `gh issue edit 5 -R ghe.example.com/geazioliveira/marketo-sandbox ${transition}`,
+        { github },
+      ),
+    )
+    expectPass(
+      await judge(
+        'gh issue reopen 5 --repo https://ghe.example.com/geazioliveira/marketo-sandbox',
+        { github },
+      ),
+    )
+    expect(github.calls).toEqual([])
+  })
+})
+
+describe('the host each live read goes to (Copilot review of #26, fifth round)', () => {
+  const transition = '--remove-label needs-triage --add-label ready-for-human'
+  const resolve = `-f query='mutation { resolveReviewThread(input: {threadId: "PRRT_1"}) { thread { isResolved } } }'`
+  // Claude Code's environment, as guard-bash hands it on: an enterprise host.
+  const env = { GH_HOST: 'ghe.example.com' }
+
+  /** A client factory that records the host of each client it hands out. */
+  function recorder(github: Stub) {
+    const hosts: string[] = []
+    return {
+      hosts,
+      githubFor: (host: string) => {
+        hosts.push(host)
+        return github
+      },
+    }
+  }
+
+  it.each([
+    [
+      'the label transition, GH_HOST=github.com on the command',
+      `GH_HOST=github.com gh issue edit 5 ${transition}`,
+      { issueState: issueAnswer() },
+    ],
+    [
+      'gh pr merge, -R github.com/OWNER/REPO',
+      `gh pr merge 7 -R github.com/${PROJECT}`,
+      { prMergeState: mergeAnswer() },
+    ],
+    [
+      'gh pr merge, the PR URL',
+      `gh pr merge https://github.com/${PROJECT}/pull/7`,
+      { prMergeState: mergeAnswer() },
+    ],
+    [
+      'resolveReviewThread, --hostname github.com',
+      `gh api graphql --hostname github.com ${resolve}`,
+      {
+        threadLastAuthor: { ok: true, value: 'geazioliveira' },
+        viewer: { ok: true, value: 'geazioliveira' },
+      },
+    ],
+    [
+      'resolveReviewThread, GH_HOST=github.com on the command',
+      `GH_HOST=github.com gh api graphql ${resolve}`,
+      {
+        threadLastAuthor: { ok: true, value: 'geazioliveira' },
+        viewer: { ok: true, value: 'geazioliveira' },
+      },
+    ],
+  ])(
+    'reads %s on github.com, over an inherited enterprise GH_HOST',
+    async (_, text, answers) => {
+      const github = stub(answers)
+      const { hosts, githubFor } = recorder(github)
+      await judge(text, { github, extra: { env, githubFor } })
+      expect(github.calls.length).toBeGreaterThan(0)
+      expect(new Set(hosts)).toEqual(new Set(['github.com']))
+    },
+  )
+
+  it.each<[string, string, Record<string, string>]>([
+    ['--hostname "$H"', `gh api graphql --hostname "$H" ${resolve}`, {}],
+    ['GH_HOST=$H on the command', `GH_HOST=$H gh api graphql ${resolve}`, {}],
+    [
+      'GH_HOST=$(…) inherited',
+      `gh api graphql ${resolve}`,
+      { GH_HOST: '$(cat /etc/host)' },
+    ],
+  ])(
+    'reads nothing for resolveReviewThread on a host it cannot read (%s), and asks, critical',
+    async (_, text, inherited) => {
+      const github = stub({
+        threadLastAuthor: { ok: true, value: 'geazioliveira' },
+        viewer: { ok: true, value: 'geazioliveira' },
+      })
+      const { githubFor } = recorder(github)
+      expectAsk(
+        await judge(text, { github, extra: { env: inherited, githubFor } }),
+        {
+          critical: true,
+          reason:
+            /não consegui confirmar que a última resposta da thread é sua \(não consegui ler em que GitHub/,
+        },
+      )
+      expect(github.calls).toEqual([])
+    },
+  )
+
+  it('reads an alias’s merge on the host of the command that runs it, and never for an alias being set', async () => {
+    const github = stub({ prMergeState: mergeAnswer() })
+    const { hosts, githubFor } = recorder(github)
+    const ghAliases = new Map([['mg', { known: true, text: 'pr merge' }]])
+    expectAsk(
+      await judge(`gh mg 7 -R github.com/${PROJECT}`, {
+        github,
+        extra: { env, githubFor, ghAliases },
+      }),
+      { critical: true, reason: /confira antes do merge/ },
+    )
+    expect(hosts).toEqual(['github.com'])
+    expect(github.calls).toEqual([['prMergeState', PROJECT, 7]])
+    // Set with no GH_HOST, the alias would merge this project's PR; it is
+    // still judged as written.
+    const setting = recorder(stub())
+    expectAsk(
+      await judge(`gh alias set m 'pr merge'`, {
+        extra: { githubFor: setting.githubFor },
+      }),
+      { critical: true },
+    )
+    expect(setting.hosts).toEqual([])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Sixth round of Copilot's review of #26
+
+describe('gh api parameters on the query string (Copilot review of #26, sixth round)', () => {
+  const repoPath = `repos/${PROJECT}`
+  const addComment =
+    'mutation($body: String!) { addComment(input: {subjectId: "I_1", body: $body}) { clientMutationId } }'
+  /** The request bodies the cases send with --input, by file name. */
+  const inputs: Record<string, unknown> = {
+    'body.json': { title: 'Novo título' },
+    'comentario.json': { body: 'Recado.' },
+    'labels.json': { labels: ['bug'] },
+    'lista.json': ['bug'],
+    'label.json': { name: 'area/hooks', color: 'ffffff' },
+    'pr.json': {
+      head: BRANCH,
+      base: 'main',
+      title: 'Hooks',
+      body: 'Closes #5.\n\nTexto.',
+    },
+    'pr-edit.json': { title: 'Hooks' },
+    'merge.json': { base: BRANCH, head: 'outra' },
+    'ref.json': { ref: `refs/heads/${BRANCH}`, sha: HEAD },
+    'conteudo.json': { message: 'm', content: 'eA==', branch: BRANCH },
+    'addcomment.json': { query: addComment, variables: { body: 'Recado.' } },
+    // A mutation whose variable is not in the body: gh sends the fields
+    // beside it as the variables.
+    'mutacao.json': { query: addComment },
+    'consulta.json': { query: 'query { viewer { login } }' },
+  }
+
+  /** The decision in each permission mode: auto refuses a critical ask. */
+  async function inModes(
+    text: string,
+    dir: string,
+  ): Promise<{ default: Decision; auto: Decision }> {
+    const decision = await judge(text, { cwd: dir })
+    return {
+      default: io.resolve(decision, 'default'),
+      auto: io.resolve(decision, 'auto'),
+    }
+  }
+
+  function writeInputs(dir: string) {
+    for (const [name, value] of Object.entries(inputs))
+      writeFileSync(path.join(dir, name), JSON.stringify(value))
+  }
+
+  const reopen = /reabrir uma issue/
+  const onQuery = /query string/
+
+  it.each<[string, string, 'deny' | 'ask', 'deny' | 'ask', RegExp]>([
+    [
+      'state=open next to --input (the example of the review)',
+      `gh api -X PATCH ${repoPath}/issues/5 --input body.json -f state=open`,
+      'deny',
+      'deny',
+      reopen,
+    ],
+    [
+      'a typed state next to --input',
+      `gh api -X PATCH ${repoPath}/issues/5 --input body.json -F state=open`,
+      'deny',
+      'deny',
+      reopen,
+    ],
+    [
+      'a nested key gh flattens to state',
+      `gh api -X PATCH ${repoPath}/issues/5 --input body.json -f 'x[state]=open'`,
+      'deny',
+      'deny',
+      reopen,
+    ],
+    [
+      'two nested keys that both become state',
+      `gh api -X PATCH ${repoPath}/issues/5 --input body.json -f 'x[state]=open' -f 'y[state]=closed'`,
+      'deny',
+      'deny',
+      reopen,
+    ],
+    [
+      // GitHub may read either value, or both at once: the body is unknown,
+      // a critical ask, not an edit of a plain body.
+      'two nested keys that both become body, with different values',
+      `gh api -X PATCH ${repoPath}/issues/5 --input body.json -f 'x[body]=Um' -f 'y[body]=Dois'`,
+      'ask',
+      'deny',
+      /não consegui ler o corpo/,
+    ],
+    [
+      'labels next to --input on the issue',
+      `gh api -X PATCH ${repoPath}/issues/5 --input body.json -f 'labels[]=bug'`,
+      'deny',
+      'deny',
+      /o campo labels troca todas as labels/,
+    ],
+    [
+      'an Approve body next to --input on the issue',
+      `gh api -X PATCH ${repoPath}/issues/5 --input body.json -f body='# Owner Approve'`,
+      'deny',
+      'deny',
+      opening,
+    ],
+    [
+      'a plain body next to --input on the issue',
+      `gh api -X PATCH ${repoPath}/issues/5 --input body.json -f body=Recado`,
+      'ask',
+      'ask',
+      /editar o corpo da issue depois do Approve o revoga/,
+    ],
+    [
+      'a state it cannot read next to --input',
+      `gh api -X PATCH ${repoPath}/issues/5 --input body.json -F state=@nao-existe.txt`,
+      'ask',
+      'deny',
+      /não consegui ler o estado que o gh api põe na issue/,
+    ],
+    [
+      'a field whose key it cannot read next to --input',
+      `gh api -X PATCH ${repoPath}/issues/5 --input body.json -f "$K"=open`,
+      'ask',
+      'deny',
+      /não consegui ler o que o gh api muda na issue/,
+    ],
+    [
+      'state=open on the endpoint itself, with --input',
+      `gh api -X PATCH '${repoPath}/issues/5?state=open' --input body.json`,
+      'deny',
+      'deny',
+      reopen,
+    ],
+    [
+      'state=open on the endpoint itself, with fields',
+      `gh api -X PATCH '${repoPath}/issues/5?state=open' -f title=Outro`,
+      'deny',
+      'deny',
+      reopen,
+    ],
+    [
+      'a state label next to --input on the labels endpoint',
+      `gh api ${repoPath}/issues/5/labels --input labels.json -f 'labels[]=ready-for-agent'`,
+      'deny',
+      'deny',
+      /não escreve label de estado por gh api/,
+    ],
+    [
+      'a state label next to a list --input on the labels endpoint',
+      `gh api ${repoPath}/issues/5/labels --input lista.json -f 'labels[]=ready-for-agent'`,
+      'deny',
+      'deny',
+      /não escreve label de estado por gh api/,
+    ],
+    [
+      'an Approve body next to --input on a new comment',
+      `gh api ${repoPath}/issues/5/comments --input comentario.json -f body='# Owner Approve'`,
+      'deny',
+      'deny',
+      opening,
+    ],
+    [
+      'a withdrawal next to --input on a comment edit',
+      `gh api -X PATCH ${repoPath}/issues/comments/9 --input comentario.json -f body='# Approve retirado'`,
+      'deny',
+      'deny',
+      opening,
+    ],
+    [
+      'ready-for-agent next to --input on a new issue',
+      `gh api ${repoPath}/issues --input body.json -f 'labels[]=ready-for-agent'`,
+      'deny',
+      'deny',
+      /ready-for-agent é do dono/,
+    ],
+    [
+      'a state label name next to --input on a new label',
+      `gh api ${repoPath}/labels --input label.json -f name=ready-for-agent`,
+      'deny',
+      'deny',
+      /as labels de estado são do contrato do loop/,
+    ],
+    [
+      'a state label new_name next to --input on a label edit',
+      `gh api -X PATCH ${repoPath}/labels/bug --input label.json -f new_name=ready-for-agent`,
+      'deny',
+      'deny',
+      /as labels de estado são do contrato do loop/,
+    ],
+    [
+      'a skip string in the title next to --input on a new PR',
+      `gh api ${repoPath}/pulls --input pr.json -f title='Hooks [skip ci]'`,
+      'deny',
+      'deny',
+      /a PR traz "\[skip ci\]"/,
+    ],
+    [
+      'a body with no Closes line next to --input on a PR edit',
+      `gh api -X PATCH ${repoPath}/pulls/7 --input pr-edit.json -f body=Resumo`,
+      'deny',
+      'deny',
+      /Closes/,
+    ],
+    [
+      'base=main next to --input on a merge',
+      `gh api ${repoPath}/merges --input merge.json -f base=main`,
+      'deny',
+      'deny',
+      /merge em main pela API/,
+    ],
+    [
+      'ref=refs/heads/main next to --input on a new ref',
+      `gh api ${repoPath}/git/refs --input ref.json -f ref=refs/heads/main`,
+      'deny',
+      'deny',
+      /escrever em main pela API/,
+    ],
+    [
+      'branch=main next to --input on a contents write',
+      `gh api -X PUT ${repoPath}/contents/a.md --input conteudo.json -f branch=main`,
+      'deny',
+      'deny',
+      /sem branch cai em main/,
+    ],
+    [
+      'an Approve variable next to a GraphQL --input',
+      `gh api graphql --input addcomment.json -f body='# Owner Approve'`,
+      'deny',
+      'deny',
+      opening,
+    ],
+    [
+      // Read with the query string over the body, the query only reads; read
+      // with the body over it, the body's mutation takes the Approve from
+      // the query string as its variable.
+      'an Approve variable next to a GraphQL --input, with a query there that only reads',
+      `gh api graphql --input mutacao.json -f query='query { viewer { login } }' -f body='# Owner Approve'`,
+      'deny',
+      'deny',
+      opening,
+    ],
+    [
+      'a mutation query next to a GraphQL --input that only reads',
+      `gh api graphql --input consulta.json -f query='mutation { reopenIssue(input: {issueId: "I_1"}) { clientMutationId } }'`,
+      'deny',
+      'deny',
+      reopen,
+    ],
+  ])(
+    'judges %s as a body field, in default and auto',
+    async (_, text, inDefault, inAuto, reason) => {
+      const dir = realpathSync.native(
+        mkdtempSync(path.join(tmpdir(), 'gh-query-')),
+      )
+      try {
+        writeInputs(dir)
+        const { default: normal, auto } = await inModes(text, dir)
+        expect(normal.decision).toBe(inDefault)
+        expect(auto.decision).toBe(inAuto)
+        expect(normal.reason).toMatch(reason)
+        expect(normal.reason).toMatch(onQuery)
+      } finally {
+        rmSync(dir, { recursive: true, force: true })
+      }
+    },
+  )
+
+  it.each([
+    [
+      'a GET, whatever it sends',
+      `gh api -X GET ${repoPath}/issues/5 --input body.json -f state=open`,
+    ],
+    [
+      'a route no rule reads',
+      `gh api ${repoPath}/milestones --input body.json -f state=open`,
+    ],
+    [
+      'a field the issue rule does not read',
+      `gh api -X PATCH ${repoPath}/issues/5 --input body.json -f title=Outro`,
+    ],
+    [
+      'a plain comment body',
+      `gh api ${repoPath}/issues/5/comments --input comentario.json -f body=Outro`,
+    ],
+    [
+      'a label that is no state label',
+      `gh api ${repoPath}/issues/5/labels --input labels.json -f 'labels[]=enhancement'`,
+    ],
+    [
+      // gh sends them as labels[]=bug&labels[]=enhancement, one list: no
+      // repeated key whose value is unknown.
+      'two labels that are no state labels',
+      `gh api ${repoPath}/issues/5/labels --input labels.json -f 'labels[]=bug' -f 'labels[]=enhancement'`,
+    ],
+    [
+      'a GraphQL query with a variable',
+      'gh api graphql --input consulta.json -f login=alguem',
+    ],
+    [
+      'another repository',
+      'gh api -X PATCH repos/alguem/outro/issues/5 --input body.json -f state=open',
+    ],
+    [
+      'a read-only query string on the endpoint',
+      `gh api '${repoPath}/issues?state=open&per_page=5'`,
+    ],
+  ])('passes %s, in default and auto', async (_, text) => {
+    const dir = realpathSync.native(
+      mkdtempSync(path.join(tmpdir(), 'gh-query-')),
+    )
+    try {
+      writeInputs(dir)
+      const { default: normal, auto } = await inModes(text, dir)
+      expectPass(normal)
+      expectPass(auto)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Ninth round of Copilot's review of #26
+
+describe('the account a gh command runs as (Copilot review of #26, ninth round)', () => {
+  // What the hook inherits, and its live reads authenticate with.
+  const inherited = {
+    GH_TOKEN: 'token-do-hook',
+    GITHUB_TOKEN: 'token-github-do-hook',
+    GH_ENTERPRISE_TOKEN: 'token-ghe-do-hook',
+    GITHUB_ENTERPRISE_TOKEN: 'token-github-ghe-do-hook',
+    GH_CONFIG_DIR: '/casa/gh',
+    HOME: '/casa',
+    XDG_CONFIG_HOME: '/casa/.config',
+  }
+  const resolve = `gh api graphql -f query='mutation { resolveReviewThread(input: {threadId: "PRRT_1"}) { thread { isResolved } } }'`
+  /** The three checks read live, and what each would read: all in order. */
+  const checks = [
+    ['gh pr merge', 'gh pr merge 7', { prMergeState: mergeAnswer() }],
+    [
+      'the label transition',
+      'gh issue edit 5 --remove-label needs-triage --add-label ready-for-human',
+      { issueState: issueAnswer() },
+    ],
+    [
+      'resolveReviewThread',
+      resolve,
+      {
+        threadLastAuthor: { ok: true, value: 'geazioliveira' },
+        viewer: { ok: true, value: 'geazioliveira' },
+      },
+    ],
+  ] as const
+  const other = /o comando pode rodar o gh com outra conta que a do hook/
+
+  /** Each variable set to another value, emptied (env -u, unset) or to one it cannot read. */
+  const changes = Object.keys(inherited)
+    .filter((name) => !['HOME', 'XDG_CONFIG_HOME'].includes(name))
+    .flatMap((name) => [
+      [name, `${name}=outro`],
+      [name, `${name}=''`],
+      [name, `${name}="$OUTRO"`],
+    ])
+
+  it.each(
+    checks.flatMap(([check, line, answers]) =>
+      changes.map(
+        ([name, vars]) => [check, vars, name, line, answers] as const,
+      ),
+    ),
+  )(
+    '%s with %s reads nothing, and asks, critical, naming the variable',
+    async (_, vars, name, line, answers) => {
+      const github = stub(answers)
+      expectAsk(
+        await judge(`${vars} ${line}`, { github, extra: { env: inherited } }),
+        { critical: true, reason: other },
+      )
+      expect(
+        (await judge(`${vars} ${line}`, { github, extra: { env: inherited } }))
+          .reason,
+      ).toContain(name)
+      expect(github.calls).toEqual([])
+    },
+  )
+
+  it.each(checks)(
+    '%s after an account switch on the line reads nothing, and asks, critical',
+    async (_, line, answers) => {
+      const github = stub(answers)
+      expectAsk(
+        await judge(line, {
+          github,
+          extra: { env: inherited, accountSwitched: true },
+        }),
+        {
+          critical: true,
+          reason: /um gh auth login, logout, switch ou refresh/,
+        },
+      )
+      expect(github.calls).toEqual([])
+    },
+  )
+
+  // gh reads its stored logins from GH_CONFIG_DIR, else XDG_CONFIG_HOME/gh,
+  // else HOME/.config/gh: what counts is the dir the command ends up with.
+  // The merge names its repository (-R), so HOME and XDG_CONFIG_HOME, which
+  // also move the git config gh reads its remotes with (seventh round), are
+  // judged here only as the account's.
+  it.each<[string, string, Record<string, string>, boolean]>([
+    ['no override', '', inherited, false],
+    [
+      'GH_TOKEN equal to the inherited one',
+      'GH_TOKEN=token-do-hook',
+      inherited,
+      false,
+    ],
+    [
+      'GH_CONFIG_DIR equal to the inherited one',
+      'GH_CONFIG_DIR=/casa/gh',
+      inherited,
+      false,
+    ],
+    [
+      'GH_CONFIG_DIR relative, the same dir',
+      'GH_CONFIG_DIR=gh',
+      inherited,
+      false,
+    ],
+    [
+      'GH_TOKEN emptied, when none is inherited',
+      `GH_TOKEN=''`,
+      { HOME: '/casa' },
+      false,
+    ],
+    ['HOME, under an inherited GH_CONFIG_DIR', 'HOME=/outra', inherited, false],
+    [
+      'XDG_CONFIG_HOME, under an inherited GH_CONFIG_DIR',
+      'XDG_CONFIG_HOME=/outra',
+      inherited,
+      false,
+    ],
+    [
+      'HOME, under an inherited XDG_CONFIG_HOME',
+      'HOME=/outra',
+      { HOME: '/casa', XDG_CONFIG_HOME: '/casa/.config' },
+      false,
+    ],
+    ['HOME, with nothing over it', 'HOME=/outra', { HOME: '/casa' }, true],
+    [
+      'HOME with an expansion, with nothing over it',
+      'HOME="$OUTRA"',
+      { HOME: '/casa' },
+      true,
+    ],
+    [
+      'XDG_CONFIG_HOME, over HOME',
+      'XDG_CONFIG_HOME=/outra',
+      { HOME: '/casa' },
+      true,
+    ],
+    [
+      'GH_CONFIG_DIR emptied, down to XDG_CONFIG_HOME',
+      `GH_CONFIG_DIR=''`,
+      inherited,
+      true,
+    ],
+    [
+      'GH_CONFIG_DIR relative, another dir',
+      'GH_CONFIG_DIR=outro',
+      inherited,
+      true,
+    ],
+    // A value with an expansion may be another even when its text is the
+    // inherited value's: the shell expands it, and gh never sees that text.
+    [
+      'GH_TOKEN with an expansion, the inherited value’s own text',
+      'GH_TOKEN="$OUTRO"',
+      { ...inherited, GH_TOKEN: '$OUTRO' },
+      true,
+    ],
+    [
+      'GH_CONFIG_DIR with an expansion, the inherited value’s own text',
+      'GH_CONFIG_DIR="$OUTRO"',
+      { ...inherited, GH_CONFIG_DIR: '$OUTRO' },
+      true,
+    ],
+  ])('%s (%s)', async (_, vars, env, changed) => {
+    const github = stub({ prMergeState: mergeAnswer() })
+    const decision = await judge(`${vars} gh pr merge 7 -R ${PROJECT}`, {
+      github,
+      cwd: '/casa',
+      extra: { env },
+    })
+    expectAsk(decision, {
+      critical: true,
+      reason: changed ? other : /confira antes do merge/,
+    })
+    expect(github.calls).toEqual(changed ? [] : [['prMergeState', PROJECT, 7]])
+  })
+
+  // A relative GH_CONFIG_DIR is resolved from the directory gh runs in: one
+  // the hook cannot read (a `cd "$X"`) may put it anywhere. An absolute one,
+  // and a config dir the command does not move, stay the hook's.
+  it.each<[string, string, boolean]>([
+    [
+      'GH_CONFIG_DIR relative, the same dir from /casa',
+      'GH_CONFIG_DIR=gh',
+      true,
+    ],
+    [
+      'GH_CONFIG_DIR relative, back into the same dir',
+      'GH_CONFIG_DIR=../casa/gh',
+      true,
+    ],
+    ['GH_CONFIG_DIR absolute, the same dir', 'GH_CONFIG_DIR=/casa/gh', false],
+    ['HOME, under an inherited GH_CONFIG_DIR', 'HOME=outra', false],
+    ['no override', '', false],
+  ])(
+    'in a directory the hook cannot read: %s (%s)',
+    async (_, vars, changed) => {
+      const github = stub({ prMergeState: mergeAnswer() })
+      const decision = await judge(`${vars} gh pr merge 7 -R ${PROJECT}`, {
+        github,
+        cwd: '/casa',
+        extra: { env: inherited, cwdKnown: false },
+      })
+      expectAsk(decision, {
+        critical: true,
+        reason: changed ? other : /confira antes do merge/,
+      })
+      if (changed) expect(decision.reason).toContain('GH_CONFIG_DIR')
+      expect(github.calls).toEqual(
+        changed ? [] : [['prMergeState', PROJECT, 7]],
+      )
+    },
+  )
+
+  it('names no value of a token in its reason', async () => {
+    const decision = await judge('GH_TOKEN=segredo-do-comando gh pr merge 7', {
+      github: stub(),
+      extra: { env: inherited },
+    })
+    expect(decision.reason).not.toContain('segredo-do-comando')
+    expect(decision.reason).not.toContain('token-do-hook')
+  })
+
+  it('reads nothing for an alias’s merge run with another token', async () => {
+    const github = stub({ prMergeState: mergeAnswer() })
+    const ghAliases = new Map([['mg', { known: true, text: 'pr merge' }]])
+    expectAsk(
+      await judge('GH_TOKEN=outro gh mg 7', {
+        github,
+        extra: { env: inherited, ghAliases },
+      }),
+      { critical: true, reason: other },
+    )
+    expect(github.calls).toEqual([])
+  })
+
+  it('reads nothing for the merge of a shell alias that switches the account first', async () => {
+    const github = stub({ prMergeState: mergeAnswer() })
+    const ghAliases = new Map([
+      [
+        'sm',
+        { known: true, text: '!gh auth switch --user outra && gh pr merge 7' },
+      ],
+    ])
+    expectAsk(
+      await judge('gh sm', { github, extra: { env: inherited, ghAliases } }),
+      { critical: true, reason: /um gh auth login, logout, switch ou refresh/ },
+    )
+    expect(github.calls).toEqual([])
+  })
+
+  it.each<[string, boolean]>([
+    ['gh auth login --with-token', true],
+    ['gh auth logout --hostname github.com', true],
+    ['gh auth switch --user outra', true],
+    ['gh auth refresh -s repo', true],
+    ['gh -R a/b auth switch', true],
+    ['gh config set -h github.com git_protocol ssh', true],
+    ['gh auth "$VERBO"', true],
+    ['gh "$GRUPO" switch', true],
+    ['gh sw', true],
+    ['gh auth status', false],
+    ['gh auth token', false],
+    ['gh auth setup-git', false],
+    ['gh auth', false],
+    ['gh config get git_protocol', false],
+    ['gh help auth switch', false],
+    ['gh pr merge 7', false],
+    ['gh co 7', false],
+    // An alias the hook cannot read may run a gh auth switch: one whose
+    // text is not known (`gh alias set xx "$X"` earlier on the line), and
+    // one in a gh config that cannot be read.
+    ['gh xx', true],
+    ['GH_CONFIG_DIR="$OUTRO" gh yy', true],
+    ['gh yy', false],
+  ])('ghSwitchesAccount: %s is %s', (text, switches) => {
+    const ghAliases = new Map<string, { known: boolean; text: string | null }>([
+      ['sw', { known: true, text: 'auth switch' }],
+      ['co', { known: true, text: 'pr checkout' }],
+      ['xx', { known: false, text: null }],
+    ])
+    const [command] = shell.parseCommand(text).commands
+    expect(gh.ghSwitchesAccount(command, { env: inherited, ghAliases })).toBe(
+      switches,
+    )
+  })
+})
