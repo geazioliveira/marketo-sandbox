@@ -2,7 +2,7 @@
 
 ## Declaração de intenção
 
-Uma mudança grande pode ser entregue numa stack de PRs pequenas, uma sobre a outra, cada uma com revisão e merge próprios. A PR #26, da #5, mostrou o custo de não poder: nove rodadas de revisão do Copilot sobre cerca de 30 mil linhas, com um achado numa parte segurando o merge de todas as outras. O dono fechou a PR em 2026-09-27 e pediu a #5 de volta como stack. Hoje o loop recusa uma branch cortada de outra.
+Uma mudança grande pode ser entregue numa stack de PRs pequenas, uma sobre a outra, cada uma com revisão e merge próprios. A PR #26, da #5, mostrou o custo de não poder: dez revisões do Copilot sobre cerca de 34 mil linhas, com um achado numa parte segurando o merge de todas as outras. O dono fechou a PR em 2026-09-27 e pediu a #5 de volta como stack. Hoje o loop recusa uma branch cortada de outra.
 
 A stack entra no loop sem afrouxar o vínculo com issue:
 
@@ -68,7 +68,8 @@ Desvios do plano, da verificação adversarial feita antes da PR e da revisão d
 - **A mãe precisa ser deste repositório.** Uma mãe que não se lê, por qualquer falha, deixa o veredito não verificado, com aviso no modo local quando o GitHub está inacessível. O refresh deixa de fora as sub-issues de outro repositório e as que não levam `stack-slice`.
 - **A mãe precisa ser a raiz.** Uma mãe que também leva `stack-slice` é recusada, porque uma stack não se aninha. Ela precisa de exatamente uma label de categoria, que dá as seções do plano. As duas regras vieram da primeira revisão do Copilot na PR #33.
 - **Toda branch da `Stack` é de uma fatia da mãe.** O gate confere cada uma contra as sub-issues da mãe, deste repositório e com `stack-slice`, lidas inteiras. Sem isso, uma branch de fora, citada na `Stack`, passaria por fatia de baixo ou de cima. O critério já pedia isso, mas o gate só conferia a branch julgada; a falta veio da segunda revisão do Copilot.
-- **O tamanho.** Depois das revisões do Copilot, são cerca de 3,5 mil linhas contra `main`, mais de 2 mil delas em testes, acima da referência de 1.500 que a própria #31 criou. Ela não podia vir numa stack, porque é ela que ensina o loop a aceitar uma.
+- **Uma falha do git não isenta.** Um `git merge-base` que falha bloqueia o `stacked`, e só a saída 1, sem commit em comum, conta como nada em comum. Antes, a falha isentava uma fatia de cima e passava no teste geral, que é de antes da #31. Veio da terceira revisão do Copilot, que também achou a contagem de rodadas da #26 neste intent, agora dez.
+- **O tamanho.** Depois das revisões do Copilot, são cerca de 3,6 mil linhas contra `main`, mais de 2,3 mil delas em testes, acima da referência de 1.500 que a própria #31 criou. Ela não podia vir numa stack, porque é ela que ensina o loop a aceitar uma.
 - **Um relato novo, de antes da #31**: a #32, o remédio errado que o `stacked` dá a um merge de fora quando a branch já foi publicada. Só a mensagem está errada, e o veredito está certo.
 - **Um anti-pattern novo**: [uma PR que prende partes independentes](../knowledge/anti-patterns/one-pr-for-many-independent-parts.md), dos fatos da PR #26.
 

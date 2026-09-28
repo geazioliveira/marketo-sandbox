@@ -32,7 +32,8 @@ Uma entrada por mudança mergeada, da mais nova para a mais antiga, escrita no p
   - os casos de teste que faltavam.
 
   O décimo é de antes da #31 e virou a #32.
-- **As duas revisões do Copilot** na PR #33 acharam seis pontos, três em threads e três só no resumo. Os seis foram corrigidos com caso de teste:
+- **As três revisões do Copilot** na PR #33 acharam oito pontos, quatro em threads e quatro só no resumo. Sete foram corrigidos com caso de teste:
+  - uma ref que o git não consegue comparar com o HEAD, que uma fatia de cima isentava e o teste geral do `stacked` deixava passar;
   - uma branch da `Stack` que não é de uma fatia da mãe, que passava por fatia de baixo ou de cima;
   - a mãe que também é fatia;
   - a mãe sem categoria ou com duas, cujo plano era julgado como de feature;
@@ -40,16 +41,18 @@ Uma entrada por mudança mergeada, da mais nova para a mais antiga, escrita no p
   - o code span de mais de uma crase na `Stack`;
   - o refresh das sub-issues que não são fatias.
 
+  O oitavo era a contagem de rodadas da #26 no intent, que dizia nove.
+
 ### Números medidos
 
-- **Os testes**, contados com `npx vitest list --json`: 1.402 em `main` (`63f69ec`) e 1.470 depois da segunda revisão do Copilot.
-  - O `gate.spec.ts` foi de 293 para 343: 44 casos no bloco da stack e 6 mutações novas do gh falso.
+- **Os testes**, contados com `npx vitest list --json`: 1.402 em `main` (`63f69ec`) e 1.472 depois da terceira revisão do Copilot.
+  - O `gate.spec.ts` foi de 293 para 345: 45 casos no bloco da stack, 6 mutações novas do gh falso e um caso novo do `stacked` fora da stack.
   - O `loop-sections.spec.ts` foi de 447 para 457, o `refresh-issue-link.spec.ts` de 65 para 72 e o `drift.spec.ts` de 184 para 185.
-- **Os checks**: `npm run check` com saída 0, 1.470 testes em 9 arquivos, o `check:context` sem problemas e as linhas "are current" do `check:all`; o e2e com 33.
-- **As mutações**: cada uma das 13 mutações das correções das revisões do Copilot derruba pelo menos um caso.
+- **Os checks**: `npm run check` com saída 0, 1.472 testes em 9 arquivos, o `check:context` sem problemas e as linhas "are current" do `check:all`; o e2e com 33.
+- **As mutações**: cada uma das 16 mutações das correções das revisões do Copilot derruba pelo menos um caso.
 - **O tamanho desta PR**, contado com `git diff --numstat origin/main...HEAD`:
   - antes do Learn, 2.887 linhas alteradas contra `main`, o que o `pr-size` relatou na própria PR;
-  - em `893f7f1`, depois da segunda revisão do Copilot, 3.506 (+3.336 −170), 2.222 delas em testes e 970 em `scripts/`.
+  - em `1f10f34`, depois da terceira revisão do Copilot, 3.620 (+3.447 −173), 2.302 delas em testes e 1.000 em `scripts/`.
 
   As duas contagens passam da referência de 1.500.
 - **A PR #26**, que motivou a issue: +34.550 −61 em 50 arquivos, e dez revisões do Copilot, com 6, 6, 11, 4, 5, 3, 2, 1, 1 e 2 comentários.
@@ -74,6 +77,7 @@ Uma entrada por mudança mergeada, da mais nova para a mais antiga, escrita no p
 - **Prosa que cita uma branch não pode virar regra.** A primeira versão da `Stack` aceitava qualquer item de lista com uma branch, então uma nota do plano que citasse uma branch a punha na stack e a isentava do `stacked`. O formato estrito separa a lista da prosa.
 - **Uma isenção precisa de uma condição que a feche.** Isentar de uma vez as fatias de cima abria o `stacked` para uma fatia de baixo que trouxesse os commits da de cima.
 - **A ordem do merge precisa ser conferida, e não só escrita.** Sem o `pr-base` olhar as fatias de baixo, uma fatia de cima apontada para `main` levaria as de baixo junto, sem o gate delas.
+- **Uma isenção não pode nascer de uma falha.** O `cutFromHere` tomava um `git merge-base` que falhou por prova de que a fatia de cima foi cortada desta, e o teste geral do `stacked`, de antes da #31, tomava a mesma falha por "nada em comum". Só a saída 1 do git diz que não há commit em comum; qualquer outra falha agora bloqueia.
 - **Quem empresta as regras de outra issue precisa conferir que ela é o que diz ser.** O gate lia da mãe o estado, o plano e o Approve, mas não conferia que ela fosse uma raiz (uma categoria só e nenhum `stack-slice`), nem que as branches da `Stack` fossem de fatias dela. As revisões do Copilot acharam as três faltas.
 
 ---
