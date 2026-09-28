@@ -376,7 +376,7 @@ function refresh(input, pr, deadline) {
 function interrupted(input, error) {
   const lines = [
     `Atualização interrompida: ${error.message}.`,
-    'Antes do merge, renove o veredito à mão (gh run rerun <id> e gh run watch <id> --exit-status, ou o gate em modo CI na cabeça da PR) ou faça push na PR.',
+    'Antes do merge, renove o veredito à mão com o gate em modo CI na cabeça da PR (node scripts/gate.mjs --pr <n> --branch <branch>), que julga também a revisão do Copilot e as threads.',
   ]
   if (input.pr !== null)
     lines.push(

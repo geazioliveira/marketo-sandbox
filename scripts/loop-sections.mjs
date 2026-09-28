@@ -1604,9 +1604,10 @@ export function refreshPrCommand(pr) {
 
 /**
  * The gate in CI mode for PR `pr` over branch `branch`, run in a checkout of
- * the PR's head with origin/main fetched: one of the two fresh verdicts
- * before a merge, when it exits 0. The other is `gh run rerun <id>` of the
- * PR's issue-link run followed by `gh run watch <id> --exit-status`.
+ * the PR's head with origin/main fetched: the fresh verdict before a merge,
+ * when it exits 0. Since #30 a re-run of the PR's issue-link is none: that
+ * run passes --review-report, and there the Copilot review and the review
+ * threads are only reported.
  */
 export function gateCiCommand(pr, branch) {
   return `node scripts/gate.mjs --pr ${shellWord(pr)} --branch ${shellWord(branch)}`

@@ -3229,6 +3229,25 @@ describe.concurrent('scripts/audit-main.mjs', () => {
 
     const noReview = `- PR #11 mergeada sem revisão do Copilot na cabeça ${sha7(headOf(11))}.`
 
+    // With --review-report (#30), issue-link.yml goes green on a head with no
+    // Copilot review, or with a thread still open. The audit reads the PR
+    // itself, so a merge on that green check is still out of the loop.
+    test.for<[string, { reviews?: unknown[]; threads?: unknown[] }, string]>([
+      ['no Copilot review of the head', { reviews: [] }, noReview],
+      [
+        'a thread still open',
+        { threads: [thread()] },
+        'mergeada com 1 thread(s) de revisão aberta(s)',
+      ],
+    ])(
+      'files an issue for a merge with every required check green but %s (#30)',
+      async ([, options, reason], { expect, fresh }) => {
+        const { run, body } = await auditOne(fresh, options)
+        expect(run.status, run.out).toBe(1)
+        expect(body).toContain(reason)
+      },
+    )
+
     test('passes a Copilot review of the head before the merge, with every thread resolved', async ({
       expect,
       fresh,

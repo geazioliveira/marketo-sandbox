@@ -1050,13 +1050,16 @@ describe.concurrent('scripts/refresh-issue-link.mjs in PR mode (#13)', () => {
     expect(run.status).toBe(1)
     expect(run.stdout).toContain('Bad credentials')
     expect(run.stdout).toContain(
-      'Antes do merge, renove o veredito à mão (gh run rerun <id> e gh run watch <id> --exit-status, ou o gate em modo CI na cabeça da PR) ou faça push na PR.',
+      'Antes do merge, renove o veredito à mão com o gate em modo CI na cabeça da PR (node scripts/gate.mjs --pr <n> --branch <branch>), que julga também a revisão do Copilot e as threads.',
     )
     // Dispatching the refresh again only retries it: it is no fresh verdict.
     expect(run.stdout).toContain(
       `Para só tentar o refresh de novo: ${refreshPrCommand(PR)}; sozinho, isso não é veredito fresco.`,
     )
     expect(run.stdout).not.toMatch(/renove o veredito[^\n]*gh workflow run/)
+    // Nor is a re-run of the issue-link since #30: it runs with
+    // --review-report, which only reports the review and the threads.
+    expect(run.stdout).not.toMatch(/renove o veredito[^\n]*gh run rerun/)
   })
 })
 
