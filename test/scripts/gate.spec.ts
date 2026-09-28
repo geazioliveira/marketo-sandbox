@@ -4167,7 +4167,10 @@ describe.concurrent('scripts/gate.mjs', () => {
         })
       })
 
-      test('still refuses a branch outside the stack that shares a slice’s history', async ({
+      // A branch that forks from a slice below shares only that slice's
+      // history, which this slice carries by design. One this slice carries
+      // is refused (middleOverForeign, below).
+      test('refuses a branch outside the stack that shares this slice’s own history, and not one that forks from a slice below', async ({
         expect,
         fresh,
       }) => {
@@ -4181,9 +4184,31 @@ describe.concurrent('scripts/gate.mjs', () => {
             'src/outra-2.ts': 'y\n',
           },
         )
-        const { result } = await onSlice(repo, MIDDLE)
-        expect(step(result, 'stacked')).toMatchObject({ status: 'no' })
-        expect(step(result, 'stacked').detail).toContain('feature/60-outra')
+        const sibling = await onSlice(repo, MIDDLE)
+        expect(step(sibling.result, 'stacked')).toMatchObject({ status: 'ok' })
+        await slice(
+          repo,
+          'feature/62-sobre',
+          MIDDLE,
+          { 'src/sobre.ts': 'x\n' },
+          { 'src/sobre-2.ts': 'y\n' },
+        )
+        // Built on this slice's commits, it is refused by its own gate, not
+        // by this one, as for any branch.
+        const above = await onSlice(repo, MIDDLE)
+        expect(step(above.result, 'stacked')).toMatchObject({ status: 'ok' })
+        await repo.git('switch', '-q', MIDDLE)
+        await repo.git(
+          'merge',
+          '-q',
+          '--no-ff',
+          '-m',
+          'Traz outra (Refs #44)',
+          'feature/62-sobre',
+        )
+        await repo.publish(MIDDLE)
+        const carried = await onSlice(repo, MIDDLE)
+        expect(step(carried.result, 'stacked')).toMatchObject({ status: 'no' })
       })
 
       test('takes a merge of the slice below as an update, and a merge of any other branch as foreign', async ({
@@ -4523,10 +4548,10 @@ describe.concurrent('scripts/gate.mjs', () => {
         )
       })
 
-      // A slice above is exempt only when it was cut from this one: it holds
-      // at least one of this slice's commits. Sharing only origin/main and the
-      // slices below proves nothing, and an empty list must not pass for one.
-      test('refuses a slice above cut from the slice below instead of this one, and lets one cut from main pass', async ({
+      // A slice above is exempt only when it forks from this slice's own
+      // line: an empty list proves nothing. One that forks from a slice below
+      // or from main shares nothing of this slice, and is no stacking here.
+      test('takes a slice above cut from a slice below, or from main, as sharing nothing of this one', async ({
         expect,
         fresh,
       }) => {
@@ -4538,26 +4563,234 @@ describe.concurrent('scripts/gate.mjs', () => {
           await repo.commit({ 'src/topo.ts': 'y\n' }, 'Topo (Refs #45)')
           await repo.publish(TOP)
         }
-        await recutTop(BOTTOM)
-        const below = await onSlice(repo, MIDDLE)
-        expect(step(below.result, 'stacked')).toMatchObject({
+        for (const from of [BOTTOM, 'main']) {
+          await recutTop(from)
+          const { result } = await onSlice(repo, MIDDLE)
+          expect(step(result, 'stacked'), from).toMatchObject({
+            status: 'ok',
+          })
+        }
+      })
+
+      // A suggestion applied on GitHub makes a commit that cites nothing. On
+      // the first slice, commits-cite-issue only reports it, and the slice
+      // above that brings it up must not deadlock the slice below.
+      test('lets a slice below open when the slice above brought up a commit of it that cites nothing', async ({
+        expect,
+        fresh,
+      }) => {
+        const repo = await stack(fresh)
+        for (const [lower, upper] of [
+          [BOTTOM, MIDDLE],
+          [MIDDLE, TOP],
+        ]) {
+          await repo.git('switch', '-q', lower)
+          await repo.commit(
+            { [`src/sugestao-${numberOf(lower)}.ts`]: 'x\n' },
+            'Apply suggestions from code review',
+          )
+          await repo.publish(lower)
+          await repo.git('switch', '-q', upper)
+          await repo.git(
+            'merge',
+            '-q',
+            '--no-ff',
+            '-m',
+            `Traz a fatia de baixo (Refs #${numberOf(upper)})`,
+            lower,
+          )
+          await repo.publish(upper)
+          const { result } = await onSlice(repo, lower)
+          expect(step(result, 'stacked'), lower).toMatchObject({
+            status: 'ok',
+          })
+          expect(step(result, 'commits-cite-issue').blocks, lower).toBe(false)
+        }
+        const inCi = await ciOnSlice(repo, MIDDLE, (head) =>
+          slicePr(head, MIDDLE, { baseRefName: BOTTOM, isDraft: true }),
+        )
+        expect(step(inCi.result, 'stacked')).toMatchObject({ status: 'ok' })
+      })
+
+      test('lets a slice open when the slice above was cut from it before its first commit', async ({
+        expect,
+        fresh,
+      }) => {
+        const repo = await fresh()
+        await slice(
+          repo,
+          BOTTOM,
+          'main',
+          { [STACK_INTENT]: '# Intent\n' },
+          { 'src/base.ts': '1\n' },
+        )
+        await repo.git('switch', '-q', '-c', MIDDLE, BOTTOM)
+        await repo.publish(MIDDLE)
+        await repo.git('switch', '-q', '-c', TOP, MIDDLE)
+        await repo.commit({ 'src/topo.ts': 'x\n' }, 'Topo (Refs #45)')
+        await repo.publish(TOP)
+        const { result } = await onSlice(repo, MIDDLE)
+        expect(step(result, 'stacked')).toMatchObject({ status: 'ok' })
+      })
+
+      // The slice above brings the slice below, never the other way: a merge
+      // of it into the slice below is a merge from outside, and a
+      // fast-forward to it brings commits citing its sub-issue.
+      test('refuses a slice below that merged or fast-forwarded to the slice above', async ({
+        expect,
+        fresh,
+      }) => {
+        const merged = await stack(fresh)
+        await merged.git('switch', '-q', TOP)
+        await merged.commit({ 'src/topo-2.ts': 'x\n' }, 'Sem número')
+        await merged.publish(TOP)
+        await merged.git('switch', '-q', MIDDLE)
+        await merged.git('merge', '-q', '--no-ff', '-m', 'Traz a de cima', TOP)
+        await merged.publish(MIDDLE)
+        const upward = await onSlice(merged, MIDDLE)
+        expect(step(upward.result, 'stacked')).toMatchObject({
           status: 'no',
           blocks: true,
         })
-        expect(step(below.result, 'stacked').detail).toContain(
-          `compartilha commits que origin/main não tem com ${TOP}, origin/${TOP}`,
+        expect(step(upward.result, 'stacked').detail).toContain(
+          `a fatia de cima ${TOP} divide com esta commits que não saíram desta: a de cima traz esta (git merge origin/${MIDDLE} nela), nunca o contrário`,
         )
-        expect(step(below.result, 'stacked').detail).toContain(
-          `a fatia de cima ${TOP} não foi cortada desta: traga esta fatia para ela (git merge origin/${MIDDLE}) ou corte-a de novo a partir desta`,
+        const forward = await stack(fresh)
+        await forward.git('switch', '-q', MIDDLE)
+        await forward.git('merge', '-q', '--ff-only', TOP)
+        await forward.publish(MIDDLE)
+        const fast = await onSlice(forward, MIDDLE)
+        expect(step(fast.result, 'stacked')).toMatchObject({
+          status: 'no',
+          blocks: true,
+        })
+      })
+
+      test('tells a slice above the first to recut from the slice below, not from main', async ({
+        expect,
+        fresh,
+      }) => {
+        const repo = await stack(fresh)
+        await slice(
+          repo,
+          'feature/61-lado',
+          'main',
+          { 'src/lado.ts': 'x\n' },
+          { 'src/lado-2.ts': 'y\n' },
         )
-        expect(step(below.result, 'stacked').detail).not.toContain(
+        await repo.git('switch', '-q', MIDDLE)
+        await repo.git(
+          'merge',
+          '-q',
+          '--no-ff',
+          '-m',
+          'Traz outra branch (Refs #44)',
+          'feature/61-lado',
+        )
+        await repo.git('branch', '-q', '-D', 'feature/61-lado')
+        await repo.git(
+          'update-ref',
+          '-d',
+          'refs/remotes/origin/feature/61-lado',
+        )
+        const { result } = await repo.gateJson([], {
+          fixture: { issue: sliceAnswer(MIDDLE), parent: parentAnswer() },
+        })
+        expect(step(result, 'stacked')).toMatchObject({ status: 'no' })
+        expect(step(result, 'stacked').detail).toContain(
+          `corte a fatia de novo a partir de origin/${BOTTOM} atualizado e traga para ela só os commits dela`,
+        )
+        expect(step(result, 'stacked').detail).not.toContain(
           'corte a branch de origin/main',
         )
-        // Cut from main, it shares nothing with this slice: nothing to
-        // exempt, and nothing to refuse.
-        await recutTop('main')
-        const main = await onSlice(repo, MIDDLE)
-        expect(step(main.result, 'stacked')).toMatchObject({ status: 'ok' })
+      })
+
+      // GitHub links closing keywords only on a PR to the default branch: a
+      // slice's draft on the slice below has no link until it points at main.
+      test('reads the closing keywords from the body of a slice PR on the slice below', async ({
+        expect,
+        fresh,
+      }) => {
+        const repo = await stack(fresh)
+        const unlinked = { totalCount: 0, nodes: [] }
+        const draft = await ciOnSlice(repo, MIDDLE, (head) =>
+          slicePr(head, MIDDLE, {
+            baseRefName: BOTTOM,
+            isDraft: true,
+            closingIssuesReferences: unlinked,
+          }),
+        )
+        expect(draft.result.blocked).toEqual([])
+        expect(step(draft.result, 'pr-closes').detail).toBe(
+          'a PR fecha a #44 (pelo corpo: com a base na fatia de baixo, o GitHub ainda não liga a PR à issue)',
+        )
+        // A CI run leaves no local branch behind: each run gets a stack.
+        const other = await ciOnSlice(await stack(fresh), MIDDLE, (head) =>
+          slicePr(head, MIDDLE, {
+            baseRefName: BOTTOM,
+            isDraft: true,
+            closingIssuesReferences: unlinked,
+            body: 'Closes #44.\n\nTambém fixes #99.',
+          }),
+        )
+        expect(step(other.result, 'pr-closes-only')).toMatchObject({
+          status: 'no',
+          blocks: true,
+        })
+        // On main, only GitHub's link counts, and the message says why it
+        // may be missing.
+        const onMain = await stack(fresh)
+        await mergeIntoMain(onMain, BOTTOM)
+        const retargeted = await ciOnSlice(
+          onMain,
+          MIDDLE,
+          (head) =>
+            slicePr(head, MIDDLE, { closingIssuesReferences: unlinked }),
+          parentAfter([BOTTOM]),
+        )
+        expect(step(retargeted.result, 'pr-closes')).toMatchObject({
+          status: 'no',
+          blocks: true,
+        })
+        expect(step(retargeted.result, 'pr-closes').detail).toContain(
+          'o corpo fecha a #44, mas o GitHub ainda não ligou a PR a nenhuma issue',
+        )
+      })
+
+      test('judges a Stack at the heading level of a plan from an issue form', async ({
+        expect,
+        fresh,
+      }) => {
+        const repo = await stack(fresh)
+        // The form renders each field as ###, and a heading inside a field
+        // is ####, as the form itself says.
+        const formPlan = `${featureBody({ Plano: 'As fatias estão abaixo.' }).replace(/^## /gm, '### ')}\n#### Stack\n\n1. \`${BOTTOM}\`\n2. \`${MIDDLE}\`\n3. \`${TOP}\`\n`
+        const { result } = await onSlice(
+          repo,
+          MIDDLE,
+          sliceAnswer(MIDDLE),
+          parentAnswer({ body: formPlan }),
+        )
+        expect(step(result, 'branch-in-plan')).toMatchObject({ status: 'ok' })
+        expect(step(result, 'branch-in-plan').detail).toContain('fatia 2 de 3')
+      })
+
+      test('suggests more slices, not a stack, for a slice past the size reference', async ({
+        expect,
+        fresh,
+      }) => {
+        const repo = await stack(fresh)
+        const { result } = await ciOnSlice(repo, MIDDLE, (head) =>
+          slicePr(head, MIDDLE, {
+            baseRefName: BOTTOM,
+            isDraft: true,
+            additions: 1600,
+            deletions: 0,
+          }),
+        )
+        expect(step(result, 'pr-size').detail).toContain(
+          'considere dividir esta fatia em mais fatias',
+        )
       })
 
       test('refuses a slice above that git cannot compare with this one, instead of exempting it', async ({

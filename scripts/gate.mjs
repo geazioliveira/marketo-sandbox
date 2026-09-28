@@ -34,6 +34,7 @@ import {
   categoryLabels,
   changelogHeadingFor,
   checkSections,
+  closingRefsOf,
   commentOpening,
   closesLine,
   copilotRequestCommand,
@@ -1268,11 +1269,27 @@ function main() {
           `${changed} linha(s) alterada(s) (+${additions} −${deletions}) em ${pr.changedFiles ?? '?'} arquivo(s), contra ${pr.baseRefName}${
             changed <= prSizeLimit
               ? ''
-              : `; acima da referência de ${prSizeLimit}: considere quebrar a mudança numa stack`
+              : `; acima da referência de ${prSizeLimit}: considere ${slice === null ? 'quebrar a mudança numa stack' : 'dividir esta fatia em mais fatias'}`
           }`,
         )
       }
-      const refs = pr.closingIssuesReferences ?? { totalCount: 0, nodes: [] }
+      // GitHub links closing keywords only on a PR to the default branch, so a
+      // slice's PR on the slice below has no link yet: its body is read
+      // instead, the text GitHub links once the PR points at main (#31).
+      const onBelow =
+        slice !== null &&
+        slice.position.below !== null &&
+        pr.baseRefName === slice.position.below
+      const bodyRefs = closingRefsOf(pr.body).map((ref) => ({
+        number: ref.number,
+        repository: { nameWithOwner: ref.repo ?? facts.repo },
+      }))
+      const refs = onBelow
+        ? { totalCount: bodyRefs.length, nodes: bodyRefs }
+        : (pr.closingIssuesReferences ?? { totalCount: 0, nodes: [] })
+      const byText = onBelow
+        ? ` (pelo corpo: com a base na fatia de baixo, o GitHub ainda não liga a PR à issue)`
+        : ''
       const sameRepo = (node) =>
         String(node.repository?.nameWithOwner ?? '').toLowerCase() ===
         String(facts.repo).toLowerCase()
@@ -1284,24 +1301,33 @@ function main() {
       const closesIt = (refs.nodes ?? []).some(
         (node) => node.number === number && sameRepo(node),
       )
+      // With no link at all while the body closes this issue, GitHub has not
+      // read the keywords yet, as after a slice's PR moves from the slice
+      // below to main.
+      const unlinked =
+        !onBelow &&
+        refs.totalCount === 0 &&
+        bodyRefs.some((node) => node.number === number && sameRepo(node))
       set(
         'pr-closes',
         closesIt ? 'ok' : 'no',
         closesIt
-          ? `a PR fecha a #${number}`
-          : refs.totalCount === 0
-            ? `a PR não fecha nenhuma issue; a primeira linha do corpo deve ser "Closes #${number}."`
-            : `a PR fecha ${closed.join(', ')}, não a #${number}`,
+          ? `a PR fecha a #${number}${byText}`
+          : unlinked
+            ? `o corpo fecha a #${number}, mas o GitHub ainda não ligou a PR a nenhuma issue; se o vínculo não aparecer depois de a PR apontar para ${trunk}, edite o corpo da PR para o GitHub ler as palavras de fechamento de novo`
+            : refs.totalCount === 0
+              ? `a PR não fecha nenhuma issue; a primeira linha do corpo deve ser "Closes #${number}."${byText}`
+              : `a PR fecha ${closed.join(', ')}, não a #${number}${byText}`,
         { blocks: true },
       )
       set(
         'pr-closes-only',
         refs.totalCount === 1 ? 'ok' : 'no',
         refs.totalCount === 1
-          ? 'a PR fecha uma issue só'
+          ? `a PR fecha uma issue só${byText}`
           : refs.totalCount === 0
-            ? 'a PR não fecha nenhuma issue'
-            : `a PR fecha ${refs.totalCount} issues (${closed.join(', ')}); deve fechar só a #${number}`,
+            ? `a PR não fecha nenhuma issue${byText}`
+            : `a PR fecha ${refs.totalCount} issues (${closed.join(', ')}); deve fechar só a #${number}${byText}`,
         { blocks: true },
       )
       const first = headAndRest(pr.body).head
@@ -1606,11 +1632,21 @@ function main() {
     const lowerRefs = candidates
       .map(({ ref }) => ref)
       .filter((ref) => stackRef(ref) && stackLower.has(refName(ref)))
-    // An exemption needs proof that the ref was cut from this slice: a
-    // merge-base git can find, and below it at least one commit of this
-    // slice's own, each citing its issue. A ref that shares only origin/main
-    // and the slices below was cut from them, not from this one, and one git
-    // cannot compare proves nothing: both are judged below like any other.
+    // Each slice above cites its own sub-issue in its commits.
+    const upperCites = (slice?.position.upper ?? [])
+      .map((upper) => parseBranch(upper)?.issue)
+      .filter((issue) => Number.isInteger(issue))
+      .map((issue) => new RegExp(`#${issue}(?!\\d)`))
+    // A slice above was cut from this one when it shares commits of this
+    // slice, beyond origin/main and the slices below, and none of them cites
+    // the sub-issue of a slice above: a fast-forward of this slice to it
+    // would bring commits citing its own, and a merge of it into this slice
+    // is a merge from outside (foreignMerges, below). What this slice's own
+    // commits cite does not matter here: one that cites nothing (a suggestion
+    // applied on GitHub) is only reported, by commits-cite-issue. A ref git
+    // cannot compare proves nothing, and one that shares nothing of this
+    // slice is no exemption: both go through the general test below, which
+    // takes the second as unrelated.
     const cutFromHere = (sha) => {
       const shared = mergeBase(facts.headSha, sha)
       if (typeof shared !== 'string') return false
@@ -1619,9 +1655,15 @@ function main() {
         `^${originMain}`,
         ...lowerRefs.map((ref) => `^${ref}`),
       ])
-      if (sharedOwn === null) return false
-      const own = sharedOwn.filter((commit) => commit.parents.length <= 1)
-      return own.length > 0 && own.every((commit) => cites.test(commit.message))
+      return (
+        sharedOwn !== null &&
+        sharedOwn.length > 0 &&
+        !sharedOwn.some(
+          (commit) =>
+            commit.parents.length <= 1 &&
+            upperCites.some((cite) => cite.test(commit.message)),
+        )
+      )
     }
     for (const { sha, ref } of candidates) {
       if (ref.endsWith('/HEAD') || ref === originTrunk || ownRefs.has(ref))
@@ -1648,7 +1690,14 @@ function main() {
         continue
       }
       if (shared === false || isAncestor(shared, originMain)) continue
-      const below = commitsIn([shared, `^${originMain}`])
+      // History shared only through the slices below is theirs, shared by
+      // design: a ref that forks from them shares nothing of this slice.
+      if (lowerRefs.some((lower) => isAncestor(shared, lower))) continue
+      const below = commitsIn([
+        shared,
+        `^${originMain}`,
+        ...lowerRefs.map((ref) => `^${ref}`),
+      ])
       if (
         !sameIssue &&
         below !== null &&
@@ -1714,8 +1763,9 @@ function main() {
         parseBranch(refName(ref))?.issue === number,
     )
     const foreign = sharing.filter((ref) => !ofThisIssue.includes(ref))
-    // A slice above that shares history with this one but was not cut from
-    // it (cutFromHere) is fixed on its own branch, not by recutting this one.
+    // A slice above that shares history with this one beyond the slices
+    // below, but was not cut from it (cutFromHere), is fixed by the direction
+    // of the merge, not by recutting this one.
     const upperNotCut = foreign.filter(
       (ref) => stackRef(ref) && stackUpper.has(refName(ref)),
     )
@@ -1782,11 +1832,13 @@ function main() {
     const recut = ownCopyMerge
       ? 'o merge trouxe a cópia publicada desta própria branch: desfaça-o e traga essa cópia com git pull --rebase (ou --ff-only)'
       : foreign.length > upperNotCut.length || foreignMerges.length > 0
-        ? `corte a branch de origin/${trunk} atualizado e traga para ela só o origin/${trunk}`
+        ? slice !== null && !slice.position.first
+          ? `corte a fatia de novo a partir de origin/${slice.position.below} atualizado e traga para ela só os commits dela`
+          : `corte a branch de origin/${trunk} atualizado e traga para ela só o origin/${trunk}`
         : null
     const upperRemedy =
       upperNames.length > 0
-        ? `${upperNames.length === 1 ? `a fatia de cima ${upperNames[0]} não foi cortada` : `as fatias de cima ${upperNames.join(', ')} não foram cortadas`} desta: traga esta fatia para ela (git merge origin/${branch}) ou corte-a de novo a partir desta`
+        ? `${upperNames.length === 1 ? `a fatia de cima ${upperNames[0]} divide` : `as fatias de cima ${upperNames.join(', ')} dividem`} com esta commits que não saíram desta: a de cima traz esta (git merge origin/${branch} nela), nunca o contrário, e um merge ou fast-forward da de cima nesta se desfaz`
         : null
     const remedies = [recut, upperRemedy].filter((text) => text !== null)
     set(

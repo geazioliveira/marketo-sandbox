@@ -196,6 +196,9 @@ export declare function approveState(input: {
 // Pull requests, checks, changelog
 
 export declare const closesLine: RegExp
+export declare function closingRefsOf(
+  body: string | null | undefined,
+): { repo: string | null; number: number }[]
 export interface RequiredCheck {
   workflow: string
   job: string

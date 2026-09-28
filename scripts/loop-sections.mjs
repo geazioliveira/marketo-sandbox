@@ -539,9 +539,9 @@ const headingLine = /^ {0,3}#{1,6}(?:[ \t]|$)/
  * The stack a plan declares: the branches its `Stack` section names, bottom
  * first. The format is strict, and anything unclear refuses the stack rather
  * than guess:
- * - the section is titled exactly `Stack`, at the level of the plan's own
- *   sections (that of Critérios de aceite): a `Stack de PRs`, or a `Stack`
- *   nested under another section, is not it, and two of it are a problem;
+ * - the section is titled exactly `Stack`, at any heading level: `## Stack`
+ *   in a plan comment, `###` or `####` in a plan from an issue form, whose
+ *   fields are `###`. A `Stack de PRs` is not it, and two of it are a problem;
  * - the list is the section's numbered items at the first column, up to its first
  *   subheading, outside code blocks and HTML comments (hiddenLines,
  *   shownText); a bullet, a nested item or a paragraph is prose, so a note
@@ -555,12 +555,8 @@ const headingLine = /^ {0,3}#{1,6}(?:[ \t]|$)/
  * @returns {{ declared: boolean, branches: string[], problems: string[] }}
  */
 export function stackOf(planText) {
-  const sections = parseSections(planText)
-  const level = pickSection(sections, 'Critérios de aceite')?.level ?? 2
-  const found = sections.filter(
-    (section) =>
-      section.level === level &&
-      foldHeading(section.title) === foldHeading(stackSection),
+  const found = parseSections(planText).filter(
+    (section) => foldHeading(section.title) === foldHeading(stackSection),
   )
   if (found.length === 0) return { declared: false, branches: [], problems: [] }
   if (found.length > 1)
@@ -945,6 +941,37 @@ export function approveState({
 
 /** The PR body's first non-empty line, exactly. English: GitHub only reads English keywords. */
 export const closesLine = /^Closes #([1-9]\d*)\.$/
+
+/**
+ * A closing keyword and the issue it names, the forms GitHub links: `#N`,
+ * `owner/repo#N` and the issue's URL, with an optional colon after the
+ * keyword.
+ */
+const closingReference =
+  /\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?):?[ \t]+(?:https:\/\/github\.com\/([\w.-]+\/[\w.-]+)\/issues\/|([\w.-]+\/[\w.-]+)#|#)([1-9]\d*)(?![\w-])/gi
+
+/**
+ * The issues a PR body closes, read from its text as GitHub would link them
+ * (#31): GitHub links closing keywords only on a PR to the default branch, so
+ * a slice's draft PR on the slice below has no link yet, and the gate reads
+ * its body instead. HTML comments are left out, as GitHub renders none; code
+ * is read, so a keyword shown in code counts, on the side that blocks. Each
+ * issue once, in the order found; `repo` is null for a bare `#N`.
+ * @returns {{ repo: string | null, number: number }[]}
+ */
+export function closingRefsOf(body) {
+  const found = []
+  const seen = new Set()
+  for (const match of shownText(body).matchAll(closingReference)) {
+    const repo = match[1] ?? match[2] ?? null
+    const number = Number(match[3])
+    const key = `${String(repo ?? '').toLowerCase()}#${number}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    found.push({ repo, number })
+  }
+  return found
+}
 
 /**
  * The checks a merge requires, by workflow and job, as GitHub shows them

@@ -52,6 +52,7 @@ import {
   sectionsFor,
   slicePosition,
   stackOf,
+  closingRefsOf,
   stackSection,
   stackSliceLabel,
   stepIds,
@@ -2027,6 +2028,48 @@ describe('openThreads', () => {
   })
 })
 
+describe('the issues a PR body closes, read from its text (#31)', () => {
+  it('reads every keyword GitHub links, in each form', () => {
+    expect(
+      closingRefsOf(
+        'Closes #44.\n\nfixes: #45, Resolved dono/repo#7 e close https://github.com/dono/repo/issues/8',
+      ),
+    ).toEqual([
+      { repo: null, number: 44 },
+      { repo: null, number: 45 },
+      { repo: 'dono/repo', number: 7 },
+      { repo: 'dono/repo', number: 8 },
+    ])
+  })
+
+  it('counts each issue once, and nothing that is not a keyword and an issue', () => {
+    expect(closingRefsOf('Closes #44.\n\nCloses #44 de novo.')).toEqual([
+      { repo: null, number: 44 },
+    ])
+    for (const body of [
+      'Refs #44.',
+      'Enclosed #44.',
+      'Closes #0.',
+      'Closes #44a.',
+      'Closes # 44.',
+      '',
+      null,
+    ])
+      expect(closingRefsOf(body), String(body)).toEqual([])
+  })
+
+  it('leaves out HTML comments and reads code, on the side that blocks', () => {
+    expect(
+      closingRefsOf(
+        'Closes #44.\n\n<!-- não use Closes #99 aqui -->\n\n```\nCloses #98\n```',
+      ),
+    ).toEqual([
+      { repo: null, number: 44 },
+      { repo: null, number: 98 },
+    ])
+  })
+})
+
 describe('a stack declared in a parent plan (#31)', () => {
   const plan = (stack: string) =>
     `# Plano\n\n## Critérios de aceite\n\n- [ ] Uma coisa.\n\n## Plano\n\nFatias abaixo.\n\n## ${stackSection}\n\n${stack}\n\n## Riscos\n\nHIGH.`
@@ -2145,7 +2188,7 @@ describe('a stack declared in a parent plan (#31)', () => {
     ])
   })
 
-  it('takes only a section titled exactly Stack, at the level of the plan’s sections', () => {
+  it('takes only a section titled exactly Stack, at any heading level, and only one', () => {
     const criteria = '## Critérios de aceite\n\n- [ ] Uma coisa.\n\n'
     expect(
       stackOf(`${criteria}## Stack de PRs\n\n1. \`feature/32-a\``).declared,
@@ -2154,20 +2197,23 @@ describe('a stack declared in a parent plan (#31)', () => {
       stackOf(`${criteria}## Stacktrace do erro\n\n1. \`feature/32-a\``)
         .declared,
     ).toBe(false)
-    expect(
-      stackOf(
-        `${criteria}## Fora de escopo\n\n### Stack\n\n1. \`feature/32-a\``,
-      ).declared,
-    ).toBe(false)
-    // A plan from an issue form has its sections one level down.
-    expect(
-      stackOf(
-        '### Critérios de aceite\n\n- [ ] x\n\n### Stack\n\n1. `feature/32-a`',
-      ).branches,
-    ).toEqual(['feature/32-a'])
+    // A plan from an issue form has its fields at ###, and a heading inside a
+    // field at ####; the workflow's example is ## Stack. All of them count.
+    for (const plan of [
+      '### Critérios de aceite\n\n- [ ] x\n\n### Stack\n\n1. `feature/32-a`',
+      '### Critérios de aceite\n\n- [ ] x\n\n## Stack\n\n1. `feature/32-a`',
+      '### Plano\n\nAs fatias:\n\n#### Stack\n\n1. `feature/32-a`\n\n### Riscos\n\nHIGH.',
+      `${criteria}## Fora de escopo\n\n### Stack\n\n1. \`feature/32-a\``,
+    ])
+      expect(stackOf(plan).branches, plan).toEqual(['feature/32-a'])
     expect(
       stackOf(
         `${criteria}## Stack\n\n1. \`feature/32-a\`\n\n## Stack\n\n1. \`feature/33-b\``,
+      ).problems,
+    ).toEqual(['o plano tem 2 seções Stack'])
+    expect(
+      stackOf(
+        `${criteria}## Stack\n\n1. \`feature/32-a\`\n\n### Stack\n\n1. \`feature/33-b\``,
       ).problems,
     ).toEqual(['o plano tem 2 seções Stack'])
   })
