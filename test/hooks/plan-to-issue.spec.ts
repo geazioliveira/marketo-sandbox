@@ -717,6 +717,30 @@ describe.concurrent('plan-to-issue on Bash: what keeps the marker', () => {
     expect(contextOf(run)).toContain('o marcador continua')
   })
 
+  test.for([
+    ['left blank on a form', '_No response_'],
+    ['with nothing under it', ''],
+  ] as const)(
+    'gh issue create with a required section %s names it, as the gate does (Copilot review of #54)',
+    async ([, content], { fresh, expect }) => {
+      const repo = await pending(fresh)
+      repo.write({
+        'issue.md': sectionsOf(featureSections).replace(
+          'Texto de Riscos.',
+          content,
+        ),
+      })
+      const run = await bash(
+        repo,
+        'gh issue create -t Coisa -l enhancement -F issue.md',
+        `${ISSUE_URL}/23\n`,
+      )
+      expect(existsSync(repo.markerPath(SESSION))).toBe(true)
+      expect(contextOf(run)).toContain('estão vazias Riscos')
+      expect(contextOf(run)).toContain('o marcador continua')
+    },
+  )
+
   test('gh issue create with a feature plan under the bug label', async ({
     fresh,
     expect,
@@ -1467,6 +1491,15 @@ describe.concurrent(
       [
         'without the plan’s sections',
         () => ({ body: 'Só um resumo, sem as seções.' }),
+      ],
+      [
+        'with a required section left blank (Copilot review of #54)',
+        () => ({
+          body: sectionsOf(featureSections).replace(
+            'Texto de Riscos.',
+            '_No response_',
+          ),
+        }),
       ],
     ] as const)(
       'keeps the marker for gh issue create when the account’s one new issue is %s',
