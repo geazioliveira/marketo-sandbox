@@ -352,10 +352,19 @@ export declare const gateCacheFile: string
 export declare const gateCacheSchema: number
 export declare const gateTtlHours: number
 export declare const planPendingPrefix: string
+/**
+ * planPendingPrefix, the session id encoded, and `.json`: [A-Za-z0-9-] kept,
+ * every other UTF-8 byte (`_` included) as `_XX` in uppercase hex, a lone
+ * surrogate as `_uXXXX`, and no id at all as `_`. Injective, so two sessions
+ * never share a marker.
+ */
+export declare function planPendingFile(
+  sessionId: string | null | undefined,
+): string
 
 export declare function gateStatus(
   cache: GateCache | null | undefined,
-  context: { branch: string; now?: number; pendingSince?: string | null },
+  context: { branch: string; now?: number; pendingPlan?: boolean },
 ): { state: GateState; cache?: GateCache }
 
 // The audit of main and the issue-link refresh

@@ -695,7 +695,7 @@ describe(workflows.check, () => {
     }
     // format:check refuses exactly what `npm run format` would rewrite (#9).
     expect(scripts['format:check']).toBe(
-      'prettier --check "src/**/*.ts" "test/**/*.ts" "scripts/**/*.{mjs,mts}"',
+      'prettier --check "src/**/*.ts" "test/**/*.ts" "scripts/**/*.{mjs,mts}" ".claude/hooks/**/*.mjs"',
     )
     expect(scripts.format).toBe(
       scripts['format:check'].replace('--check', '--write'),
