@@ -12,16 +12,16 @@ A stack entra no loop sem afrouxar o vínculo com issue:
 
 ## Critérios de aceite
 
-- [ ] Uma issue mãe declara uma stack com uma seção `Stack` no plano vigente: a lista ordenada das branches das fatias, de baixo para cima, cada uma nomeando uma sub-issue da mãe.
-- [ ] Uma sub-issue de fatia leva a label de categoria e a label `stack-slice`, sem label de estado. O gate lê, para ela, o estado, as seções, os critérios e o Approve da mãe. Ele exige que a sub-issue seja filha da mãe, que as duas estejam abertas, e que a branch esteja na `Stack` do plano vigente da mãe. Uma branch fora da `Stack`, ou uma mãe sem Approve, é recusada.
-- [ ] Editar o plano da mãe depois do Approve, ou postar nela um `# Plano` novo, revoga o Approve de todas as fatias, como já revoga o da mãe.
-- [ ] A PR de uma fatia pode ter como base a branch da fatia logo abaixo na `Stack`, ou `main`. Com a base na fatia de baixo, ela fica em draft; sai de draft só quando a de baixo mergeia e a PR passa a apontar para `main`.
-- [ ] O `stacked` aceita as refs das fatias de baixo da mesma `Stack`, e o merge de uma delas na fatia de cima, para trazer correções, não conta como merge estranho. Qualquer outra ref continua recusada.
-- [ ] O `intent-first` bloqueia só na primeira fatia. O `learn` bloqueia só na última, com a entrada do changelog citando a mãe. Nas outras fatias, os dois só relatam.
-- [ ] Um evento na issue mãe (o Approve, uma label, um plano) re-executa o `issue-link` das PRs abertas que fecham as sub-issues dela.
-- [ ] Um passo novo, `pr-size`, só relata as linhas alteradas da PR contra a base, com um teto de referência de 1.500 linhas.
-- [ ] O `test/scripts/gate.spec.ts` cobre a primeira fatia, uma do meio e a última, a base na fatia de baixo com e sem draft, o merge da fatia de baixo, uma branch fora da `Stack`, uma mãe sem Approve, uma sub-issue de outra mãe e um plano revisado na mãe depois do Approve.
-- [ ] A ADR 0001, o ciclo de vida de issue e branch, o gate do loop, o fluxo e o glossário descrevem como montar, revisar, atualizar e mergear uma stack.
+- [x] Uma issue mãe declara uma stack com uma seção `Stack` no plano vigente: a lista ordenada das branches das fatias, de baixo para cima, cada uma nomeando uma sub-issue da mãe.
+- [x] Uma sub-issue de fatia leva a label de categoria e a label `stack-slice`, sem label de estado. O gate lê, para ela, o estado, as seções, os critérios e o Approve da mãe. Ele exige que a sub-issue seja filha da mãe, que as duas estejam abertas, e que a branch esteja na `Stack` do plano vigente da mãe. Uma branch fora da `Stack`, ou uma mãe sem Approve, é recusada.
+- [x] Editar o plano da mãe depois do Approve, ou postar nela um `# Plano` novo, revoga o Approve de todas as fatias, como já revoga o da mãe.
+- [x] A PR de uma fatia pode ter como base a branch da fatia logo abaixo na `Stack`, ou `main`. Com a base na fatia de baixo, ela fica em draft; sai de draft só quando a de baixo mergeia e a PR passa a apontar para `main`.
+- [x] O `stacked` aceita as refs das fatias de baixo da mesma `Stack`, e o merge de uma delas na fatia de cima, para trazer correções, não conta como merge estranho. Qualquer outra ref continua recusada.
+- [x] O `intent-first` bloqueia só na primeira fatia. O `learn` bloqueia só na última, com a entrada do changelog citando a mãe. Nas outras fatias, os dois só relatam.
+- [x] Um evento na issue mãe (o Approve, uma label, um plano) re-executa o `issue-link` das PRs abertas que fecham as sub-issues dela.
+- [x] Um passo novo, `pr-size`, só relata as linhas alteradas da PR contra a base, com um teto de referência de 1.500 linhas.
+- [x] O `test/scripts/gate.spec.ts` cobre a primeira fatia, uma do meio e a última, a base na fatia de baixo com e sem draft, o merge da fatia de baixo, uma branch fora da `Stack`, uma mãe sem Approve, uma sub-issue de outra mãe e um plano revisado na mãe depois do Approve.
+- [x] A ADR 0001, o ciclo de vida de issue e branch, o gate do loop, o fluxo e o glossário descrevem como montar, revisar, atualizar e mergear uma stack.
 
 ## Abordagem técnica
 
@@ -55,7 +55,25 @@ Nenhuma. O Approve do dono na #31 (2026-09-27, "Pode seguir com suas recomendaç
 - [Ciclo de vida de issue e branch](../knowledge/patterns/issue-branch-lifecycle.md)
 - [Revisão classificada por risco](../knowledge/patterns/risk-classified-review.md)
 
+## Resultados
+
+O que foi construído está na [entrada do changelog](../evolution/changelog.md), e a PR é a #33.
+
+Desvios do plano, todos da verificação adversarial feita antes da PR e sempre para o lado que bloqueia:
+
+- **A ordem do merge é conferida.** Uma fatia acima da primeira só aponta para `main` depois de toda fatia de baixo mergeada. O plano só dizia que a de cima ficava em draft até a de baixo mergear, e uma fatia apontada para `main` antes disso levaria as de baixo junto, sem o gate delas.
+- **Os commits de uma fatia acima da primeira precisam citar a sub-issue dela**, no CI fora de draft. Ali o `intent-first`, que só bloqueia na primeira fatia, já não pega uma branch cortada de trabalho de fora da stack.
+- **A isenção de uma fatia de cima tem condição.** A ref dela só fica fora do `stacked` quando o que ela divide com o HEAD, fora de `main` e das fatias de baixo, cita a issue desta fatia. Isentar toda fatia de cima deixava passar uma fatia de baixo que trouxe os commits da de cima.
+- **A `Stack` tem formato estrito.** Só os itens numerados na primeira coluna, começando pela branch, são fatias, e um bullet, um item indentado ou um parágrafo é prosa. Antes, uma nota que citasse uma branch virava fatia e a isentava do `stacked`. Duas branches da mesma issue e a branch da própria mãe bloqueiam.
+- **A mãe precisa ser deste repositório.** Uma mãe que não se lê deixa o veredito não verificado, com aviso no modo local, e o refresh deixa de fora as sub-issues de outro repositório.
+- **O tamanho.** São cerca de 2,9 mil linhas contra `main`, 1.868 delas em testes, acima da referência de 1.500 que a própria #31 criou. Ela não podia vir numa stack, porque é ela que ensina o loop a aceitar uma.
+- **Um relato novo, de antes da #31**: a #32, o remédio errado que o `stacked` dá a um merge de fora quando a branch já foi publicada. Só a mensagem está errada, e o veredito está certo.
+- **Um anti-pattern novo**: [uma PR que prende partes independentes](../knowledge/anti-patterns/one-pr-for-many-independent-parts.md), dos fatos da PR #26.
+
+O gate numa fatia e o refresh das sub-issues estão provados com o GitHub falso do `gate.spec.ts` e do `refresh-issue-link.spec.ts`. Ao vivo, eles rodam pela primeira vez na stack da #5.
+
 ## Status
 
 - **Criado**: 2026-09-27 (Fase: Intent), do plano aprovado na issue #31 (#31)
-- **Status**: In Progress
+- **Status**: Completed
+- **Atualizado**: 2026-09-27 (Fase: Learn), os critérios provados no `gate.spec.ts`, no `loop-sections.spec.ts` e no `refresh-issue-link.spec.ts`, com o `npm run check` e o e2e verdes na PR #33 (#31)
