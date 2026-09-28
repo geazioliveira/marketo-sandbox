@@ -197,7 +197,6 @@ const keys = (calls: Call[]): (string | undefined)[] =>
 // PR mode (#13)
 
 const PR = 14
-const BRANCH = 'feature/13-review-gate'
 
 /** The PR as the PR-mode GraphQL query reads it now. */
 const pullNow = (number: number, state = 'OPEN', headRefOid = HEAD) => ({

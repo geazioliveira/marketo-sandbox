@@ -834,7 +834,9 @@ describe('docs against the review gate’s contract values (#13)', () => {
     },
   )
 
-  it.each([adr0003, adr0002, loopGate, workflowGuide, lifecycle, 'AGENTS.md'])(
+  // AGENTS.md left the list with #30: after resolving a thread the check
+  // needs no refresh, since the issue-link only reports the threads.
+  it.each([adr0003, adr0002, loopGate, workflowGuide, lifecycle])(
     '%s gives the command that brings one PR’s check up to date through the refresh’s dispatch, on main',
     (file) => {
       expect(read('scripts/refresh-issue-link.mjs')).toContain(
@@ -1027,7 +1029,7 @@ describe('docs against the review gate after the #13 reviews', () => {
   )
 
   it.each(freshVerdictDocs)(
-    '%s gives both fresh verdicts: the gate in CI mode, and a re-run watched to its end',
+    '%s gives the fresh verdict, the gate in CI mode, and says a re-run of the issue-link is none (#30)',
     (file) => {
       expect(gate).toContain('gateCiCommand(options.pr, options.branch)')
       const text = bodyOf(read(file))
@@ -1041,11 +1043,18 @@ describe('docs against the review gate after the #13 reviews', () => {
         expect(command, file).toBe(
           asDocs(gateCiCommand(SAMPLE_PR, SAMPLE_BRANCH), pr, branch),
         )
-      expect(text, file).toMatch(/gh run rerun <run-id>/)
-      expect(text, file).toMatch(
+      // Since #30 the issue-link runs with --review-report: re-running it
+      // judges neither the Copilot review nor the threads.
+      expect(text, file).not.toMatch(
         /gh run watch <run-id>(?: --repo \S+)? --exit-status/,
       )
-      expect(text, file).toMatch(notFresh)
+      const reruns = proseOf(text).filter((sentence) =>
+        /rerun do (?:job )?`issue-link`/.test(sentence),
+      )
+      expect(
+        reruns.some((sentence) => notFresh.test(sentence)),
+        file,
+      ).toBe(true)
     },
   )
 
@@ -1128,17 +1137,22 @@ describe('docs against the review gate after the #13 reviews', () => {
     },
   )
 
-  it.each([adr0002, adr0003])(
-    '%s counts each thread reply as a review that fires the signal and the refresh',
+  it.each([
+    adr0002,
+    adr0003,
+    workflowGuide,
+    'AGENTS.md',
+    lifecycle,
+    loopGate,
+    'context/knowledge/patterns/review-before-merge.md',
+  ])(
+    '%s neither calls the refresh unproven nor keeps the review signal, gone since #30',
     (file) => {
-      const replies = proseOf(read(file)).filter(
-        (sentence) =>
-          /cada resposta numa thread/i.test(sentence) &&
-          sentence.includes('revisão') &&
-          sentence.includes('sinal') &&
-          sentence.includes('refresh'),
-      )
-      expect(replies, file).not.toEqual([])
+      for (const sentence of proseOf(bodyOf(read(file)))) {
+        expect(sentence, file).not.toMatch(/não foi provad[oa] ao vivo/)
+        if (/[Ss]inal de revisão|review-signal/.test(sentence))
+          expect(sentence, file).toContain('#30')
+      }
     },
   )
 
