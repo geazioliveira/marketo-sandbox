@@ -663,6 +663,25 @@ describe('gh issue reopen and gh repo edit', () => {
   it('passes gh repo edit on another repository', async () => {
     expectPass(await judge('gh repo edit alguem/outro --description x'))
   })
+
+  it('reads the value of a gh repo edit option as a value, not as the repository (Copilot review of #47)', async () => {
+    for (const option of [
+      '--visibility public',
+      '--description x',
+      '-d x',
+      '--homepage https://example.com',
+      '-h https://example.com',
+      '--add-topic mock',
+      '--remove-topic mock',
+      '--default-branch main',
+      '--squash-merge-commit-message pr-title',
+    ])
+      expectDeny(
+        await judge(`gh repo edit ${option}`),
+        /configurações do repositório/,
+      )
+    expectPass(await judge('gh repo edit --visibility public alguem/outro'))
+  })
 })
 
 describe('gh pr create', () => {

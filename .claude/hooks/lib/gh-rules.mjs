@@ -675,7 +675,17 @@ const valuedFlags = {
   'label create': ['-c', '--color', '-d', '--description'],
   'label edit': ['-c', '--color', '-d', '--description', '-n', '--name'],
   'label delete': [],
-  'repo edit': [],
+  'repo edit': [
+    '--add-topic',
+    '--default-branch',
+    '-d',
+    '--description',
+    '-h',
+    '--homepage',
+    '--remove-topic',
+    '--squash-merge-commit-message',
+    '--visibility',
+  ],
   'pr create': [
     '-a',
     '--assignee',
