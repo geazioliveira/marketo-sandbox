@@ -76,7 +76,7 @@ Os mesmos do plano vigente, o `# Plano` de 2026-09-28 11:37 UTC na #5.
 
 ## Abordagem técnica
 
-O código vem da branch `feature/5-hooks-claude-code` (`9377db6`), que passou pelas dez revisões da PR #26. Ele é portado para o `main` de hoje sem ser reescrito, uma fatia por módulo, na ordem do grafo de imports. As regras do `gh` e o `guard-bash` vão em duas fatias cada, com os testes cortados entre dois blocos `describe` de nível zero, para cada PR ficar abaixo de 180 KiB:
+O código vem da branch `feature/5-hooks-claude-code` (`9377db6`), que passou pelas dez revisões da PR #26. Ele é portado para o `main` de hoje sem ser reescrito, uma fatia por módulo, na ordem do grafo de imports. As regras do `gh` e o `guard-bash` vão em duas fatias cada, com os testes cortados entre dois blocos `describe` de nível zero, para as PRs delas ficarem abaixo de 180 KiB, a margem adotada depois de a PR #47 não ser revisada:
 
 1. `feature/34-hooks-base`: este intent, o contrato do plano pendente (`planPendingFile` e o `pendingPlan` do `gateStatus()`), `lib/io.mjs`, `lib/budget.mjs`, `lib/repo.mjs`, `run.sh`, o `lint` e o `format` cobrindo `.claude/hooks/` e o suporte de teste;
 2. `feature/35-hooks-shell`: o parser de shell;
@@ -148,7 +148,7 @@ Como foi verificado:
 
   Os outros achados viraram limite na [ADR 0002](../decisions/0002-soft-enforcement-on-github-free.md) ou não procediam, e cada thread foi respondida antes de resolvida.
 - **O conjunto das fatias contra a `9377db6`.** Em `.claude/hooks/` e `test/hooks/`, só diferem as correções acima e os testes delas: `lib/edit-gate.mjs` (o `settingsLocal` exportado), `lib/git-rules.mjs`, `lib/gh-rules.mjs`, `lib/plan-publication.mjs`, `plan-to-issue.mjs`, uma frase do README sobre o caminho de reserva e o `budget.spec.ts`, novo. O `.claude/settings.json`, o `settings.spec.ts`, o `guard-bash.spec.ts` e o `session-context.spec.ts` são os da `9377db6`.
-- **As sondas** rodam com os hooks ligados, depois do `.claude/settings.json`, numa sessão sem a saída de emergência do dono. A evidência fica na Verificação da PR desta fatia e no comentário de fechamento na #5.
+- **As sondas** foram negadas com os hooks ligados, depois de o dono tirar a saída de emergência deste worktree. O `gh issue edit 1 --remove-label needs-info` foi negado pelo `guard-bash`, e um `Edit` em `src/main.ts` numa sonda `claude/x` cortada de `origin/main`, pelo `build-guard`. A sonda foi apagada em seguida. A primeira tentativa da segunda sonda trocou o worktree da sessão para `claude/x`, que não tem o `.claude/settings.json`, e os hooks saíram com o arquivo: o `Edit` passou e foi desfeito na hora, sem commit. A evidência está na Verificação da PR #55 e no comentário de fechamento na #5.
 
 Desvios do plano:
 

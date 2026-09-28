@@ -36,6 +36,7 @@ Uma entrada por mudança mergeada, da mais nova para a mais antiga, escrita no p
 - O tamanho de cada PR, com `gh pr diff`: de 48.644 bytes (#53) a 222.324 (#45). A #47 falhou três vezes com 241.186 bytes e foi revisada com 179.248.
 - Os achados do Copilot por PR: 5 na #42, 8 na #43, 3 na #44, 27 na #45, 7 na #47, nenhum na #51, 2 na #52, nenhum na #53 e 4 na #54. Nenhuma fatia passou de três revisões completas.
 - Contra a `9377db6`, os arquivos de `.claude/hooks/` e `test/hooks/` só diferem pelas correções das revisões e pelos testes delas.
+- As duas sondas do plano foram negadas com os hooks ligados: a troca de label pelo `guard-bash` e o `Edit` numa sonda `claude/x` pelo `build-guard`.
 
 ### Decisões tomadas
 
@@ -52,7 +53,7 @@ Uma entrada por mudança mergeada, da mais nova para a mais antiga, escrita no p
 
 ### Aprendizados / surpresas
 
-- **O Copilot tem um limite de tamanho que não está documentado.** A PR #47, com 241.186 bytes de diff, recebeu três revisões "Copilot wasn't able to review any files", e a #45, com 222.324, foi revisada. Cortar a fatia resolveu na primeira tentativa, e cada PR passou a ficar abaixo de 180 KiB.
+- **O Copilot tem um limite de tamanho que não está documentado.** A PR #47, com 241.186 bytes de diff, recebeu três revisões "Copilot wasn't able to review any files", e a #45, com 222.324, foi revisada. Cortar a fatia resolveu na primeira tentativa, e as PRs de depois ficaram abaixo de 180 KiB, a margem adotada ali.
 - **O GitHub não liga uma PR de fatia à sub-issue quando muda a base dela para `main`.** Em todos os merges da stack, a PR de cima ficou sem vínculo até uma edição no corpo, que o cria na hora.
 - **Um merge com um rerun do `issue-link` em andamento deixou a auditoria de `main` ler um run vermelho** (#46, relato #48). O refresh re-roda o `issue-link` depois de cada resposta numa thread, e desde a fatia 3 o merge espera nenhum run em andamento.
 - **O critério do agente cooperativo encurtou as rodadas.** Na PR #26, cada achado virou correção, e foram dez rodadas. Na stack, 7 dos 56 achados viraram correção, e nenhuma fatia passou de três revisões completas.
@@ -60,6 +61,7 @@ Uma entrada por mudança mergeada, da mais nova para a mais antiga, escrita no p
 - **Cortar um spec entre blocos deixa imports sem uso na metade de baixo,** que o `lint` aponta: eles saem e voltam com a metade que os usa.
 - **Depois do merge de uma fatia de baixo, o gate em modo CI local precisa de um `git fetch`.** Com o `origin/main` velho, ele recusou o `pr-base` de uma fatia já liberada.
 - **Os avisos do monitor de CI chegaram depois dos merges,** com threads já respondidas. Cada um foi conferido contra o estado da PR antes de qualquer ação.
+- **Os hooks seguem o `.claude/settings.json` do checkout da sessão.** A primeira tentativa da sonda do `build-guard` trocou o worktree da sessão para uma branch cortada de `main`, que ainda não tinha o arquivo, e os hooks saíram com ele: o `Edit` passou. A sonda foi refeita num worktree próprio, e o limite foi para a ADR 0002.
 
 ---
 
