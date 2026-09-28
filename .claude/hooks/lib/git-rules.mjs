@@ -36,7 +36,13 @@ import {
   within,
 } from './edit-gate.mjs'
 import { ask, combine, deny, pass } from './io.mjs'
-import { isProject, realPathOf, repoFromRemote, trunk } from './repo.mjs'
+import {
+  harnessPaths,
+  isProject,
+  realPathOf,
+  repoFromRemote,
+  trunk,
+} from './repo.mjs'
 import { parseCommand, readBody } from './shell.mjs'
 
 const escapeRegExp = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
@@ -2024,6 +2030,17 @@ function writeDecision(write, g, sub, found, ctx, env) {
   }
   if (write.ignored === true && relatives.some(holdsSettings))
     relatives.push(settingsLocal)
+  // A folder named as a pathspec covers the files under it, the harness ones
+  // too (`git restore scripts`, `git checkout main -- scripts`; Copilot
+  // review of #45): each harness path under it is judged by name, so the
+  // harness asks as it does for the file itself. The worktree whole ('') is
+  // judged as before.
+  for (const relative of [...relatives]) {
+    const dir = fold(relative).replace(/\/$/, '')
+    if (dir === '') continue
+    for (const entry of harnessPaths)
+      if (fold(entry).startsWith(`${dir}/`)) relatives.push(entry)
+  }
   if (relatives.length === 0) return pass()
   const decision = combine(
     [...new Set(relatives)].map((relative) =>
