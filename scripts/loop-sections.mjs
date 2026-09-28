@@ -1595,8 +1595,8 @@ export const issueLinkRefreshWorkflowFile = 'issue-link-refresh.yml'
  * its workflow_dispatch input `pr`. A dispatch runs the YAML and the script of
  * the ref it names, not of main, hence `--ref main`. It returns before the
  * refresh runs, and a failed refresh shows nothing on the PR, so it only
- * brings the PR's check up to date: it is no fresh verdict before a merge
- * (gateCiCommand, or a re-run of the issue-link watched to its end, is).
+ * brings the PR's check up to date: it is no fresh verdict before a merge.
+ * Since #30 only gateCiCommand is one.
  */
 export function refreshPrCommand(pr) {
   return `gh workflow run ${issueLinkRefreshWorkflowFile} --ref main -f pr=${shellWord(pr)}`

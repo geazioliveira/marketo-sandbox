@@ -213,7 +213,7 @@ Este repositório tem uma conta só no GitHub. O dono e o agente postam com o me
 
 - Em toda branch de issue, antes do primeiro commit e de novo antes da PR.
 - No CI, em toda PR, pelo `issue-link`.
-- Logo antes do merge, para o veredito fresco, quando o `issue-link` não pode ser re-rodado.
+- Logo antes do merge, para o veredito fresco, na cabeça da PR. Desde a #30, um rerun do `issue-link` não é veredito fresco, porque roda com `--review-report`.
 
 ## Quando NÃO usar
 

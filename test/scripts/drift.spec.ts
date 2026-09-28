@@ -1278,4 +1278,45 @@ describe('docs against the review gate after the #13 reviews', () => {
       expect([...named].sort()).toEqual([...present].sort())
     })
   })
+
+  it('no doc offers a re-run of the issue-link as a fresh verdict (#30)', () => {
+    // Bold left out, so that a bullet's bold lead-in is a sentence of its own.
+    const checked = [
+      ...freshVerdictDocs,
+      loopGate,
+      'context/knowledge/glossary.md',
+      'context/knowledge/patterns/review-before-merge.md',
+    ].flatMap((file) =>
+      proseOf(bodyOf(read(file)).replaceAll('**', ''))
+        .filter(
+          (sentence) =>
+            sentence.includes('veredito fresco') &&
+            sentence.includes('issue-link') &&
+            /\b(?:rerun|re-rod|re-execut)/.test(sentence),
+        )
+        .map((sentence): [string, string] => [file, sentence]),
+    )
+    expect(checked.length).toBeGreaterThan(0)
+    for (const [file, sentence] of checked)
+      expect(sentence, file).toMatch(notFresh)
+  })
+
+  it('no JSDoc of the scripts offers a re-run of the issue-link as a fresh verdict (#30)', () => {
+    const rerun = /re-?run of (?:the )?(?:PR's )?issue-link/
+    const named = readdirSync(path.join(root, 'scripts'))
+      .filter((file) => file.endsWith('.mjs'))
+      .flatMap((file) =>
+        [...read(`scripts/${file}`).matchAll(/\/\*\*([\s\S]*?)\*\//g)]
+          .flatMap(([, doc]) =>
+            doc.replace(/\s*\n\s*\*\s?/g, ' ').split(/(?<=[.!?;])\s+/),
+          )
+          .filter((sentence) => rerun.test(sentence))
+          .map((sentence): [string, string] => [file, sentence]),
+      )
+    expect(named.length).toBeGreaterThan(0)
+    for (const [file, sentence] of named)
+      expect(sentence, file).toMatch(
+        new RegExp(`${rerun.source} is (?:none|no fresh verdict)\\b`),
+      )
+  })
 })
