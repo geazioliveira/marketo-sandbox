@@ -615,10 +615,12 @@ describe(workflows.issueLink, () => {
     expect(text).not.toMatch(/allow-unsafe-pr-checkout:\s*true/)
   })
 
-  it('runs the trusted gate by absolute path, in CI mode, and installs nothing', () => {
+  it('runs the trusted gate by absolute path, in CI mode with --review-report (#30), and installs nothing', () => {
+    // The option makes the Copilot review and the threads only report here;
+    // the fresh verdict before a merge runs the gate without it.
     const scripts = runBlocks(text)
     expect(scripts).toEqual([
-      'node "$GITHUB_WORKSPACE/trusted/scripts/gate.mjs" --pr "$PR_NUMBER" --branch "$PR_HEAD_REF"',
+      'node "$GITHUB_WORKSPACE/trusted/scripts/gate.mjs" --pr "$PR_NUMBER" --branch "$PR_HEAD_REF" --review-report',
     ])
     for (const script of scripts)
       expect(script).not.toMatch(/\b(?:npm|npx|yarn|pnpm)\b/)

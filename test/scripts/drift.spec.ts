@@ -1073,6 +1073,18 @@ describe('docs against the review gate after the #13 reviews', () => {
     },
   )
 
+  it.each(freshVerdictDocs)(
+    '%s never gives the fresh verdict with --review-report, the option of the issue-link workflow (#30)',
+    (file) => {
+      expect(gateCiCommand(SAMPLE_PR, SAMPLE_BRANCH)).not.toContain(
+        '--review-report',
+      )
+      expect(bodyOf(read(file)), file).not.toMatch(
+        /node scripts\/gate\.mjs --pr <\w+> --branch <\w+> --review-report/,
+      )
+    },
+  )
+
   it.each([adr0002, adr0003, workflowGuide])(
     '%s says a dispatch runs the copy of the ref it was dispatched on',
     (file) => {
