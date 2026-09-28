@@ -34,6 +34,7 @@ import {
   categoryLabels,
   changelogHeadingFor,
   checkSections,
+  commentOpening,
   closesLine,
   copilotRequestCommand,
   copilotRequested,
@@ -73,7 +74,7 @@ const page = 100
 
 // The sub-issues, each with its repository and labels, are read for a stack's
 // parent (#31): every branch its Stack names must be one of its slices.
-const issueQuery = `query($owner: String!, $name: String!, $number: Int!) { repository(owner: $owner, name: $name) { owner { login } issue(number: $number) { number state body lastEditedAt parent { number repository { nameWithOwner } } labels(first: ${page}) { totalCount nodes { name } } comments(last: ${page}) { totalCount nodes { body createdAt lastEditedAt author { __typename login } } } timelineItems(last: ${page}, itemTypes: [LABELED_EVENT, REOPENED_EVENT, COMMENT_DELETED_EVENT]) { totalCount nodes { __typename ... on LabeledEvent { createdAt actor { __typename login } label { name } } ... on ReopenedEvent { createdAt } ... on CommentDeletedEvent { createdAt } } } subIssues(first: ${page}) { totalCount nodes { number repository { nameWithOwner } labels(first: ${page}) { totalCount nodes { name } } } } } } }`
+const issueQuery = `query($owner: String!, $name: String!, $number: Int!) { repository(owner: $owner, name: $name) { owner { login } issue(number: $number) { number state body lastEditedAt parent { number repository { nameWithOwner } } labels(first: ${page}) { totalCount nodes { name } } comments(last: ${page}) { totalCount nodes { body createdAt lastEditedAt author { __typename login } } } timelineItems(last: ${page}, itemTypes: [LABELED_EVENT, REOPENED_EVENT, COMMENT_DELETED_EVENT]) { totalCount nodes { __typename ... on LabeledEvent { createdAt actor { __typename login } label { name } } ... on ReopenedEvent { createdAt } ... on CommentDeletedEvent { createdAt } } } subIssues(first: ${page}) { totalCount nodes { number state repository { nameWithOwner } labels(first: ${page}) { totalCount nodes { name } } } } } } }`
 
 // The reviews come newest last, so the last page holds the newest; a Copilot
 // review is told apart by its author's type and database id, which only a Bot
@@ -999,6 +1000,27 @@ function main() {
       const commentsTotal = planIssue.comments?.totalCount ?? 0
       const eventsTotal = planIssue.timelineItems?.totalCount ?? 0
       const inParent = sliceOf === null ? '' : ` (na mãe #${sliceOf})`
+      // A slice's own acts count against its parent's Approve, as they would
+      // on any issue: reopening it resets the Approve, and so do a withdrawal,
+      // a revision or a title naming Approve posted on it, and a comment of it
+      // edited or deleted after the Approve. Its labels and an Approve written
+      // on it do not count: the Approve and ready-for-agent live on the parent.
+      const sliceComments =
+        sliceOf === null
+          ? []
+          : (issue.comments?.nodes ?? []).filter(
+              (comment) => commentOpening(comment.body) !== 'approve',
+            )
+      const sliceEvents =
+        sliceOf === null
+          ? []
+          : (issue.timelineItems?.nodes ?? []).filter(
+              (event) => event.__typename !== 'LabeledEvent',
+            )
+      const sliceCommentsTotal =
+        sliceOf === null ? 0 : (issue.comments?.totalCount ?? 0)
+      const sliceEventsTotal =
+        sliceOf === null ? 0 : (issue.timelineItems?.totalCount ?? 0)
       if (commentsTotal > page || eventsTotal > page) {
         set(
           'approve',
@@ -1006,17 +1028,40 @@ function main() {
           `a issue tem ${commentsTotal} comentário(s) e ${eventsTotal} evento(s) de label, reabertura ou comentário apagado; o gate lê só os últimos ${page} de cada e não julga o Approve sem ler tudo${inParent}`,
           { blocks: true },
         )
+      } else if (sliceCommentsTotal > page || sliceEventsTotal > page) {
+        set(
+          'approve',
+          'no',
+          `a fatia #${number} tem ${sliceCommentsTotal} comentário(s) e ${sliceEventsTotal} evento(s) de label, reabertura ou comentário apagado; o gate lê só os últimos ${page} de cada e não julga o Approve da mãe #${sliceOf} para ela sem ler tudo`,
+          { blocks: true },
+        )
       } else {
         const approve = approveState({
           issue: { lastEditedAt: planIssue.lastEditedAt },
-          comments,
-          events,
+          comments: [...comments, ...sliceComments],
+          events: [...events, ...sliceEvents],
           ownerLogin: judged.owner,
         })
+        const lastReopen = (list) =>
+          list
+            .filter((event) => event.__typename === 'ReopenedEvent')
+            .map((event) => event.createdAt)
+            .sort()
+            .at(-1) ?? ''
+        const sliceReopen = lastReopen(sliceEvents)
+        const reopenedHere =
+          sliceReopen !== '' &&
+          sliceReopen > lastReopen(events) &&
+          (approve.code === 'before-reopen' ||
+            approve.code === 'label-before-reopen')
         set(
           'approve',
           approve.ok ? 'ok' : 'no',
-          `${approve.detail}${inParent}`,
+          approve.ok || sliceOf === null
+            ? `${approve.detail}${inParent}`
+            : reopenedHere
+              ? `a fatia #${number} foi reaberta em ${sliceReopen}, depois do Approve da mãe #${sliceOf}: reabrir zera o Approve, e vale para ela um Approve novo na mãe, com ${readyLabel} aplicada de novo`
+              : `${approve.detail} (na mãe #${sliceOf} e na fatia #${number})`,
           {
             blocks: true,
           },
@@ -1055,6 +1100,9 @@ function main() {
         // read whole, or the Stack is not judged.
         const subs = planIssue.subIssues
         const subNodes = Array.isArray(subs?.nodes) ? subs.nodes : []
+        // Each slice's state, for pr-base: a slice below is done only once its
+        // sub-issue is closed, which its PR does on merge (Closes #N).
+        const subState = new Map()
         if (!(
           Number.isInteger(subs?.totalCount) &&
           subs.totalCount <= subNodes.length
@@ -1087,6 +1135,7 @@ function main() {
                   ? 'slice'
                   : 'other',
             )
+            subState.set(node.number, node.state)
           }
           for (const listed of stack.branches) {
             const listedIssue = parseBranch(listed)?.issue
@@ -1111,7 +1160,12 @@ function main() {
             ? slicePosition(stack.branches, branch)
             : null
         if (position !== null)
-          slice = { parent: sliceOf, position, branches: stack.branches }
+          slice = {
+            parent: sliceOf,
+            position,
+            branches: stack.branches,
+            subState,
+          }
         set(
           'branch-in-plan',
           position !== null ? 'ok' : 'no',
@@ -1608,16 +1662,18 @@ function main() {
     // This branch's own commits: first-parent from HEAD, minus origin/main and
     // minus every ref it shares history with, so a stacked branch is judged by
     // its own first commit and not the one of the branch below (#122).
-    const walked =
-      commitsIn(
-        [
-          'HEAD',
-          `^${originMain}`,
-          ...sharing.map((ref) => `^${ref}`),
-          ...lowerRefs.map((ref) => `^${ref}`),
-        ],
-        { firstParent: true },
-      ) ?? []
+    // A walk git could not make is no proof of a branch with no commits of
+    // its own: it blocks stacked, as a comparison git could not make does.
+    const walkedRead = commitsIn(
+      [
+        'HEAD',
+        `^${originMain}`,
+        ...sharing.map((ref) => `^${ref}`),
+        ...lowerRefs.map((ref) => `^${ref}`),
+      ],
+      { firstParent: true },
+    )
+    const walked = walkedRead ?? []
     // Hidden stacking: a merge anywhere on that line whose other parent is
     // not in origin/main brought in work from outside it, and its ref may be
     // gone (`git merge --no-ff side`, then `git branch -D side`), so no ref
@@ -1694,6 +1750,11 @@ function main() {
         ? `a outra branch da #${number}, ${name}, tem commits que esta não tem: fique com uma só, traga para ela o trabalho da outra, e só então apague a outra (git branch -d recusa apagar trabalho não mergeado)`
         : `apague a outra branch da #${number} com ${deleteCommands(name)}`
     const stackProblems = [
+      ...(walkedRead === null
+        ? [
+            'o git não conseguiu ler os commits próprios desta branch (git rev-list --first-parent): o gate não sabe o que ela traz',
+          ]
+        : []),
       ...(unread.length > 0
         ? [
             `o git não conseguiu comparar ${unread.map(shortRef).join(', ')} com o HEAD: o gate não sabe se compartilham commits que origin/${trunk} não tem`,
@@ -1740,23 +1801,31 @@ function main() {
     )
 
     // A slice above the first points at main only once every slice below is
-    // merged there. Before that, merging it would bring the slices below, and
-    // their gate, into main through this PR.
+    // merged there: its ref, if any, is in origin/main, and its sub-issue is
+    // closed, as its PR leaves it on merge. A missing ref proves nothing (a
+    // slice never published, or deleted unmerged), nor does a ref still at
+    // main (a slice published before its first commit). Before that, merging
+    // this one would bring the slices below, or skip them, without their gate.
     if (
       ci &&
       pr !== null &&
       slice !== null &&
       !slice.position.first &&
-      pr.baseRefName === trunk &&
-      lowerRefs.length > 0
+      pr.baseRefName === trunk
     ) {
-      const pending = [...new Set(lowerRefs.map(refName))]
-      set(
-        'pr-base',
-        'no',
-        `a PR aponta para ${trunk}, mas ${pending.length === 1 ? `a fatia de baixo ${pending[0]} ainda não foi mergeada` : `as fatias de baixo ${pending.join(', ')} ainda não foram mergeadas`} em ${trunk}: até lá, a base desta é a fatia logo abaixo (${slice.position.below}), com a PR em draft`,
-        { blocks: true },
+      const unmerged = new Set(lowerRefs.map(refName))
+      const pending = slice.position.lower.filter(
+        (lower) =>
+          unmerged.has(lower) ||
+          slice.subState.get(parseBranch(lower)?.issue) !== 'CLOSED',
       )
+      if (pending.length > 0)
+        set(
+          'pr-base',
+          'no',
+          `a PR aponta para ${trunk}, mas ${pending.length === 1 ? `a fatia de baixo ${pending[0]} ainda não foi mergeada` : `as fatias de baixo ${pending.join(', ')} ainda não foram mergeadas`} em ${trunk} (a sub-issue de cada uma fecha no merge): até lá, a base desta é a fatia logo abaixo (${slice.position.below}), com a PR em draft`,
+          { blocks: true },
+        )
     }
 
     const base = gitOut('merge-base', 'HEAD', originMain)

@@ -46,7 +46,7 @@ const required = {
       ... on CommentDeletedEvent { createdAt }
     } }
     subIssues { totalCount nodes {
-      number repository { nameWithOwner }
+      number state repository { nameWithOwner }
       labels { totalCount nodes { name } }
     } }
   } } }`,

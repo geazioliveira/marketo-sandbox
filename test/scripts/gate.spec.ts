@@ -175,6 +175,8 @@ interface IssueOptions {
 
 interface SubIssue {
   number: number
+  /** OPEN unless the slice was merged (its PR closes it). */
+  state?: 'OPEN' | 'CLOSED'
   repo?: string
   labels?: string[]
   labelsTotal?: number
@@ -237,6 +239,7 @@ function issueAnswer(options: IssueOptions = {}): GhAnswer {
                     ]
                     return {
                       number: child.number,
+                      state: child.state ?? 'OPEN',
                       repository: {
                         nameWithOwner: child.repo ?? `${OWNER}/${NAME}`,
                       },
@@ -464,11 +467,14 @@ async function ciOver(
     env = {},
     prepare,
     branch = BRANCH,
+    pathOverride,
   }: {
     env?: Record<string, string>
     /** Runs on the trusted copy of the gate before it runs. */
     prepare?: (script: string) => void
     branch?: string
+    /** A PATH in place of the usual one (pathWithFailingGit). */
+    pathOverride?: string
   } = {},
 ) {
   const head = await repo.head()
@@ -481,35 +487,54 @@ async function ciOver(
     fixture: fixture(head),
     script: trusted,
     env: { GITHUB_REPOSITORY: `${OWNER}/${NAME}`, ...env },
+    ...(pathOverride === undefined ? {} : { pathOverride }),
   })
   return { repo, head, ...run }
 }
+
+/**
+ * A PATH whose git fails with exit 128 when `failWhen`, a sh test on its
+ * arguments, holds, and runs the real git for anything else: a git failure on
+ * one kind of call only, the way a damaged object or a shallow history makes
+ * one fail.
+ */
+async function pathWithFailingGit(
+  repo: TempRepo,
+  name: string,
+  failWhen: string,
+): Promise<string> {
+  const realGit = (await exec('sh', ['-c', 'command -v git'])).stdout.trim()
+  const dir = path.join(repo.bin, '..', name)
+  mkdirSync(dir, { recursive: true })
+  writeFileSync(
+    path.join(dir, 'git'),
+    `#!/bin/sh\nif ${failWhen}; then\n  echo "fatal: simulado" >&2\n  exit 128\nfi\nexec ${JSON.stringify(realGit)} "$@"\n`,
+    { mode: 0o755 },
+  )
+  return [dir, repo.bin, process.env.PATH ?? ''].join(path.delimiter)
+}
+
+/** A git that cannot compare HEAD with one commit (`git merge-base <a> <sha>`). */
+const pathFailingMergeBase = (repo: TempRepo, sha: string) =>
+  pathWithFailingGit(
+    repo,
+    'git-sem-merge-base',
+    `[ "$1" = merge-base ] && [ "$2" != --is-ancestor ] && [ "$3" = ${sha} ]`,
+  )
+
+/** A git that cannot walk a branch's first-parent line (`git rev-list --first-parent`). */
+const pathFailingFirstParentWalk = (repo: TempRepo) =>
+  pathWithFailingGit(
+    repo,
+    'git-sem-first-parent',
+    '[ "$1" = rev-list ] && case " $* " in *" --first-parent "*) true ;; *) false ;; esac',
+  )
 
 /**
  * Rewrites one piece of a gate script, the way a careless edit would. Throws
  * when the piece is not there, so a reworded query fails the case loudly
  * instead of mutating nothing and passing.
  */
-/**
- * A PATH whose git fails `git merge-base <a> <sha>` with exit 128, the way a
- * damaged object or a shallow history makes it fail, and runs the real git
- * for anything else: a comparison git cannot make, on one commit only.
- */
-async function pathFailingMergeBase(
-  repo: TempRepo,
-  sha: string,
-): Promise<string> {
-  const realGit = (await exec('sh', ['-c', 'command -v git'])).stdout.trim()
-  const dir = path.join(repo.bin, '..', 'git-sem-merge-base')
-  mkdirSync(dir, { recursive: true })
-  writeFileSync(
-    path.join(dir, 'git'),
-    `#!/bin/sh\nif [ "$1" = merge-base ] && [ "$2" != --is-ancestor ] && [ "$3" = ${sha} ]; then\n  echo "fatal: simulado" >&2\n  exit 128\nfi\nexec ${JSON.stringify(realGit)} "$@"\n`,
-    { mode: 0o755 },
-  )
-  return [dir, repo.bin, process.env.PATH ?? ''].join(path.delimiter)
-}
-
 function mutate(script: string, from: string, to: string): void {
   const text = readFileSync(script, 'utf8')
   if (!text.includes(from)) throw new Error(`mutação sem alvo: ${from}`)
@@ -3682,6 +3707,19 @@ describe.concurrent('scripts/gate.mjs', () => {
           ...options,
         })
 
+      /** The parent after the given slices merged: their sub-issues closed, as their PRs leave them. */
+      const parentAfter = (
+        merged: readonly string[],
+        options: IssueOptions = {},
+      ) =>
+        parentAnswer({
+          subIssues: SLICES.map((branch) => ({
+            number: numberOf(branch),
+            state: merged.includes(branch) ? 'CLOSED' : 'OPEN',
+          })),
+          ...options,
+        })
+
       /** A slice's sub-issue: its category and the slice label, no state label, no plan of its own. */
       const sliceAnswer = (branch: string, options: IssueOptions = {}) =>
         issueAnswer({
@@ -3945,8 +3983,11 @@ describe.concurrent('scripts/gate.mjs', () => {
       }) => {
         const repo = await stack(fresh)
         await mergeIntoMain(repo, BOTTOM)
-        const { result, out } = await ciOnSlice(repo, MIDDLE, (head) =>
-          slicePr(head, MIDDLE),
+        const { result, out } = await ciOnSlice(
+          repo,
+          MIDDLE,
+          (head) => slicePr(head, MIDDLE),
+          parentAfter([BOTTOM]),
         )
         expect(step(result, 'intent-first')).toMatchObject({
           status: 'no',
@@ -3969,8 +4010,11 @@ describe.concurrent('scripts/gate.mjs', () => {
         const repo = await stack(fresh)
         await mergeIntoMain(repo, BOTTOM)
         await mergeIntoMain(repo, MIDDLE)
-        const { result } = await ciOnSlice(repo, TOP, (head) =>
-          slicePr(head, TOP),
+        const { result } = await ciOnSlice(
+          repo,
+          TOP,
+          (head) => slicePr(head, TOP),
+          parentAfter([BOTTOM, MIDDLE]),
         )
         expect(step(result, 'learn')).toMatchObject({
           status: 'ok',
@@ -4033,7 +4077,7 @@ describe.concurrent('scripts/gate.mjs', () => {
         )
         expect(step(none.result, 'approve')).toMatchObject({ status: 'no' })
         expect(step(none.result, 'approve').detail).toContain(
-          `(na mãe #${PARENT})`,
+          `(na mãe #${PARENT} e na fatia #44)`,
         )
         const revised = await onSlice(
           repo,
@@ -4236,6 +4280,7 @@ describe.concurrent('scripts/gate.mjs', () => {
         repo: TempRepo,
         branch: string,
         fixture: (head: string) => GhFixture,
+        pathOverride?: string,
       ) => {
         await repo.git('switch', '-q', branch)
         const locals = (
@@ -4250,7 +4295,7 @@ describe.concurrent('scripts/gate.mjs', () => {
         for (const other of locals)
           if (other !== branch && other !== 'main')
             await repo.git('branch', '-q', '-D', other)
-        return ciOver(repo, fixture, { branch })
+        return ciOver(repo, fixture, { branch, pathOverride })
       }
 
       const sliceCi =
@@ -4308,7 +4353,7 @@ describe.concurrent('scripts/gate.mjs', () => {
           blocks: true,
         })
         expect(step(result, 'pr-base').detail).toBe(
-          `a PR aponta para main, mas as fatias de baixo ${BOTTOM}, ${MIDDLE} ainda não foram mergeadas em main: até lá, a base desta é a fatia logo abaixo (${MIDDLE}), com a PR em draft`,
+          `a PR aponta para main, mas as fatias de baixo ${BOTTOM}, ${MIDDLE} ainda não foram mergeadas em main (a sub-issue de cada uma fecha no merge): até lá, a base desta é a fatia logo abaixo (${MIDDLE}), com a PR em draft`,
         )
         expect(result.open).toBe(false)
       })
@@ -5344,13 +5389,167 @@ describe.concurrent('scripts/gate.mjs', () => {
         })
       })
 
+      // A missing ref, or one still at main, proves nothing about a slice
+      // below: its sub-issue closed, as its PR leaves it on merge, does.
+      test('refuses a slice on main while a slice below is open, whatever its ref shows', async ({
+        expect,
+        fresh,
+      }) => {
+        // The first slice published before its first commit.
+        const empty = await fresh()
+        await empty.git('switch', '-q', '-c', BOTTOM, 'main')
+        await empty.publish(BOTTOM)
+        await slice(
+          empty,
+          MIDDLE,
+          BOTTOM,
+          { 'src/meio.ts': 'x\n' },
+          { 'src/meio-2.ts': 'y\n' },
+        )
+        const early = await ciAt(empty, MIDDLE, sliceCi(MIDDLE))
+        expect(step(early.result, 'pr-base')).toMatchObject({
+          status: 'no',
+          blocks: true,
+        })
+        expect(step(early.result, 'pr-base').detail).toContain(
+          `a fatia de baixo ${BOTTOM} ainda não foi mergeada em main`,
+        )
+        // The first slice's ref deleted without a merge.
+        const gone = await fresh()
+        await slice(
+          gone,
+          BOTTOM,
+          'main',
+          { [STACK_INTENT]: '# Intent\n' },
+          { 'src/base.ts': '1\n' },
+        )
+        await slice(
+          gone,
+          MIDDLE,
+          'main',
+          { 'src/meio.ts': 'x\n' },
+          { 'src/meio-2.ts': 'y\n' },
+        )
+        await gone.git('update-ref', '-d', `refs/remotes/origin/${BOTTOM}`)
+        const deleted = await ciAt(gone, MIDDLE, sliceCi(MIDDLE))
+        expect(step(deleted.result, 'pr-base')).toMatchObject({ status: 'no' })
+        expect(step(deleted.result, 'pr-base').detail).toContain(BOTTOM)
+      })
+
+      // Reopening resets the Approve on any issue. A slice has no Approve of
+      // its own, so its acts count against its parent's, for this slice.
+      test('counts the slice’s own reopening, withdrawal and revision against the parent’s Approve', async ({
+        expect,
+        fresh,
+      }) => {
+        const repo = await stack(fresh)
+        const sliceEvents = [
+          labeled('enhancement', at('10:00')),
+          labeled('stack-slice', at('10:00')),
+        ]
+        const reopenedSlice = sliceAnswer(MIDDLE, {
+          events: [...sliceEvents, reopened(at('14:00'))],
+        })
+        const stale = await onSlice(repo, MIDDLE, reopenedSlice)
+        expect(step(stale.result, 'approve')).toMatchObject({
+          status: 'no',
+          blocks: true,
+          detail: `a fatia #44 foi reaberta em ${at('14:00')}, depois do Approve da mãe #${PARENT}: reabrir zera o Approve, e vale para ela um Approve novo na mãe, com ready-for-agent aplicada de novo`,
+        })
+        expect(stale.result.open).toBe(false)
+        const renewed = await onSlice(
+          repo,
+          MIDDLE,
+          reopenedSlice,
+          parentAnswer({
+            comments: [approve(), approve(at('15:00'))],
+            events: [
+              ...defaultEvents(),
+              labeled('ready-for-agent', at('15:05')),
+            ],
+          }),
+        )
+        expect(step(renewed.result, 'approve').status).toBe('ok')
+        for (const [name, body] of [
+          ['a withdrawal', '# Approve retirado\n\nPare esta fatia.'],
+          ['a revision', '# Plano\n\nOutra fatia.'],
+          ['a title naming Approve', '## Approve da fatia\n\nOk.'],
+        ]) {
+          const { result } = await onSlice(
+            repo,
+            MIDDLE,
+            sliceAnswer(MIDDLE, { comments: [comment(body, at('13:00'))] }),
+          )
+          expect(step(result, 'approve').status, name).toBe('no')
+          expect(step(result, 'approve').detail, name).toContain(
+            `(na mãe #${PARENT} e na fatia #44)`,
+          )
+        }
+        const edited = await onSlice(
+          repo,
+          MIDDLE,
+          sliceAnswer(MIDDLE, {
+            comments: [
+              comment('Nota.', at('11:00'), { lastEditedAt: at('13:00') }),
+            ],
+          }),
+        )
+        expect(step(edited.result, 'approve').status).toBe('no')
+        // An Approve written on the slice neither approves nor revokes.
+        const own = await onSlice(
+          repo,
+          MIDDLE,
+          sliceAnswer(MIDDLE, { comments: [approve(at('13:00'))] }),
+        )
+        expect(step(own.result, 'approve').status).toBe('ok')
+        const onlyOwn = await onSlice(
+          repo,
+          MIDDLE,
+          sliceAnswer(MIDDLE, { comments: [approve(at('13:00'))] }),
+          parentAnswer({ comments: [] }),
+        )
+        expect(step(onlyOwn.result, 'approve').status).toBe('no')
+      })
+
+      test('refuses a slice whose own commits git cannot walk', async ({
+        expect,
+        fresh,
+      }) => {
+        const repo = await stack(fresh)
+        await mergeIntoMain(repo, BOTTOM)
+        await repo.git('switch', '-q', MIDDLE)
+        await repo.commit(
+          { 'src/alheio.ts': 'x\n' },
+          'Trabalho de outra issue (Refs #99)',
+        )
+        await repo.publish(MIDDLE)
+        const { result } = await ciAt(
+          repo,
+          MIDDLE,
+          sliceCi(MIDDLE, {}, parentAfter([BOTTOM])),
+          await pathFailingFirstParentWalk(repo),
+        )
+        expect(step(result, 'stacked')).toMatchObject({
+          status: 'no',
+          blocks: true,
+        })
+        expect(step(result, 'stacked').detail).toContain(
+          'o git não conseguiu ler os commits próprios desta branch',
+        )
+        expect(result.open).toBe(false)
+      })
+
       test('lets a slice on main once the slices below are merged', async ({
         expect,
         fresh,
       }) => {
         const repo = await stack(fresh)
         await mergeIntoMain(repo, BOTTOM)
-        const { result } = await ciAt(repo, MIDDLE, sliceCi(MIDDLE))
+        const { result } = await ciAt(
+          repo,
+          MIDDLE,
+          sliceCi(MIDDLE, {}, parentAfter([BOTTOM])),
+        )
         expect(step(result, 'pr-base')).toMatchObject({ status: 'ok' })
         expect(result.blocked).toEqual([])
         expect(step(result, 'commits-cite-issue').detail).toBe(
@@ -5415,7 +5614,7 @@ describe.concurrent('scripts/gate.mjs', () => {
     const selection = (issueFields: string) =>
       `${header} { repository(owner: $owner, name: $name) { owner { login } issue(number: $number) { ${issueFields} } } }`
     const complete =
-      'state body lastEditedAt parent { number repository { nameWithOwner } } labels(first: 100) { totalCount nodes { name } } comments(last: 100) { totalCount nodes { body createdAt lastEditedAt author { __typename login } } } timelineItems(last: 100, itemTypes: [LABELED_EVENT, REOPENED_EVENT, COMMENT_DELETED_EVENT]) { totalCount nodes { __typename ... on LabeledEvent { createdAt actor { __typename login } label { name } } ... on ReopenedEvent { createdAt } ... on CommentDeletedEvent { createdAt } } } subIssues(first: 100) { totalCount nodes { number repository { nameWithOwner } labels(first: 100) { totalCount nodes { name } } } }'
+      'state body lastEditedAt parent { number repository { nameWithOwner } } labels(first: 100) { totalCount nodes { name } } comments(last: 100) { totalCount nodes { body createdAt lastEditedAt author { __typename login } } } timelineItems(last: 100, itemTypes: [LABELED_EVENT, REOPENED_EVENT, COMMENT_DELETED_EVENT]) { totalCount nodes { __typename ... on LabeledEvent { createdAt actor { __typename login } label { name } } ... on ReopenedEvent { createdAt } ... on CommentDeletedEvent { createdAt } } } subIssues(first: 100) { totalCount nodes { number state repository { nameWithOwner } labels(first: 100) { totalCount nodes { name } } } }'
 
     test('refuses a query that does not select lastEditedAt', async ({
       expect,
@@ -5599,14 +5798,20 @@ describe.concurrent('scripts/gate.mjs', () => {
       ],
       [
         'the sub-issues a Stack is checked against',
-        ' subIssues(first: ${page}) { totalCount nodes { number repository { nameWithOwner } labels(first: ${page}) { totalCount nodes { name } } } }',
+        ' subIssues(first: ${page}) { totalCount nodes { number state repository { nameWithOwner } labels(first: ${page}) { totalCount nodes { name } } } }',
         '',
         'repository.issue.subIssues',
       ],
       [
+        'the state of a sub-issue',
+        'nodes { number state repository',
+        'nodes { number repository',
+        'subIssues.nodes.state',
+      ],
+      [
         'the repository of a sub-issue',
-        'nodes { number repository { nameWithOwner } labels',
-        'nodes { number labels',
+        'number state repository { nameWithOwner } labels',
+        'number state labels',
         'subIssues.nodes.repository',
       ],
       [
