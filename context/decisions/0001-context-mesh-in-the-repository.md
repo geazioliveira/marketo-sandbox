@@ -67,8 +67,8 @@
 - [ADR 0002: Enforcement soft do loop no GitHub Free](0002-soft-enforcement-on-github-free.md), que diz como este loop é imposto sem branch protection
 - [Pattern: Ciclo de vida de issue e branch](../knowledge/patterns/issue-branch-lifecycle.md)
 - [Pattern: O gate do loop](../knowledge/patterns/loop-gate.md)
-- [Feature: Loop issue-first com gate e vínculo PR↔issue](../intent/feature-issue-first-loop.md), a fatia que colocou esta decisão em prática
-- A issue de acompanhamento #1, com as decisões do dono e as fatias #2 a #5
+- [Feature: Loop issue-first com gate e vínculo PR↔issue](../intent/feature-issue-first-loop.md), a sub-issue que colocou esta decisão em prática
+- A issue de acompanhamento #1, com as decisões do dono e as sub-issues #2 a #5
 
 ## Status
 

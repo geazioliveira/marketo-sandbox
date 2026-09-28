@@ -73,7 +73,7 @@ Uma mudança grande demais para uma PR vem numa stack de PRs pequenas, uma sobre
 
 ## Quando NÃO usar
 
-- A issue de acompanhamento (#1) não tem branch nem PR. Cada fatia dela é uma sub-issue com a própria branch.
+- A issue de acompanhamento (#1) não tem branch nem PR. Cada sub-issue dela tem a própria branch.
 - Um experimento local descartável, que nunca vira commit publicado. Se for para ficar, ele vira uma issue antes de virar uma branch.
 
 ## Decisões relacionadas
