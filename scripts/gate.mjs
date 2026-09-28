@@ -71,7 +71,9 @@ const changelogPath = 'context/evolution/changelog.md'
 // category label past the first page. 100 is the most one page may ask for.
 const page = 100
 
-const issueQuery = `query($owner: String!, $name: String!, $number: Int!) { repository(owner: $owner, name: $name) { owner { login } issue(number: $number) { number state body lastEditedAt parent { number repository { nameWithOwner } } labels(first: ${page}) { totalCount nodes { name } } comments(last: ${page}) { totalCount nodes { body createdAt lastEditedAt author { __typename login } } } timelineItems(last: ${page}, itemTypes: [LABELED_EVENT, REOPENED_EVENT, COMMENT_DELETED_EVENT]) { totalCount nodes { __typename ... on LabeledEvent { createdAt actor { __typename login } label { name } } ... on ReopenedEvent { createdAt } ... on CommentDeletedEvent { createdAt } } } } } }`
+// The sub-issues, each with its repository and labels, are read for a stack's
+// parent (#31): every branch its Stack names must be one of its slices.
+const issueQuery = `query($owner: String!, $name: String!, $number: Int!) { repository(owner: $owner, name: $name) { owner { login } issue(number: $number) { number state body lastEditedAt parent { number repository { nameWithOwner } } labels(first: ${page}) { totalCount nodes { name } } comments(last: ${page}) { totalCount nodes { body createdAt lastEditedAt author { __typename login } } } timelineItems(last: ${page}, itemTypes: [LABELED_EVENT, REOPENED_EVENT, COMMENT_DELETED_EVENT]) { totalCount nodes { __typename ... on LabeledEvent { createdAt actor { __typename login } label { name } } ... on ReopenedEvent { createdAt } ... on CommentDeletedEvent { createdAt } } } subIssues(first: ${page}) { totalCount nodes { number repository { nameWithOwner } labels(first: ${page}) { totalCount nodes { name } } } } } } }`
 
 // The reviews come newest last, so the last page holds the newest; a Copilot
 // review is told apart by its author's type and database id, which only a Bot
@@ -1034,6 +1036,65 @@ function main() {
           stack.problems.push(
             `a seção ${stackSection} cita ${ownBranch}, uma branch da própria mãe #${sliceOf}: a mãe não é fatia da stack dela`,
           )
+        // Every other branch the Stack names is a slice of this parent: a
+        // sub-issue of it, in this repository, with the slice label. Else a
+        // branch from outside the stack would pass for a slice below this one,
+        // taken as its base and kept out of its own commits, or for a slice
+        // above, exempt from stacked. The sub-issues and their labels are
+        // read whole, or the Stack is not judged.
+        const subs = planIssue.subIssues
+        const subNodes = Array.isArray(subs?.nodes) ? subs.nodes : []
+        if (!(
+          Number.isInteger(subs?.totalCount) &&
+          subs.totalCount <= subNodes.length
+        ))
+          stack.problems.push(
+            Number.isInteger(subs?.totalCount)
+              ? `a mãe #${sliceOf} tem ${subs.totalCount} sub-issues e o gate leu ${subNodes.length}: ele não julga a seção ${stackSection} sem ler todas`
+              : `o GitHub não disse quantas sub-issues a mãe #${sliceOf} tem, e o gate não julga a seção ${stackSection} sem saber se leu todas (leu ${subNodes.length})`,
+          )
+        else {
+          const here = String(facts.repo).toLowerCase()
+          const slices = new Map()
+          for (const node of subNodes) {
+            if (
+              String(node?.repository?.nameWithOwner ?? '').toLowerCase() !==
+              here
+            )
+              continue
+            const names = (node?.labels?.nodes ?? []).map(
+              (label) => label?.name,
+            )
+            const whole =
+              Number.isInteger(node?.labels?.totalCount) &&
+              node.labels.totalCount <= names.length
+            slices.set(
+              node.number,
+              !whole
+                ? 'unread'
+                : names.includes(stackSliceLabel)
+                  ? 'slice'
+                  : 'other',
+            )
+          }
+          for (const listed of stack.branches) {
+            const listedIssue = parseBranch(listed)?.issue
+            if (listedIssue === sliceOf) continue
+            const found = slices.get(listedIssue)
+            if (found === undefined)
+              stack.problems.push(
+                `a seção ${stackSection} cita ${listed}, mas a #${listedIssue} não é sub-issue da mãe #${sliceOf} neste repositório: toda branch da ${stackSection} é de uma fatia da mãe`,
+              )
+            else if (found === 'other')
+              stack.problems.push(
+                `a seção ${stackSection} cita ${listed}, mas a #${listedIssue} não tem a label ${stackSliceLabel}: toda branch da ${stackSection} é de uma fatia da mãe`,
+              )
+            else if (found === 'unread')
+              stack.problems.push(
+                `a seção ${stackSection} cita ${listed}, e as labels da #${listedIssue} não foram lidas inteiras: o gate não sabe se ela é uma fatia da mãe #${sliceOf}`,
+              )
+          }
+        }
         const position =
           stack.problems.length === 0
             ? slicePosition(stack.branches, branch)

@@ -167,6 +167,17 @@ interface IssueOptions {
   events?: object[]
   commentsTotal?: number
   eventsTotal?: number
+  /** A stack parent's sub-issues (#31): slices of this repository unless a case says otherwise. */
+  subIssues?: SubIssue[]
+  /** The sub-issues' totalCount; defaults to their number. */
+  subIssuesTotal?: number
+}
+
+interface SubIssue {
+  number: number
+  repo?: string
+  labels?: string[]
+  labelsTotal?: number
 }
 
 function issueAnswer(options: IssueOptions = {}): GhAnswer {
@@ -213,6 +224,30 @@ function issueAnswer(options: IssueOptions = {}): GhAnswer {
             totalCount: options.eventsTotal ?? events.length,
             nodes: events,
           },
+          ...(options.subIssues === undefined
+            ? {}
+            : {
+                subIssues: {
+                  totalCount:
+                    options.subIssuesTotal ?? options.subIssues.length,
+                  nodes: options.subIssues.map((child) => {
+                    const childLabels = child.labels ?? [
+                      'enhancement',
+                      'stack-slice',
+                    ]
+                    return {
+                      number: child.number,
+                      repository: {
+                        nameWithOwner: child.repo ?? `${OWNER}/${NAME}`,
+                      },
+                      labels: {
+                        totalCount: child.labelsTotal ?? childLabels.length,
+                        nodes: childLabels.map((name) => ({ name })),
+                      },
+                    }
+                  }),
+                },
+              }),
         },
       },
     },
@@ -3586,8 +3621,14 @@ describe.concurrent('scripts/gate.mjs', () => {
           .map((branch, i) => `${i + 1}. \`${branch}\``)
           .join('\n')}\n`
 
+      /** The parent: its plan with the Stack, and the three slices as its sub-issues. */
       const parentAnswer = (options: IssueOptions = {}) =>
-        issueAnswer({ number: PARENT, body: parentBody(), ...options })
+        issueAnswer({
+          number: PARENT,
+          body: parentBody(),
+          subIssues: SLICES.map((branch) => ({ number: numberOf(branch) })),
+          ...options,
+        })
 
       /** A slice's sub-issue: its category and the slice label, no state label, no plan of its own. */
       const sliceAnswer = (branch: string, options: IssueOptions = {}) =>
@@ -4892,25 +4933,124 @@ describe.concurrent('scripts/gate.mjs', () => {
         fresh,
       }) => {
         const repo = await stack(fresh)
+        const slicesOf50 = SLICES.map((branch) => ({
+          number: numberOf(branch),
+        }))
         const other = await onSlice(
           repo,
           MIDDLE,
           sliceAnswer(MIDDLE, { parent: 50 }),
-          issueAnswer({ number: 50, body: parentBody([BOTTOM, TOP]) }),
+          issueAnswer({
+            number: 50,
+            body: parentBody([BOTTOM, TOP]),
+            subIssues: slicesOf50,
+          }),
         )
         expect(step(other.result, 'branch-in-plan')).toMatchObject({
           status: 'no',
         })
+        expect(step(other.result, 'branch-in-plan').detail).toContain(
+          `não cita a branch ${MIDDLE}`,
+        )
         const listed = await onSlice(
           repo,
           MIDDLE,
           sliceAnswer(MIDDLE, { parent: 50 }),
-          issueAnswer({ number: 50, body: parentBody() }),
+          issueAnswer({
+            number: 50,
+            body: parentBody(),
+            subIssues: slicesOf50,
+          }),
         )
         expect(step(listed.result, 'branch-in-plan').detail).toContain(
           'mãe #50',
         )
         expect(listed.result.open).toBe(true)
+      })
+
+      // A branch the Stack names below this slice is taken as its base and
+      // kept out of its own commits, so it must be a slice of this parent.
+      test('refuses a Stack that names a branch outside the parent’s slices, and the base that branch would give', async ({
+        expect,
+        fresh,
+      }) => {
+        const repo = await stack(fresh)
+        // A branch of another issue, where the slice below would be.
+        await repo.git('branch', '-q', 'feature/99-alheia', BOTTOM)
+        await repo.publish('feature/99-alheia')
+        const outsider = parentAnswer({
+          body: parentBody(['feature/99-alheia', MIDDLE, TOP]),
+          subIssues: [MIDDLE, TOP].map((branch) => ({
+            number: numberOf(branch),
+          })),
+        })
+        const { result } = await ciOnSlice(
+          repo,
+          MIDDLE,
+          (head) =>
+            slicePr(head, MIDDLE, {
+              baseRefName: 'feature/99-alheia',
+              isDraft: true,
+            }),
+          outsider,
+        )
+        expect(step(result, 'branch-in-plan')).toMatchObject({
+          status: 'no',
+          blocks: true,
+        })
+        expect(step(result, 'branch-in-plan').detail).toContain(
+          `a seção Stack cita feature/99-alheia, mas a #99 não é sub-issue da mãe #${PARENT} neste repositório: toda branch da Stack é de uma fatia da mãe`,
+        )
+        expect(step(result, 'pr-base')).toMatchObject({ status: 'no' })
+        expect(result.blocked).toEqual(
+          expect.arrayContaining(['branch-in-plan', 'pr-base']),
+        )
+      })
+
+      test('refuses a Stack whose branches are not all slices of the parent, read whole', async ({
+        expect,
+        fresh,
+      }) => {
+        const repo = await stack(fresh)
+        const rest = [{ number: 44 }, { number: 45 }]
+        const cases: [string, IssueOptions, string][] = [
+          [
+            'a sub-issue without the slice label',
+            {
+              subIssues: [
+                { number: 43, labels: ['enhancement', 'ready-for-agent'] },
+                ...rest,
+              ],
+            },
+            `a seção Stack cita ${BOTTOM}, mas a #43 não tem a label stack-slice`,
+          ],
+          [
+            'a sub-issue in another repository',
+            { subIssues: [{ number: 43, repo: 'alguem/outro' }, ...rest] },
+            `a seção Stack cita ${BOTTOM}, mas a #43 não é sub-issue da mãe #${PARENT} neste repositório`,
+          ],
+          [
+            'a sub-issue whose labels were read in part',
+            { subIssues: [{ number: 43, labelsTotal: 101 }, ...rest] },
+            `a seção Stack cita ${BOTTOM}, e as labels da #43 não foram lidas inteiras`,
+          ],
+          [
+            'more sub-issues than one page',
+            { subIssuesTotal: 101 },
+            `a mãe #${PARENT} tem 101 sub-issues e o gate leu 3: ele não julga a seção Stack sem ler todas`,
+          ],
+        ]
+        for (const [name, options, problem] of cases) {
+          const { result } = await onSlice(
+            repo,
+            MIDDLE,
+            sliceAnswer(MIDDLE),
+            parentAnswer(options),
+          )
+          expect(step(result, 'branch-in-plan').status, name).toBe('no')
+          expect(step(result, 'branch-in-plan').detail, name).toContain(problem)
+          expect(result.open, name).toBe(false)
+        }
       })
 
       test('turns the slice below red when a slice above is merged into it', async ({
@@ -5158,7 +5298,7 @@ describe.concurrent('scripts/gate.mjs', () => {
     const selection = (issueFields: string) =>
       `${header} { repository(owner: $owner, name: $name) { owner { login } issue(number: $number) { ${issueFields} } } }`
     const complete =
-      'state body lastEditedAt parent { number repository { nameWithOwner } } labels(first: 100) { totalCount nodes { name } } comments(last: 100) { totalCount nodes { body createdAt lastEditedAt author { __typename login } } } timelineItems(last: 100, itemTypes: [LABELED_EVENT, REOPENED_EVENT, COMMENT_DELETED_EVENT]) { totalCount nodes { __typename ... on LabeledEvent { createdAt actor { __typename login } label { name } } ... on ReopenedEvent { createdAt } ... on CommentDeletedEvent { createdAt } } }'
+      'state body lastEditedAt parent { number repository { nameWithOwner } } labels(first: 100) { totalCount nodes { name } } comments(last: 100) { totalCount nodes { body createdAt lastEditedAt author { __typename login } } } timelineItems(last: 100, itemTypes: [LABELED_EVENT, REOPENED_EVENT, COMMENT_DELETED_EVENT]) { totalCount nodes { __typename ... on LabeledEvent { createdAt actor { __typename login } label { name } } ... on ReopenedEvent { createdAt } ... on CommentDeletedEvent { createdAt } } } subIssues(first: 100) { totalCount nodes { number repository { nameWithOwner } labels(first: 100) { totalCount nodes { name } } } }'
 
     test('refuses a query that does not select lastEditedAt', async ({
       expect,
@@ -5339,6 +5479,24 @@ describe.concurrent('scripts/gate.mjs', () => {
         'labels(first: ${page})',
         'labels',
         'repository.issue.labels deve pedir first ou last',
+      ],
+      [
+        'the sub-issues a Stack is checked against',
+        ' subIssues(first: ${page}) { totalCount nodes { number repository { nameWithOwner } labels(first: ${page}) { totalCount nodes { name } } } }',
+        '',
+        'repository.issue.subIssues',
+      ],
+      [
+        'the repository of a sub-issue',
+        'nodes { number repository { nameWithOwner } labels',
+        'nodes { number labels',
+        'subIssues.nodes.repository',
+      ],
+      [
+        'the labels of a sub-issue',
+        ' labels(first: ${page}) { totalCount nodes { name } } } } } } }',
+        ' } } } } }',
+        'subIssues.nodes.labels',
       ],
     ] as const)(
       'refuses the issue query without %s',

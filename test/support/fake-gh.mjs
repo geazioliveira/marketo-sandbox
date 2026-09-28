@@ -45,6 +45,10 @@ const required = {
       ... on ReopenedEvent { createdAt }
       ... on CommentDeletedEvent { createdAt }
     } }
+    subIssues { totalCount nodes {
+      number repository { nameWithOwner }
+      labels { totalCount nodes { name } }
+    } }
   } } }`,
   pr: `{ repository { pullRequest {
     baseRefName headRefName headRefOid isDraft body
