@@ -490,6 +490,26 @@ async function ciOver(
  * when the piece is not there, so a reworded query fails the case loudly
  * instead of mutating nothing and passing.
  */
+/**
+ * A PATH whose git fails `git merge-base <a> <sha>` with exit 128, the way a
+ * damaged object or a shallow history makes it fail, and runs the real git
+ * for anything else: a comparison git cannot make, on one commit only.
+ */
+async function pathFailingMergeBase(
+  repo: TempRepo,
+  sha: string,
+): Promise<string> {
+  const realGit = (await exec('sh', ['-c', 'command -v git'])).stdout.trim()
+  const dir = path.join(repo.bin, '..', 'git-sem-merge-base')
+  mkdirSync(dir, { recursive: true })
+  writeFileSync(
+    path.join(dir, 'git'),
+    `#!/bin/sh\nif [ "$1" = merge-base ] && [ "$2" != --is-ancestor ] && [ "$3" = ${sha} ]; then\n  echo "fatal: simulado" >&2\n  exit 128\nfi\nexec ${JSON.stringify(realGit)} "$@"\n`,
+    { mode: 0o755 },
+  )
+  return [dir, repo.bin, process.env.PATH ?? ''].join(path.delimiter)
+}
+
 function mutate(script: string, from: string, to: string): void {
   const text = readFileSync(script, 'utf8')
   if (!text.includes(from)) throw new Error(`mutação sem alvo: ${from}`)
@@ -1923,6 +1943,38 @@ describe.concurrent('scripts/gate.mjs', () => {
       const ci = await ciOver(repo, passingCi)
       expect(step(ci.result, 'stacked').status).toBe('no')
       expect(ci.status).toBe(1)
+    })
+
+    // `git merge-base` exits 1 when two histories share no commit, and 128
+    // when it cannot compare them. Only the first says the ref shares nothing.
+    test('refuses a ref git cannot compare with HEAD, and takes one with no common commit as unrelated', async ({
+      expect,
+      fresh,
+    }) => {
+      const repo = await fresh()
+      await repo.git('switch', '-q', '-c', 'feature/41-other', 'main')
+      await repo.commit({ 'src/other.ts': 'x\n' }, 'Build (Refs #41)')
+      await repo.publish('feature/41-other')
+      const other = await repo.git('rev-parse', 'feature/41-other')
+      await repo.git('switch', '-q', '--orphan', 'feature/46-orfa')
+      await repo.commit({ 'orfa.txt': 'x\n' }, 'Outra história (Refs #46)')
+      await repo.publish('feature/46-orfa')
+      await repo.git('switch', '-q', '-c', BRANCH, 'main')
+      await repo.commit({ [INTENT]: '# Intent\n' }, 'Intent (Refs #42)')
+      const unrelated = await judge(repo)
+      expect(step(unrelated.result, 'stacked')).toMatchObject({ status: 'ok' })
+      const failing = await repo.gateJson([], {
+        fixture: { issue: issueAnswer() },
+        pathOverride: await pathFailingMergeBase(repo, other),
+      })
+      expect(step(failing.result, 'stacked')).toMatchObject({
+        status: 'no',
+        blocks: true,
+      })
+      expect(step(failing.result, 'stacked').detail).toContain(
+        'o git não conseguiu comparar feature/41-other, origin/feature/41-other com o HEAD',
+      )
+      expect(failing.result.open).toBe(false)
     })
 
     test('names a rebase when the merge brought in this branch’s own published copy', async ({
@@ -4424,6 +4476,34 @@ describe.concurrent('scripts/gate.mjs', () => {
         expect(step(result, 'commits-cite-issue').detail).toBe(
           '3 commit(s) próprio(s), todos citam #44',
         )
+      })
+
+      test('refuses a slice above that git cannot compare with this one, instead of exempting it', async ({
+        expect,
+        fresh,
+      }) => {
+        const repo = await stack(fresh)
+        // The slice above has not merged this slice's latest commit yet, so
+        // only a comparison with it could exempt it.
+        await repo.git('switch', '-q', MIDDLE)
+        await repo.commit(
+          { 'src/meio-3.ts': 'z\n' },
+          'Corrige a fatia do meio (Refs #44)',
+        )
+        await repo.publish(MIDDLE)
+        const top = await repo.git('rev-parse', TOP)
+        const { result } = await repo.gateJson([], {
+          fixture: { issue: sliceAnswer(MIDDLE), parent: parentAnswer() },
+          pathOverride: await pathFailingMergeBase(repo, top),
+        })
+        expect(step(result, 'stacked')).toMatchObject({
+          status: 'no',
+          blocks: true,
+        })
+        expect(step(result, 'stacked').detail).toContain(
+          `o git não conseguiu comparar ${TOP}, origin/${TOP} com o HEAD`,
+        )
+        expect(result.open).toBe(false)
       })
 
       test('keeps the slices in place when a note before or after the list names another branch', async ({

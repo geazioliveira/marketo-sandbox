@@ -151,6 +151,17 @@ function gitOut(...args) {
 const isAncestor = (older, newer) =>
   git('merge-base', '--is-ancestor', older, newer).status === 0
 
+/**
+ * The best common ancestor of two commits: its sha, false when git says they
+ * share no commit (exit 1, nothing printed), or null when git failed. A
+ * failure is no proof that two histories share nothing.
+ */
+function mergeBase(a, b) {
+  const run = git('merge-base', a, b)
+  if (run.ok) return run.out.trim()
+  return run.status === 1 && run.out.trim() === '' ? false : null
+}
+
 const hexSha = /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/
 
 /**
@@ -1509,6 +1520,8 @@ function main() {
       `refs/remotes/origin/${branch}`,
     ])
     const sharing = []
+    // Refs git could not compare with HEAD (mergeBase): they block.
+    const unread = []
     const shaOf = new Map()
     // A slice of a stack (#31) shares history with the slices below it, by
     // design: their refs are not foreign, and their commits are not this
@@ -1539,9 +1552,11 @@ function main() {
     const lowerRefs = candidates
       .map(({ ref }) => ref)
       .filter((ref) => stackRef(ref) && stackLower.has(refName(ref)))
+    // An exemption needs proof: when git cannot compare the two, or they
+    // share no commit, the ref is judged below like any other.
     const cutFromHere = (sha) => {
-      const shared = gitOut('merge-base', facts.headSha, sha)
-      if (shared === null) return true
+      const shared = mergeBase(facts.headSha, sha)
+      if (typeof shared !== 'string') return false
       const sharedOwn = commitsIn([
         shared,
         `^${originMain}`,
@@ -1571,8 +1586,14 @@ function main() {
         headCitesIssue()
       )
         continue
-      const shared = gitOut('merge-base', facts.headSha, sha)
-      if (shared === null || isAncestor(shared, originMain)) continue
+      const shared = mergeBase(facts.headSha, sha)
+      // git failing to compare the two is no proof that they share nothing:
+      // the ref stays unread, and blocks.
+      if (shared === null) {
+        unread.push(ref)
+        continue
+      }
+      if (shared === false || isAncestor(shared, originMain)) continue
       const below = commitsIn([shared, `^${originMain}`])
       if (
         !sameIssue &&
@@ -1667,6 +1688,11 @@ function main() {
         ? `a outra branch da #${number}, ${name}, tem commits que esta não tem: fique com uma só, traga para ela o trabalho da outra, e só então apague a outra (git branch -d recusa apagar trabalho não mergeado)`
         : `apague a outra branch da #${number} com ${deleteCommands(name)}`
     const stackProblems = [
+      ...(unread.length > 0
+        ? [
+            `o git não conseguiu comparar ${unread.map(shortRef).join(', ')} com o HEAD: o gate não sabe se compartilham commits que origin/${trunk} não tem`,
+          ]
+        : []),
       ...(foreign.length > 0
         ? [
             `compartilha commits que origin/${trunk} não tem com ${foreign.map(shortRef).join(', ')}`,
