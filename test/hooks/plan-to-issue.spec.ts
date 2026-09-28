@@ -2105,6 +2105,76 @@ describe.concurrent(
       ).toBe(false)
     })
 
+    test.for([
+      ['another repository', 'https://github.com/alguem/outro.git'],
+      [
+        'this project on another host',
+        'https://gitlab.com/geazioliveira/marketo-sandbox.git',
+      ],
+      ['missing', null],
+    ] as const)(
+      'touches nothing in a repository whose origin is %s, and tells Claude through exit 2 (Copilot review of #54)',
+      async ([, origin], { fresh, scratch, expect }) => {
+        const script = brokenTree(scratch())
+        const repo = await fresh({ origin, cache: true })
+        const before = readdirSync(repo.gitDir).sort()
+        const run = await runBroken(script, repo, {
+          session_id: SESSION,
+          tool_name: 'ExitPlanMode',
+          tool_input: { plan: planComment },
+        })
+        expect(run.status).toBe(2)
+        expect(run.stderr).toContain('não fica neste projeto')
+        expect(run.stderr).toContain(
+          'o hook não grava o marcador do plano nem remove o cache do gate',
+        )
+        expect(readdirSync(repo.gitDir).sort()).toEqual(before)
+        expect(cacheExists(repo)).toBe(true)
+      },
+    )
+
+    test.for([
+      ['over SSH', 'git@github.com:geazioliveira/marketo-sandbox.git'],
+      ['in another case', 'https://github.com/GeaziOliveira/Marketo-Sandbox'],
+    ] as const)(
+      'marks the plan when this project’s origin is written %s',
+      async ([, origin], { fresh, scratch, expect }) => {
+        const script = brokenTree(scratch())
+        const repo = await fresh({ origin })
+        const run = await runBroken(script, repo, {
+          session_id: SESSION,
+          tool_name: 'ExitPlanMode',
+          tool_input: { plan: planComment },
+        })
+        expect(run.status).toBe(2)
+        expect(existsSync(repo.markerPath(SESSION))).toBe(true)
+      },
+    )
+
+    test('keeps failing closed when the origin cannot be read', async ({
+      fresh,
+      scratch,
+      expect,
+    }) => {
+      // Two URLs on the origin: which one gh would use is not read, so the
+      // plan is marked as in this project.
+      const script = brokenTree(scratch())
+      const repo = await fresh()
+      await repo.git(
+        'config',
+        '--add',
+        'remote.origin.url',
+        'https://github.com/alguem/outro.git',
+      )
+      const run = await runBroken(script, repo, {
+        session_id: SESSION,
+        tool_name: 'ExitPlanMode',
+        tool_input: { plan: planComment },
+      })
+      expect(run.status).toBe(2)
+      expect(existsSync(repo.markerPath(SESSION))).toBe(true)
+    })
+
     test('names the marker as planPendingFile does, for any session id', async ({
       fresh,
       scratch,

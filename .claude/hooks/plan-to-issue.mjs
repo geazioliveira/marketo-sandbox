@@ -66,8 +66,20 @@
 // may be built. The input is read here, before the libraries load, so the
 // fallback has it whatever failed. On a publication, a failure never
 // removes the marker: the fallback touches nothing there and says so.
+//
+// The fallback writes only in this project (Copilot review of #54): before
+// the marker, it reads the origin from the repository's config file, and in
+// a repository whose origin is another one, or that has none, it touches
+// nothing, as the library would not. An origin it cannot read keeps it
+// failing closed.
 import { spawnSync } from 'node:child_process'
-import { readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import {
+  readdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs'
 import path from 'node:path'
 
 /**
@@ -99,6 +111,58 @@ function fallbackMarkerName(sessionId) {
  * test/hooks/plan-to-issue.spec.ts holds the two equal.
  */
 const gateCacheName = 'loop-gate.json'
+
+/**
+ * lib/repo.mjs' projectRepo, for when that module failed to load;
+ * test/hooks/plan-to-issue.spec.ts holds the two equal, by the fallback
+ * marking a plan in this project's repository and in no other.
+ */
+const projectName = 'geazioliveira/marketo-sandbox'
+
+/**
+ * The repository the origin names in the config file of the common git dir,
+ * read with nothing but Node's own, the way lib/repo.mjs' repoFromRemote
+ * reads a URL: `{ known: true, repo }`, with `repo` the lowercased
+ * `owner/name` on github.com, or null when there is no origin or it is on
+ * another host; `{ known: false }` when the file cannot be read or the
+ * origin has more than one URL. Includes and `insteadOf` are not followed:
+ * this only tells a repository that is plainly another one.
+ */
+function fallbackOrigin(commonDir) {
+  let text
+  try {
+    text = readFileSync(path.join(commonDir, 'config'), 'utf8')
+  } catch {
+    return { known: false }
+  }
+  const urls = new Set()
+  let inOrigin = false
+  for (const raw of text.split(/\r?\n/)) {
+    const line = raw.trim()
+    const header =
+      /^\[\s*([A-Za-z0-9.-]+)(?:\s+"((?:[^"\\]|\\.)*)")?\s*\]/.exec(line)
+    if (header !== null) {
+      const section = header[1].toLowerCase()
+      inOrigin =
+        (section === 'remote' && header[2] === 'origin') ||
+        (header[2] === undefined && section === 'remote.origin')
+      continue
+    }
+    if (!inOrigin) continue
+    const entry = /^url\s*=\s*(.*)$/i.exec(line)
+    if (entry !== null) urls.add(entry[1].trim().replace(/^"(.*)"$/, '$1'))
+  }
+  if (urls.size > 1) return { known: false }
+  if (urls.size === 0) return { known: true, repo: null }
+  const matched =
+    /^(?:https?:\/\/(?:[^@/]+@)?github\.com\/|git@github\.com:|ssh:\/\/git@github\.com(?::\d+)?\/)([A-Za-z0-9-]+)\/([A-Za-z0-9._-]+?)(?:\.git)?\/?$/i.exec(
+      [...urls][0],
+    )
+  return {
+    known: true,
+    repo: matched ? `${matched[1]}/${matched[2]}`.toLowerCase() : null,
+  }
+}
 
 /** The fallback's git bound when no budget holds one (the libraries did not load). */
 const fallbackGitMs = 10_000
@@ -236,6 +300,13 @@ function failClosed(input, { stage, why, gitMs }) {
     return found.notRepo
       ? `${head}. ${cwd} não fica num repositório git: não há marcador de plano a gravar nem cache do gate a remover. Avise o dono.\n`
       : `${head}. Nada foi gravado: não achei o diretório do git de ${cwd} (${found.reason}), então nem o marcador do plano aceito foi gravado nem o cache do gate foi removido, e o gate pode continuar aberto para um plano que o dono não viu. Não construa: ${publishPlan}. Avise o dono.\n`
+  const origin = fallbackOrigin(found.dir)
+  if (origin.known && origin.repo !== projectName)
+    return `${head}. ${cwd} não fica neste projeto (${
+      origin.repo === null
+        ? 'o repositório não tem um origin no github.com'
+        : `o origin é ${origin.repo}`
+    }): o hook não grava o marcador do plano nem remove o cache do gate de outro repositório. Avise o dono.\n`
   const plan =
     typeof input.tool_input?.plan === 'string'
       ? input.tool_input.plan
