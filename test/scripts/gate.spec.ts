@@ -4478,6 +4478,43 @@ describe.concurrent('scripts/gate.mjs', () => {
         )
       })
 
+      // A slice above is exempt only when it was cut from this one: it holds
+      // at least one of this slice's commits. Sharing only origin/main and the
+      // slices below proves nothing, and an empty list must not pass for one.
+      test('refuses a slice above cut from the slice below instead of this one, and lets one cut from main pass', async ({
+        expect,
+        fresh,
+      }) => {
+        const repo = await stack(fresh)
+        const recutTop = async (from: string) => {
+          await repo.git('switch', '-q', MIDDLE)
+          await repo.git('branch', '-f', TOP, from)
+          await repo.git('switch', '-q', TOP)
+          await repo.commit({ 'src/topo.ts': 'y\n' }, 'Topo (Refs #45)')
+          await repo.publish(TOP)
+        }
+        await recutTop(BOTTOM)
+        const below = await onSlice(repo, MIDDLE)
+        expect(step(below.result, 'stacked')).toMatchObject({
+          status: 'no',
+          blocks: true,
+        })
+        expect(step(below.result, 'stacked').detail).toContain(
+          `compartilha commits que origin/main não tem com ${TOP}, origin/${TOP}`,
+        )
+        expect(step(below.result, 'stacked').detail).toContain(
+          `a fatia de cima ${TOP} não foi cortada desta: traga esta fatia para ela (git merge origin/${MIDDLE}) ou corte-a de novo a partir desta`,
+        )
+        expect(step(below.result, 'stacked').detail).not.toContain(
+          'corte a branch de origin/main',
+        )
+        // Cut from main, it shares nothing with this slice: nothing to
+        // exempt, and nothing to refuse.
+        await recutTop('main')
+        const main = await onSlice(repo, MIDDLE)
+        expect(step(main.result, 'stacked')).toMatchObject({ status: 'ok' })
+      })
+
       test('refuses a slice above that git cannot compare with this one, instead of exempting it', async ({
         expect,
         fresh,

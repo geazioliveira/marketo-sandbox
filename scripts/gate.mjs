@@ -1552,8 +1552,11 @@ function main() {
     const lowerRefs = candidates
       .map(({ ref }) => ref)
       .filter((ref) => stackRef(ref) && stackLower.has(refName(ref)))
-    // An exemption needs proof: when git cannot compare the two, or they
-    // share no commit, the ref is judged below like any other.
+    // An exemption needs proof that the ref was cut from this slice: a
+    // merge-base git can find, and below it at least one commit of this
+    // slice's own, each citing its issue. A ref that shares only origin/main
+    // and the slices below was cut from them, not from this one, and one git
+    // cannot compare proves nothing: both are judged below like any other.
     const cutFromHere = (sha) => {
       const shared = mergeBase(facts.headSha, sha)
       if (typeof shared !== 'string') return false
@@ -1562,12 +1565,9 @@ function main() {
         `^${originMain}`,
         ...lowerRefs.map((ref) => `^${ref}`),
       ])
-      return (
-        sharedOwn !== null &&
-        sharedOwn
-          .filter((commit) => commit.parents.length <= 1)
-          .every((commit) => cites.test(commit.message))
-      )
+      if (sharedOwn === null) return false
+      const own = sharedOwn.filter((commit) => commit.parents.length <= 1)
+      return own.length > 0 && own.every((commit) => cites.test(commit.message))
     }
     for (const { sha, ref } of candidates) {
       if (ref.endsWith('/HEAD') || ref === originTrunk || ownRefs.has(ref))
@@ -1658,6 +1658,12 @@ function main() {
         parseBranch(refName(ref))?.issue === number,
     )
     const foreign = sharing.filter((ref) => !ofThisIssue.includes(ref))
+    // A slice above that shares history with this one but was not cut from
+    // it (cutFromHere) is fixed on its own branch, not by recutting this one.
+    const upperNotCut = foreign.filter(
+      (ref) => stackRef(ref) && stackUpper.has(refName(ref)),
+    )
+    const upperNames = [...new Set(upperNotCut.map(refName))]
     const otherNames = [...new Set(ofThisIssue.map(refName))]
     // A name whose refs HEAD all contains holds nothing HEAD lacks, so
     // deleting it loses nothing, and `git branch -d` agrees. Any other holds
@@ -1712,11 +1718,16 @@ function main() {
     ]
     // Another branch of #N carries its own remedy above; a recut is for
     // anything else, and a rebase for a merge of this branch's own copy.
-    const remedy = ownCopyMerge
+    const recut = ownCopyMerge
       ? 'o merge trouxe a cópia publicada desta própria branch: desfaça-o e traga essa cópia com git pull --rebase (ou --ff-only)'
-      : foreign.length > 0 || foreignMerges.length > 0
+      : foreign.length > upperNotCut.length || foreignMerges.length > 0
         ? `corte a branch de origin/${trunk} atualizado e traga para ela só o origin/${trunk}`
         : null
+    const upperRemedy =
+      upperNames.length > 0
+        ? `${upperNames.length === 1 ? `a fatia de cima ${upperNames[0]} não foi cortada` : `as fatias de cima ${upperNames.join(', ')} não foram cortadas`} desta: traga esta fatia para ela (git merge origin/${branch}) ou corte-a de novo a partir desta`
+        : null
+    const remedies = [recut, upperRemedy].filter((text) => text !== null)
     set(
       'stacked',
       stackProblems.length === 0 ? 'ok' : 'no',
@@ -1724,7 +1735,7 @@ function main() {
         ? slice === null
           ? `nenhuma outra ref compartilha commits que origin/${trunk} não tem, e nenhum merge traz commits de fora dele`
           : `nenhuma ref de fora da stack da #${slice.parent} compartilha commits que origin/${trunk} não tem, e nenhum merge traz commits de fora dele e das fatias de baixo${lowerRefs.length > 0 ? `; as fatias de baixo (${lowerRefs.map(shortRef).join(', ')}) ficam fora dos commits próprios` : ''}`
-        : [...stackProblems, ...(remedy === null ? [] : [remedy])].join('; '),
+        : [...stackProblems, ...remedies].join('; '),
       { blocks: true },
     )
 
