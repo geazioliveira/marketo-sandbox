@@ -77,16 +77,16 @@ Os mesmos do plano vigente, o `# Plano` de 2026-09-28 na #5.
 
 O código vem da branch `feature/5-hooks-claude-code` (`9377db6`), que passou pelas dez revisões da PR #26. Ele é portado para o `main` de hoje sem ser reescrito, uma fatia por módulo, na ordem do grafo de imports:
 
-1. `feature/34-hooks-base`: este intent, o contrato do plano pendente (`planPendingFile` e o `pendingPlan` do `gateStatus()`), `lib/io.mjs`, `lib/budget.mjs`, `lib/repo.mjs`, `run.sh`, o README dos hooks, o `lint` e o `format` cobrindo `.claude/hooks/` e o suporte de teste;
+1. `feature/34-hooks-base`: este intent, o contrato do plano pendente (`planPendingFile` e o `pendingPlan` do `gateStatus()`), `lib/io.mjs`, `lib/budget.mjs`, `lib/repo.mjs`, `run.sh`, o `lint` e o `format` cobrindo `.claude/hooks/` e o suporte de teste;
 2. `feature/35-hooks-shell`: o parser de shell;
 3. `feature/36-hooks-build-guard`: `lib/edit-gate.mjs` e `build-guard.mjs`;
 4. `feature/37-hooks-git-rules`: as regras de git;
 5. `feature/38-hooks-gh-rules`: as regras do `gh`;
 6. `feature/39-hooks-guard-bash`: o `guard-bash`;
 7. `feature/40-hooks-plan-to-issue`: `lib/plan-publication.mjs`, `plan-to-issue.mjs` e `session-context.mjs`;
-8. `feature/41-hooks-settings`: as docs no presente, os limites na ADR 0002, o Learn e, por último, o `.claude/settings.json`, que liga os hooks, e as sondas.
+8. `feature/41-hooks-settings`: as docs no presente, o README dos hooks inclusive, os limites na ADR 0002, o Learn e, por último, o `.claude/settings.json`, que liga os hooks, e as sondas.
 
-Os comentários dos scripts falam dos hooks no futuro até a última fatia, como o bloco de drift exige, e passam ao presente com as docs.
+Os comentários dos scripts falam dos hooks no futuro até a última fatia, como o bloco de drift exige, e passam ao presente com as docs. O README dos hooks, que o plano pôs na fatia 1, vai na 8 pelo mesmo motivo: ele descreve os quatro hooks como estão.
 
 ## Perguntas em aberto
 
