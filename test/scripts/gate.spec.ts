@@ -4556,6 +4556,7 @@ describe.concurrent('scripts/gate.mjs', () => {
           failing('auth', PARENT),
         )
         expect(auth.result.open).toBe(false)
+        expect(auth.result.verified).toBe(false)
         for (const id of [
           'state-label',
           'sections',
@@ -4576,6 +4577,26 @@ describe.concurrent('scripts/gate.mjs', () => {
         expect(step(missing.result, 'state-label').detail).toContain(
           `a mãe #${PARENT} da fatia #44 não existe`,
         )
+        // Whatever the failure, a parent not read is not verified, as an
+        // issue not read is not.
+        expect(missing.result.verified).toBe(false)
+        expect(
+          gateStatus((await readCache(repo)) as unknown as GateCache, {
+            branch: MIDDLE,
+          }).state,
+        ).toBe('unverified')
+        // An answer that does not say the parent's repository is read in part.
+        const unnamed = sliceAnswer(MIDDLE, { parent: PARENT })
+        delete (
+          unnamed.data as {
+            repository: { issue: { parent: { repository?: unknown } } }
+          }
+        ).repository.issue.parent.repository
+        const noRepo = await onSlice(repo, MIDDLE, unnamed, undefined)
+        expect(step(noRepo.result, 'state-label').detail).toBe(
+          `o GitHub não disse de que repositório é a mãe #${PARENT} da fatia #44`,
+        )
+        expect(noRepo.result.verified).toBe(false)
         const inCi = await stack(fresh)
         const unreachable = await ciAt(inCi, BOTTOM, (head) => ({
           issue: sliceAnswer(BOTTOM),
@@ -4947,6 +4968,94 @@ describe.concurrent('scripts/gate.mjs', () => {
         )
         expect(step(result, 'sections')).toMatchObject({ status: 'ok' })
         expect(step(result, 'sections').detail).toContain('seções de bug')
+        expect(step(result, 'kind')).toMatchObject({
+          status: 'ok',
+          detail: `enhancement (a mãe #${PARENT} é bug)`,
+        })
+      })
+
+      test('refuses a slice whose parent has no category, or more than one', async ({
+        expect,
+        fresh,
+      }) => {
+        const repo = await stack(fresh)
+        const none = await onSlice(
+          repo,
+          MIDDLE,
+          sliceAnswer(MIDDLE),
+          parentAnswer({
+            labels: ['ready-for-agent'],
+            events: [labeled('ready-for-agent', at('12:05'))],
+          }),
+        )
+        expect(step(none.result, 'kind')).toMatchObject({
+          status: 'no',
+          blocks: true,
+          detail: `na mãe #${PARENT}, nenhuma label de categoria (bug ou enhancement)`,
+        })
+        expect(none.result.open).toBe(false)
+        const two = await onSlice(
+          repo,
+          MIDDLE,
+          sliceAnswer(MIDDLE),
+          parentAnswer({
+            labels: ['bug', 'enhancement', 'ready-for-agent'],
+            events: [
+              labeled('bug', at('10:00')),
+              labeled('enhancement', at('10:00')),
+              labeled('ready-for-agent', at('12:05')),
+            ],
+          }),
+        )
+        expect(step(two.result, 'kind')).toMatchObject({
+          status: 'no',
+          detail: `na mãe #${PARENT}, mais de uma label de categoria: bug, enhancement`,
+        })
+        expect(two.result.open).toBe(false)
+        const partial = await onSlice(
+          repo,
+          MIDDLE,
+          sliceAnswer(MIDDLE),
+          parentAnswer({ labelsTotal: 3 }),
+        )
+        expect(step(partial.result, 'kind')).toMatchObject({ status: 'no' })
+        expect(step(partial.result, 'kind').detail).toContain(
+          `na mãe #${PARENT}, a issue tem 3 labels e o gate leu 2`,
+        )
+      })
+
+      test('refuses a parent that is a slice too, with a state label of its own or without one', async ({
+        expect,
+        fresh,
+      }) => {
+        const repo = await stack(fresh)
+        for (const labels of [
+          ['enhancement', 'stack-slice', 'ready-for-agent'],
+          ['enhancement', 'stack-slice'],
+        ]) {
+          const { result } = await onSlice(
+            repo,
+            MIDDLE,
+            sliceAnswer(MIDDLE),
+            parentAnswer({ labels }),
+          )
+          expect(result.open, labels.join(', ')).toBe(false)
+          for (const id of [
+            'state-label',
+            'sections',
+            'criteria',
+            'approve',
+            'branch-in-plan',
+          ])
+            expect(
+              step(result, id),
+              `${labels.join(', ')}: ${id}`,
+            ).toMatchObject({
+              status: 'no',
+              blocks: true,
+              detail: `a mãe #${PARENT} da fatia #44 também tem a label stack-slice: uma stack não se aninha, e a mãe de uma fatia é a raiz da stack`,
+            })
+        }
       })
 
       test('refuses every slice of a Stack with a problem', async ({

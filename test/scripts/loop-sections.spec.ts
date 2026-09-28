@@ -2079,6 +2079,33 @@ describe('a stack declared in a parent plan (#31)', () => {
     })
   })
 
+  it('reads a branch in a code span of any number of backticks, as CommonMark does', () => {
+    expect(
+      stackOf(
+        plan(
+          '1. ``feature/32-a``\n2. ```feature/33-b```, a do meio\n3. `` feature/34-c ``',
+        ),
+      ),
+    ).toEqual({
+      declared: true,
+      branches: ['feature/32-a', 'feature/33-b', 'feature/34-c'],
+      problems: [],
+    })
+    // Runs of different lengths make no code span: the backticks are text.
+    expect(stackOf(plan('1. ``feature/32-a`')).problems).toEqual([
+      'um item numerado da seção Stack não começa com uma branch: ``feature/32-a`',
+    ])
+    expect(stackOf(plan('1. `feature/32-a``')).problems).toEqual([
+      'um item numerado da seção Stack não começa com uma branch: `feature/32-a``',
+    ])
+    // A second branch in a longer span is still a second branch.
+    expect(
+      stackOf(plan('1. `feature/32-a` (antes ``feature/33-b``)')).problems,
+    ).toEqual([
+      'um item da seção Stack cita mais de uma branch: feature/32-a, feature/33-b',
+    ])
+  })
+
   it('stops the list at the first subheading of the section', () => {
     expect(
       stackOf(

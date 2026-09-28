@@ -58,6 +58,7 @@ import {
   refreshPollMs,
   refreshPrCommand,
   refreshWaitMs,
+  stackSliceLabel,
 } from './loop-sections.mjs'
 
 const hexSha = /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/
@@ -67,6 +68,8 @@ const maxBuffer = 64 * 1024 * 1024
 const pageSize = 10
 /** Sub-issues read per issue: a stack (#31) has a handful of slices. */
 const subIssuePageSize = 50
+/** Labels read per sub-issue, to find the slice label; a partial page is read as a slice. */
+const subIssueLabelPageSize = 20
 const issueEvents = ['issues', 'issue_comment']
 const prEvents = ['workflow_run', 'workflow_dispatch']
 const positive = /^[1-9]\d*$/
@@ -78,9 +81,10 @@ const isBranchName = (text) =>
 
 // includeClosedPrs: false still lists merged PRs (measured on #2, closed by
 // the merged PR #10), so only state OPEN is acted on below. The sub-issues
-// come with their own closing PRs: a slice of a stack (#31) is judged by its
-// parent, so an event on the parent changes their verdict too.
-const issueQuery = `query($owner: String!, $name: String!, $number: Int!) { repository(owner: $owner, name: $name) { issue(number: $number) { closedByPullRequestsReferences(first: ${pageSize}, includeClosedPrs: false) { totalCount nodes { number state headRefOid } } subIssues(first: ${subIssuePageSize}) { totalCount nodes { number repository { nameWithOwner } closedByPullRequestsReferences(first: ${pageSize}, includeClosedPrs: false) { totalCount nodes { number state headRefOid } } } } } } }`
+// come with their labels and their own closing PRs: a slice of a stack (#31)
+// is judged by its parent, so an event on the parent changes their verdict
+// too.
+const issueQuery = `query($owner: String!, $name: String!, $number: Int!) { repository(owner: $owner, name: $name) { issue(number: $number) { closedByPullRequestsReferences(first: ${pageSize}, includeClosedPrs: false) { totalCount nodes { number state headRefOid } } subIssues(first: ${subIssuePageSize}) { totalCount nodes { number repository { nameWithOwner } labels(first: ${subIssueLabelPageSize}) { totalCount nodes { name } } closedByPullRequestsReferences(first: ${pageSize}, includeClosedPrs: false) { totalCount nodes { number state headRefOid } } } } } } }`
 
 // PR mode: the PR as it is now, whatever the event carried.
 const pullQuery = `query($owner: String!, $name: String!, $number: Int!) { repository(owner: $owner, name: $name) { pullRequest(number: $number) { number state headRefOid } } }`
@@ -235,13 +239,26 @@ function closingPulls({ owner, name, issue, repo }) {
   const nodes = Array.isArray(refs.nodes) ? refs.nodes : []
   const subs = found?.subIssues
   // A sub-issue in another repository is no slice of a stack here, and its
-  // PRs run no issue-link of this repository: it is left out.
+  // PRs run no issue-link of this repository: it is left out. So is one
+  // without the slice label: the gate judges it by its own plan, and nothing
+  // on this issue changes its verdict. Labels read in part may hide the slice
+  // label, so that sub-issue is kept.
   const here = String(repo ?? `${owner}/${name}`).toLowerCase()
+  const isSlice = (child) => {
+    const labels = child?.labels
+    const names = Array.isArray(labels?.nodes)
+      ? labels.nodes.map((label) => label?.name)
+      : []
+    const whole =
+      Number.isInteger(labels?.totalCount) && labels.totalCount <= names.length
+    return !whole || names.includes(stackSliceLabel)
+  }
   const nodesOfSubs = Array.isArray(subs?.nodes) ? subs.nodes : []
   const children = nodesOfSubs
     .filter(
       (child) =>
-        String(child?.repository?.nameWithOwner ?? '').toLowerCase() === here,
+        String(child?.repository?.nameWithOwner ?? '').toLowerCase() === here &&
+        isSlice(child),
     )
     .map((child) => {
       const childRefs = child?.closedByPullRequestsReferences
@@ -437,7 +454,7 @@ function refreshIssue(input, deadline, lines) {
     closingPulls(input)
   if (children.length > 0)
     lines.push(
-      `A #${input.issue} tem ${children.length} sub-issue(s): o issue-link das PRs que as fecham também é re-rodado, porque uma fatia de stack é julgada pela mãe.`,
+      `A #${input.issue} tem ${children.length} fatia(s) de stack entre as sub-issues (label ${stackSliceLabel}): o issue-link das PRs que as fecham também é re-rodado, porque uma fatia é julgada pela mãe.`,
     )
   // One PR can close the issue and a sub-issue: it is refreshed once.
   const seen = new Set()
@@ -454,7 +471,7 @@ function refreshIssue(input, deadline, lines) {
   if (open.length === 0)
     lines.push(
       children.length > 0
-        ? `Nenhuma PR aberta fecha a #${input.issue} nem as sub-issues dela: nada a re-rodar.`
+        ? `Nenhuma PR aberta fecha a #${input.issue} nem as fatias dela: nada a re-rodar.`
         : `Nenhuma PR aberta fecha a #${input.issue}: nada a re-rodar.`,
     )
   let exitCode = 0

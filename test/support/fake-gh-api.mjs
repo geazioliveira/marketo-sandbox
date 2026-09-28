@@ -73,7 +73,7 @@ const argv = process.argv.slice(2)
 const queries = {
   pr: 'query($owner: String!, $name: String!, $number: Int!, $head: GitObjectID!) { repository(owner: $owner, name: $name) { pullRequest(number: $number) { number body mergedAt headRefOid closingIssuesReferences(first: 100) { totalCount nodes { number repository { nameWithOwner } } } reviews(last: 100) { totalCount nodes { state submittedAt commit { oid } author { __typename ... on Bot { databaseId } } body } } reviewThreads(first: 100) { totalCount nodes { isResolved comments(first: 1) { nodes { createdAt } } } } } object(oid: $head) { ... on Commit { checkSuites(first: 100) { totalCount nodes { workflowRun { event file { path } workflow { name } } checkRuns(first: 100, filterBy: { checkType: ALL }) { totalCount nodes { name conclusion startedAt completedAt } } } } } } } }',
   issue:
-    'query($owner: String!, $name: String!, $number: Int!) { repository(owner: $owner, name: $name) { issue(number: $number) { closedByPullRequestsReferences(first: 10, includeClosedPrs: false) { totalCount nodes { number state headRefOid } } subIssues(first: 50) { totalCount nodes { number repository { nameWithOwner } closedByPullRequestsReferences(first: 10, includeClosedPrs: false) { totalCount nodes { number state headRefOid } } } } } } }',
+    'query($owner: String!, $name: String!, $number: Int!) { repository(owner: $owner, name: $name) { issue(number: $number) { closedByPullRequestsReferences(first: 10, includeClosedPrs: false) { totalCount nodes { number state headRefOid } } subIssues(first: 50) { totalCount nodes { number repository { nameWithOwner } labels(first: 20) { totalCount nodes { name } } closedByPullRequestsReferences(first: 10, includeClosedPrs: false) { totalCount nodes { number state headRefOid } } } } } } }',
   pull: 'query($owner: String!, $name: String!, $number: Int!) { repository(owner: $owner, name: $name) { pullRequest(number: $number) { number state headRefOid } } }',
   branch:
     'query($owner: String!, $name: String!, $branch: String!) { repository(owner: $owner, name: $name) { pullRequests(first: 10, headRefName: $branch, states: [OPEN]) { totalCount nodes { number state headRefOid headRepository { nameWithOwner } } } } }',
@@ -140,6 +140,7 @@ const selections = {
       nodes: {
         number: true,
         repository: { nameWithOwner: true },
+        labels: { totalCount: true, nodes: { name: true } },
         closedByPullRequestsReferences: {
           totalCount: true,
           nodes: { number: true, state: true, headRefOid: true },

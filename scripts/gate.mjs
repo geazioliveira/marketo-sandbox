@@ -733,15 +733,18 @@ function main() {
       else if (
         String(parentRepo ?? '').toLowerCase() !==
         String(facts.repo).toLowerCase()
-      )
+      ) {
+        // An answer that does not name the parent's repository is a partial
+        // read: refused, and not verified.
+        const unnamed = parentRepo === undefined || parentRepo === null
+        if (unnamed) facts.verified = false
         parentProblem = {
           refused: true,
-          detail:
-            parentRepo === undefined || parentRepo === null
-              ? `o GitHub não disse de que repositório é a mãe #${parentNumber} da fatia #${number}`
-              : `a mãe da fatia #${number} é ${parentRepo}#${parentNumber}, de outro repositório: uma stack fica num repositório só`,
+          detail: unnamed
+            ? `o GitHub não disse de que repositório é a mãe #${parentNumber} da fatia #${number}`
+            : `a mãe da fatia #${number} é ${parentRepo}#${parentNumber}, de outro repositório: uma stack fica num repositório só`,
         }
-      else {
+      } else {
         const parentFetched = graphql(issueQuery, {
           owner: identity.owner,
           name: identity.name,
@@ -755,27 +758,37 @@ function main() {
             (node) => node.name,
           )
           const parentTotal = parent.labels?.totalCount
-          judged = {
-            issue: parent,
-            labels: parentLabels,
-            labelsRead:
-              Number.isInteger(parentTotal) &&
-              parentTotal <= parentLabels.length,
-            owner: parentFetched.data.repository.owner?.login,
+          const parentLabelsRead =
+            Number.isInteger(parentTotal) && parentTotal <= parentLabels.length
+          // A stack has one level: the parent of a slice is its root, which
+          // carries the state label and the Approve. A parent that is a slice
+          // too is refused, with a state label or without one, so no slice is
+          // ever judged by the plan of another slice.
+          if (parentLabelsRead && parentLabels.includes(stackSliceLabel))
+            parentProblem = {
+              refused: true,
+              detail: `a mãe #${parentNumber} da fatia #${number} também tem a label ${stackSliceLabel}: uma stack não se aninha, e a mãe de uma fatia é a raiz da stack`,
+            }
+          else {
+            judged = {
+              issue: parent,
+              labels: parentLabels,
+              labelsRead: parentLabelsRead,
+              owner: parentFetched.data.repository.owner?.login,
+            }
+            sliceOf = parentNumber
           }
-          sliceOf = parentNumber
         } else {
           const failed = parentFetched.ok ? 'missing' : parentFetched.kind
-          // A parent not read leaves the verdict unverified, as an issue not
-          // read does: the hooks must not take it for an open gate.
-          if (failed === 'unreachable') {
-            facts.verified = false
-            if (!ci)
-              tail.push(
-                '',
-                `Aviso: a mãe #${parentNumber} não foi lida (GitHub inacessível). Os passos marcados com ? não foram verificados; rode o gate de novo com rede.`,
-              )
-          }
+          // A parent not read leaves the verdict unverified, whatever the
+          // failure, as an issue not read does: the hooks must not take it
+          // for a verified verdict.
+          facts.verified = false
+          if (failed === 'unreachable' && !ci)
+            tail.push(
+              '',
+              `Aviso: a mãe #${parentNumber} não foi lida (GitHub inacessível). Os passos marcados com ? não foram verificados; rode o gate de novo com rede.`,
+            )
           parentProblem = {
             refused: failed === 'missing' || failed === 'unverified',
             detail:
@@ -839,14 +852,30 @@ function main() {
     } else {
       const category = kindOf(labels)
       kind = category.kind
+      const categoryProblem = (found) =>
+        found.length === 0
+          ? `nenhuma label de categoria (${categoryLabels.join(' ou ')})`
+          : `mais de uma label de categoria: ${found.join(', ')}`
+      // A slice's plan is its parent's, judged by the parent's category, so
+      // the parent needs exactly one, as every open issue does.
+      const parentCategory =
+        sliceOf !== null && judged.labelsRead ? kindOf(judged.labels) : null
+      const kindProblem = !kind
+        ? categoryProblem(category.found)
+        : sliceOf === null
+          ? null
+          : parentCategory === null
+            ? `na mãe #${sliceOf}, ${partial('a categoria', judged.issue.labels?.totalCount, judged.labels.length)}`
+            : parentCategory.kind === null
+              ? `na mãe #${sliceOf}, ${categoryProblem(parentCategory.found)}`
+              : null
       set(
         'kind',
-        kind ? 'ok' : 'no',
-        kind
-          ? kind
-          : category.found.length === 0
-            ? `nenhuma label de categoria (${categoryLabels.join(' ou ')})`
-            : `mais de uma label de categoria: ${category.found.join(', ')}`,
+        kindProblem === null ? 'ok' : 'no',
+        kindProblem ??
+          (sliceOf === null
+            ? kind
+            : `${kind} (a mãe #${sliceOf} é ${parentCategory.kind})`),
         { blocks: true },
       )
 

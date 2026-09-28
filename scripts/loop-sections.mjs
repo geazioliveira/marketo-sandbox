@@ -523,8 +523,15 @@ export const prSizeLimit = 1500
  * column: an indented one may sit inside the item above it, and is prose.
  */
 const stackItem = /^\d{1,9}[.)][ \t]+(.*)$/
-/** A code span on one line: where a stack item names its branch. */
-const stackCode = /`([^`\n]+)`/g
+/**
+ * A code span on one line, where a stack item names its branch: a run of
+ * backticks, text with none, and a run of the same length, as CommonMark
+ * reads it (`x` or ``x``). A branch never holds a backtick, so a span whose
+ * text has one names no branch.
+ */
+const stackCode = /(?<!`)(`+)([^`\n]+)\1(?!`)/g
+/** The code span a stack item starts with (stackCode). */
+const stackFirstCode = /^(`+)([^`\n]+)\1(?!`)/
 /** A heading line: it ends the list of the Stack section. */
 const headingLine = /^ {0,3}#{1,6}(?:[ \t]|$)/
 
@@ -573,7 +580,7 @@ export function stackOf(planText) {
     const item = stackItem.exec(lines[i])
     if (item === null) continue
     const text = item[1].trim()
-    const first = /^`([^`\n]+)`/.exec(text)?.[1]?.trim()
+    const first = stackFirstCode.exec(text)?.[2]?.trim()
     if (first === undefined || parseBranch(first) === null) {
       problems.push(
         `um item numerado da seção ${stackSection} não começa com uma branch: ${text}`,
@@ -581,7 +588,7 @@ export function stackOf(planText) {
       continue
     }
     const named = [...text.matchAll(stackCode)]
-      .map((match) => match[1].trim())
+      .map((match) => match[2].trim())
       .filter((span) => parseBranch(span) !== null)
     if (named.length > 1) {
       problems.push(

@@ -613,9 +613,17 @@ describe.concurrent('scripts/refresh-issue-link.mjs', () => {
 
   describe('a parent issue and the slices of its stack (#31)', () => {
     type Pr = { number: number; state: string; headRefOid: string }
-    /** The issue with no PR of its own, and its sub-issues with theirs. */
+    type Child = {
+      number: number
+      prs: Pr[]
+      total?: number
+      repo?: string
+      labels?: string[]
+      labelsTotal?: number
+    }
+    /** The issue with no PR of its own, and its sub-issues with theirs: slices unless labelled otherwise. */
     const parentOf = (
-      children: { number: number; prs: Pr[]; total?: number; repo?: string }[],
+      children: Child[],
       childrenTotal = children.length,
       own: Pr[] = [],
     ) => ({
@@ -623,9 +631,17 @@ describe.concurrent('scripts/refresh-issue-link.mjs', () => {
         closedByPullRequestsReferences: { totalCount: own.length, nodes: own },
         subIssues: {
           totalCount: childrenTotal,
-          nodes: children.map(({ number, prs, total, repo }) => ({
+          nodes: children.map(({ number, prs, total, repo, ...rest }) => ({
             number,
             repository: { nameWithOwner: repo ?? REPO },
+            labels: {
+              totalCount:
+                rest.labelsTotal ??
+                (rest.labels ?? ['enhancement', 'stack-slice']).length,
+              nodes: (rest.labels ?? ['enhancement', 'stack-slice']).map(
+                (name) => ({ name }),
+              ),
+            },
             closedByPullRequestsReferences: {
               totalCount: total ?? prs.length,
               nodes: prs,
@@ -668,7 +684,7 @@ describe.concurrent('scripts/refresh-issue-link.mjs', () => {
         'rerun:4302',
       ])
       expect(run.stdout).toContain(
-        `A #${ISSUE} tem 2 sub-issue(s): o issue-link das PRs que as fecham também é re-rodado`,
+        `A #${ISSUE} tem 2 fatia(s) de stack entre as sub-issues (label stack-slice): o issue-link das PRs que as fecham também é re-rodado`,
       )
     })
 
@@ -710,7 +726,7 @@ describe.concurrent('scripts/refresh-issue-link.mjs', () => {
       expect(run.status, run.stdout).toBe(0)
       expect(keys(run.calls)).toEqual([`issue:${ISSUE}`])
       expect(run.stdout).toContain(
-        `Nenhuma PR aberta fecha a #${ISSUE} nem as sub-issues dela: nada a re-rodar.`,
+        `Nenhuma PR aberta fecha a #${ISSUE} nem as fatias dela: nada a re-rodar.`,
       )
     })
 
@@ -738,7 +754,46 @@ describe.concurrent('scripts/refresh-issue-link.mjs', () => {
         `runs:${HEAD}`,
         'rerun:4304',
       ])
-      expect(run.stdout).toContain(`A #${ISSUE} tem 1 sub-issue(s)`)
+      expect(run.stdout).toContain(`A #${ISSUE} tem 1 fatia(s) de stack`)
+    })
+
+    test('leaves out a sub-issue without the slice label, and keeps one whose labels were read in part', async ({
+      expect,
+      scratch,
+    }) => {
+      const run = await scratch.refresh({
+        answers: {
+          ...parentOf([
+            // A sub-issue that is no slice keeps its own verdict: the gate
+            // judges it by its own plan.
+            {
+              number: 2,
+              prs: [openPr(99, OTHER)],
+              labels: ['enhancement', 'ready-for-agent'],
+            },
+            // The slice label may be among the labels not read.
+            {
+              number: 43,
+              prs: [openPr(12)],
+              labels: ['enhancement'],
+              labelsTotal: 21,
+            },
+          ]),
+          ...runsFor(HEAD, {
+            id: 4305,
+            status: 'completed',
+            conclusion: 'success',
+          }),
+          'rerun:4305': true,
+        },
+      })
+      expect(run.status, run.stdout).toBe(0)
+      expect(keys(run.calls)).toEqual([
+        `issue:${ISSUE}`,
+        `runs:${HEAD}`,
+        'rerun:4305',
+      ])
+      expect(run.stdout).toContain(`A #${ISSUE} tem 1 fatia(s) de stack`)
     })
 
     test('goes red when there are more sub-issues than one page holds', async ({
