@@ -4,6 +4,49 @@ Uma entrada por mudança mergeada, da mais nova para a mais antiga, escrita no p
 
 ---
 
+## 2026-09-28: O issue-link só relata a revisão do Copilot e as threads, e o veredito fresco é só o gate (#30)
+
+**Fase**: Learn
+**Tipo**: Bug Fix
+
+### O que foi construído / corrigido
+
+- **O gate ganhou `--review-report`.** No modo CI, fora de draft, a opção faz `copilot-review` e `review-threads` só relatarem. Cada um que bloquearia vira uma annotation `::warning::` na PR e uma linha no resumo do job, e o gate sai com 0 se o resto está em ordem. Sem a opção, que é o veredito fresco, os dois bloqueiam como antes.
+- **O `issue-link.yml` passa a opção.** Como o `pull_request_target` lê o YAML de `main`, uma PR não consegue tirá-la, e um teste fixa que o veredito fresco das docs nunca a passa.
+- **Saíram o `Sinal de revisão` e o modo `workflow_run` do refresh.** O refresh ficou com os eventos de issue e o disparo a pedido, e os contratos, o script, os testes e o `gh` falso perderam o que só o sinal usava.
+- **O veredito fresco é só o gate em modo CI na cabeça da PR.** Um rerun do `issue-link` não é mais veredito fresco, porque roda com a opção. A nota de refresh interrompido e as docs passaram a dizer isso.
+- **O hook de `gh pr merge` (#5) e a auditoria de `main` seguem exigindo** a revisão na cabeça, nenhum pedido pendente e nenhuma thread aberta, com testes novos que montam os checks exigidos verdes.
+- **As docs dizem a regra nova:** a ADR 0003, a ADR 0002, o fluxo, o `AGENTS.md`, o glossário e os patterns do gate, da revisão e do ciclo de vida. Nenhuma diz mais que o refresh não foi provado ao vivo, nem que toda revisão dispara o sinal.
+
+### Números medidos
+
+- **Antes**, pelo plano da #30: 32 de 76 tentativas do `issue-link` vermelhas, todas em `copilot-review`, e 4 das 5 PRs mergeadas sob a regra da #13 só ficaram verdes com um `gh run rerun` manual.
+- **`npm run check`**: 3.743 testes em 21 arquivos, com 8 casos novos no `gate.spec.ts` e os testes do modo `workflow_run` e da busca por branch removidos do `refresh-issue-link.spec.ts`; o e2e com 33.
+- **Mutações**: as 7 da opção foram pegas pelos testes.
+- **O rerun pelo `GITHUB_TOKEN`** passa, medido ao vivo nas runs 36263677912 (tentativa 2) e 36269762597 (tentativas 3 e 4), e as docs deixaram de dizer o contrário.
+
+### Decisões tomadas
+
+- [0003: Revisão do Copilot na cabeça e nenhuma thread aberta antes do merge](../decisions/0003-copilot-review-and-no-open-threads-before-merge.md): o `issue-link` relata, e o veredito fresco, o hook de merge e a auditoria exigem. As opções (b), esperar o pedido pendente, e (c), uma varredura agendada, ficaram como alternativas rejeitadas.
+- [0002: Enforcement soft do loop no GitHub Free](../decisions/0002-soft-enforcement-on-github-free.md): a camada 1 e os Limites sem o sinal de revisão, e com o rerun medido.
+- As quatro respostas do Approve da #30: a correção (a), o sinal fora, o aviso só na annotation e no resumo do job, e a branch cortada depois da #5.
+
+### Patterns aplicados ou criados
+
+- [Check que espera um evento que não chega](../knowledge/anti-patterns/check-waiting-for-an-event-that-never-comes.md), anti-pattern novo
+- [O gate do loop](../knowledge/patterns/loop-gate.md), [Revisão antes do merge](../knowledge/patterns/review-before-merge.md) e [Ciclo de vida de issue e branch](../knowledge/patterns/issue-branch-lifecycle.md), atualizados
+
+### Aprendizados / surpresas
+
+- **Um check exigido não pode depender de um evento que não chega.** O sinal foi desenhado sem medir a revisão do próprio Copilot, e a medição da PR #15 mostrou o `action_required`. Relatar no check e exigir no ponto da decisão resolve sem gastar minuto de runner.
+- **O Build do harness passou pelos hooks da #5.** Com os hooks ligados desde a PR #55, cada edição no gate, nos workflows e nos scripts do loop pediu a confirmação do dono, porque a sessão saiu do modo automático. Em `auto`, essas edições seriam negadas.
+- **Um redirecionamento para `$TMPDIR/...` foi negado pelo `guard-bash`,** porque o hook não lê a expansão, e a linha inteira não rodou. Com o caminho escrito por extenso, passou.
+- **As mutações rodaram numa cópia da árvore fora do git.** Mutar o `scripts/gate.mjs` pelo shell teria escrito no harness sem passar pela confirmação do dono, que é o limite da tripwire registrado na ADR 0002.
+- **Os testes dos hooks falham por tempo quando a máquina está carregada.** Com a média de carga entre 15 e 20, duas rodadas do `npm run check` falharam em testes diferentes do `guard-bash` e do `session-context`, e a terceira passou inteira.
+- **A prova ao vivo depende do merge.** O `issue-link` desta PR ainda roda o gate de `main`, o de antes. A primeira PR depois do merge mostra se ele fica verde sem rerun.
+
+---
+
 ## 2026-09-28: Os hooks do Claude Code param o agente antes da ação, numa stack de 10 PRs (#5)
 
 **Fase**: Learn
