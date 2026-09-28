@@ -20,11 +20,20 @@
 //   are read through git (`git show <sha>:<path>`), never through fs. Only
 //   this mode reads the PR, and with it the two conditions of a merge (#13):
 //   a Copilot review of the PR's head, and no review thread left open.
+//   issue-link.yml adds `--review-report` (#30): there the two are only
+//   reported, with a warning on the PR, because the review lands after the
+//   run and no event renews the check. Without it, the fresh verdict before
+//   a merge, both block.
 //
 // What it cannot see: the agent posts from the owner's account, so it cannot
 // tell who typed an Approve. ownerRule states that convention on every run.
 import { spawnSync } from 'node:child_process'
-import { existsSync, realpathSync, writeFileSync } from 'node:fs'
+import {
+  appendFileSync,
+  existsSync,
+  realpathSync,
+  writeFileSync,
+} from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
@@ -88,10 +97,28 @@ const prQuery = `query($owner: String!, $name: String!, $number: Int!) { reposit
 /** How many open threads the review-threads step names; the rest are counted. */
 const threadsShown = 10
 
+/** The steps --review-report only reports, each with its warning's title (#30). */
+const reviewWaitTitles = {
+  'copilot-review': 'O merge espera a revisão do Copilot',
+  'review-threads': 'O merge espera as threads de revisão',
+}
+
+/** A workflow command's message, as the runner reads it: %, CR and LF escaped. */
+const commandData = (text) =>
+  String(text)
+    .replaceAll('%', '%25')
+    .replaceAll('\r', '%0D')
+    .replaceAll('\n', '%0A')
+
+/** A workflow command's property: its message's escapes, plus : and ,. */
+const commandProperty = (text) =>
+  commandData(text).replaceAll(':', '%3A').replaceAll(',', '%2C')
+
 const usage = [
   'Uso:',
   '  node scripts/gate.mjs [--json] [--no-cache]            modo local (a branch é o HEAD)',
   '  node scripts/gate.mjs --pr <n> --branch <headRef> [--json]  modo CI (fail-closed)',
+  '    [--review-report]  a revisão do Copilot e as threads só relatam, com aviso (o issue-link.yml)',
 ].join('\n')
 
 // ---------------------------------------------------------------------------
@@ -103,12 +130,14 @@ function parseArgs(argv) {
     cache: true,
     pr: null,
     branch: null,
+    reviewReport: false,
     help: false,
   }
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i]
     if (arg === '--json') options.json = true
     else if (arg === '--no-cache') options.cache = false
+    else if (arg === '--review-report') options.reviewReport = true
     else if (arg === '--help' || arg === '-h') options.help = true
     else if (arg === '--pr' || arg === '--branch') {
       const key = arg.slice(2)
@@ -126,6 +155,10 @@ function parseArgs(argv) {
   }
   if ((options.pr === null) !== (options.branch === null))
     return { error: '--pr e --branch andam juntos (modo CI)' }
+  if (options.reviewReport && options.pr === null)
+    return {
+      error: '--review-report só vale no modo CI, com --pr e --branch',
+    }
   return { options }
 }
 
@@ -399,6 +432,8 @@ function main() {
     gitDir: null,
   }
   let gateable = false
+  // Set by the CI mode on a PR ready for a merge, with --review-report.
+  let reviewWarn = false
 
   const finish = ({ exitOk = false } = {}) => {
     const list = [...steps.values()]
@@ -409,6 +444,14 @@ function main() {
       )
       .map((s) => s.id)
     const open = gateable && blocked.length === 0
+    // What --review-report only reports and a merge still waits for.
+    const waiting = reviewWarn
+      ? list.filter(
+          (s) =>
+            s.id in reviewWaitTitles &&
+            (s.status === 'no' || s.status === 'unchecked'),
+        )
+      : []
     const result = {
       schema: gateCacheSchema,
       mode,
@@ -442,15 +485,50 @@ function main() {
           )
       }
     }
+    const fresh =
+      waiting.length > 0 ? gateCiCommand(options.pr, options.branch) : ''
+    if (waiting.length > 0)
+      lines.push(
+        '',
+        `O merge espera ${waiting.map((s) => s.id).join(' e ')}: com --review-report, o issue-link só relata, e o veredito fresco (${fresh}) exige.`,
+      )
     lines.push(...tail, '', ownerRule)
     const human = `${lines.join('\n')}\n`
+    // A workflow command per step the merge waits for: GitHub shows each as
+    // a warning on the PR (#30).
+    const annotations = waiting
+      .map(
+        (s) =>
+          `::warning title=${commandProperty(reviewWaitTitles[s.id])}::${commandData(s.detail)}\n`,
+      )
+      .join('')
 
     if (options.json) {
       process.stdout.write(`${JSON.stringify(result, null, 2)}\n`)
       // The report still reaches a person reading CI logs, without touching
       // the JSON a hook parses from stdout.
-      process.stderr.write(human)
-    } else process.stdout.write(human)
+      process.stderr.write(human + annotations)
+    } else process.stdout.write(human + annotations)
+
+    const summary = process.env.GITHUB_STEP_SUMMARY
+    if (waiting.length > 0 && summary !== undefined && summary !== '')
+      try {
+        appendFileSync(
+          summary,
+          [
+            '### O merge espera a revisão do Copilot ou as threads',
+            '',
+            `O \`issue-link\` desta PR só relata os dois passos (\`--review-report\`). O merge espera por eles, e o veredito fresco os exige: \`${fresh}\`.`,
+            '',
+            ...waiting.map((s) => `- \`${s.id}\`: ${s.detail}`),
+            '',
+          ].join('\n'),
+        )
+      } catch (error) {
+        process.stderr.write(
+          `gate: não foi possível escrever o resumo do job: ${error.message}\n`,
+        )
+      }
 
     // Only the local gate writes the cache the hooks (#5) read; a CI verdict
     // describes a PR head, not the worktree someone is building in. The
@@ -1352,7 +1430,14 @@ function main() {
       // Every refusal ends with how to renew the verdict once it is fixed:
       // resolving a thread triggers no workflow, and a re-request only brings
       // a review later.
-      const reviewBlocks = pr.isDraft !== true
+      // With --review-report, which issue-link.yml passes (#30), both are
+      // only reported on a PR ready for a merge too, and each that would
+      // block becomes a warning on the PR: the review lands minutes after
+      // the request, and no event renews the check when it does. The fresh
+      // verdict, this command without the option, the merge hook (#5) and
+      // the audit of main still hold a merge to both.
+      reviewWarn = options.reviewReport && pr.isDraft !== true
+      const reviewBlocks = pr.isDraft !== true && !options.reviewReport
       const request = copilotRequestCommand(options.pr)
       const renew = `depois, renove o veredito na cabeça da PR com ${gateCiCommand(options.pr, options.branch)}`
       const reviews = pr.reviews?.nodes ?? []

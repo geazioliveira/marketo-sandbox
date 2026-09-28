@@ -31,9 +31,6 @@
 //   issue:<n>       api graphql -F owner=… -F name=… -F number=<n> -f query=<issueQuery>
 //   pull:<n>        api graphql -F owner=… -F name=… -F number=<n> -f query=<pullQuery>
 //                   (the refresh's PR mode: the PR as it is now)
-//   branch:<name>   api graphql -F owner=… -F name=… -f branch=<name> -f query=<branchQuery>
-//                   (the refresh's PR mode with no PR number), answered with
-//                   the pullRequests connection
 //   runs:<sha>      api repos/<repo>/actions/workflows/issue-link.yml/runs
 //                     ?head_sha=<sha>&event=pull_request_target&per_page=1
 //                   answered as GitHub filters: of the fixture's workflow_runs,
@@ -75,8 +72,6 @@ const queries = {
   issue:
     'query($owner: String!, $name: String!, $number: Int!) { repository(owner: $owner, name: $name) { issue(number: $number) { closedByPullRequestsReferences(first: 10, includeClosedPrs: false) { totalCount nodes { number state headRefOid } } subIssues(first: 50) { totalCount nodes { number repository { nameWithOwner } labels(first: 20) { totalCount nodes { name } } closedByPullRequestsReferences(first: 10, includeClosedPrs: false) { totalCount nodes { number state headRefOid } } } } } } }',
   pull: 'query($owner: String!, $name: String!, $number: Int!) { repository(owner: $owner, name: $name) { pullRequest(number: $number) { number state headRefOid } } }',
-  branch:
-    'query($owner: String!, $name: String!, $branch: String!) { repository(owner: $owner, name: $name) { pullRequests(first: 10, headRefName: $branch, states: [OPEN]) { totalCount nodes { number state headRefOid headRepository { nameWithOwner } } } } }',
 }
 
 /** What each query selects, for cutting an answer down to it. */
@@ -149,17 +144,6 @@ const selections = {
     },
   },
   pull: { number: true, state: true, headRefOid: true },
-  branch: {
-    pullRequests: {
-      totalCount: true,
-      nodes: {
-        number: true,
-        state: true,
-        headRefOid: true,
-        headRepository: { nameWithOwner: true },
-      },
-    },
-  },
 }
 
 /**
@@ -312,30 +296,6 @@ function classify(repo) {
   if (matches(['api', '-X', 'POST', (t) => rerun.test(t)]))
     return { key: `rerun:${rerun.exec(argv[3])[1]}`, kind: 'rerun' }
 
-  const byBranch = [
-    'api',
-    'graphql',
-    '-F',
-    any,
-    '-F',
-    any,
-    '-f',
-    (t) => t.startsWith('branch='),
-    '-f',
-    any,
-  ]
-  if (matches(byBranch)) {
-    if (argv[3] !== `owner=${owner}`) return `owner inesperado: ${argv[3]}`
-    if (argv[5] !== `name=${name}`) return `name inesperado: ${argv[5]}`
-    const branch = argv[7].slice('branch='.length)
-    if (branch === '') return 'branch vazia'
-    if (!argv[9].startsWith('query=')) return 'o último argumento não é query='
-    const query = fold(argv[9].slice('query='.length))
-    if (query !== fold(queries.branch))
-      return `query diferente da branch: ${query}`
-    return { key: `branch:${branch}`, kind: 'graphql-branch' }
-  }
-
   const graphql = ['api', 'graphql', '-F', any, '-F', any, '-F', any]
   const withHead = matches([...graphql, '-f', any, '-f', any])
   if (withHead || matches([...graphql, '-f', any])) {
@@ -348,9 +308,7 @@ function classify(repo) {
     const last = argv.at(-1)
     if (!last.startsWith('query=')) return 'o último argumento não é query='
     const query = fold(last.slice('query='.length))
-    const kind = Object.keys(queries).find(
-      (k) => k !== 'branch' && fold(queries[k]) === query,
-    )
+    const kind = Object.keys(queries).find((k) => fold(queries[k]) === query)
     if (kind === undefined)
       return `query diferente das que o fake conhece: ${query}`
     if ((kind === 'pr') !== withHead)
@@ -496,9 +454,7 @@ function answer() {
         uncounted(answers[checks], selections.commit, 'object'))
       : kind === 'graphql-issue'
         ? uncounted(value, selections.issue, 'issue')
-        : kind === 'graphql-branch'
-          ? uncounted({ pullRequests: value }, selections.branch, 'repository')
-          : null
+        : null
   if (missing !== null)
     return refuse(
       `${key}: a fixture dá ${missing} sem um totalCount inteiro e não menor que os nodes`,
@@ -526,17 +482,6 @@ function answer() {
     if (value === null) return notResolved('pullRequest', key)
     process.stdout.write(
       `${JSON.stringify({ data: { repository: { pullRequest: prune(value, selections.pull) } } })}\n`,
-    )
-    return
-  }
-  if (kind === 'graphql-branch') {
-    const { pullRequests } = prune(
-      { pullRequests: value },
-      selections.branch,
-      'repository',
-    )
-    process.stdout.write(
-      `${JSON.stringify({ data: { repository: { pullRequests } } })}\n`,
     )
     return
   }

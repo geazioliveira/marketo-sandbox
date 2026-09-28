@@ -36,8 +36,6 @@ import {
   refreshWaitMs,
   requiredChecks,
   reviewRuleSince,
-  reviewSignalWorkflow,
-  reviewSignalWorkflowFile,
   skipCiTokens,
   skipChecksTrailer,
   stepIds,
@@ -732,7 +730,6 @@ const asDocs = (command: string, pr: string, branch = '<branch>') =>
 
 describe('docs against the review gate’s contract values (#13)', () => {
   const gate = read('scripts/gate.mjs')
-  const reviewSignal = `.github/workflows/${reviewSignalWorkflowFile}`
   const refresh = `.github/workflows/${issueLinkRefreshWorkflowFile}`
   const reviewSteps = ['copilot-review', 'review-threads']
 
@@ -837,7 +834,9 @@ describe('docs against the review gate’s contract values (#13)', () => {
     },
   )
 
-  it.each([adr0003, adr0002, loopGate, workflowGuide, lifecycle, 'AGENTS.md'])(
+  // AGENTS.md left the list with #30: after resolving a thread the check
+  // needs no refresh, since the issue-link only reports the threads.
+  it.each([adr0003, adr0002, loopGate, workflowGuide, lifecycle])(
     '%s gives the command that brings one PR’s check up to date through the refresh’s dispatch, on main',
     (file) => {
       expect(read('scripts/refresh-issue-link.mjs')).toContain(
@@ -864,27 +863,6 @@ describe('docs against the review gate’s contract values (#13)', () => {
         // A dispatch runs the YAML and the script of the ref it names.
         expect(rest, file).toContain(' --ref main ')
       }
-    },
-  )
-
-  it.each([adr0003, adr0002, workflowGuide])(
-    '%s names the review signal as its workflow does, with its events and no permissions',
-    (file) => {
-      const yaml = read(reviewSignal)
-      expect(/^name: (.+)$/m.exec(yaml)?.[1]).toBe(reviewSignalWorkflow)
-      expect(yaml).toMatch(/^permissions: \{\}$/m)
-      const types = /^ {2}pull_request_review:\n {4}types: \[([^\]]*)\]/m
-        .exec(yaml)?.[1]
-        .split(',')
-        .map((type) => type.trim())
-      expect(types?.length).toBeGreaterThan(0)
-      const text = read(file)
-      expect(text).toContain(`\`${reviewSignalWorkflow}\``)
-      expect(text).toContain(`\`${reviewSignal}\``)
-      expect(text).toContain(
-        `\`pull_request_review\` (${(types ?? []).map((type) => `\`${type}\``).join(', ')})`,
-      )
-      expect(text).toContain('`permissions: {}`')
     },
   )
 
@@ -1051,7 +1029,7 @@ describe('docs against the review gate after the #13 reviews', () => {
   )
 
   it.each(freshVerdictDocs)(
-    '%s gives both fresh verdicts: the gate in CI mode, and a re-run watched to its end',
+    '%s gives the fresh verdict, the gate in CI mode, and says a re-run of the issue-link is none (#30)',
     (file) => {
       expect(gate).toContain('gateCiCommand(options.pr, options.branch)')
       const text = bodyOf(read(file))
@@ -1065,11 +1043,30 @@ describe('docs against the review gate after the #13 reviews', () => {
         expect(command, file).toBe(
           asDocs(gateCiCommand(SAMPLE_PR, SAMPLE_BRANCH), pr, branch),
         )
-      expect(text, file).toMatch(/gh run rerun <run-id>/)
-      expect(text, file).toMatch(
+      // Since #30 the issue-link runs with --review-report: re-running it
+      // judges neither the Copilot review nor the threads.
+      expect(text, file).not.toMatch(
         /gh run watch <run-id>(?: --repo \S+)? --exit-status/,
       )
-      expect(text, file).toMatch(notFresh)
+      const reruns = proseOf(text).filter((sentence) =>
+        /rerun do (?:job )?`issue-link`/.test(sentence),
+      )
+      expect(
+        reruns.some((sentence) => notFresh.test(sentence)),
+        file,
+      ).toBe(true)
+    },
+  )
+
+  it.each(freshVerdictDocs)(
+    '%s never gives the fresh verdict with --review-report, the option of the issue-link workflow (#30)',
+    (file) => {
+      expect(gateCiCommand(SAMPLE_PR, SAMPLE_BRANCH)).not.toContain(
+        '--review-report',
+      )
+      expect(bodyOf(read(file)), file).not.toMatch(
+        /node scripts\/gate\.mjs --pr <\w+> --branch <\w+> --review-report/,
+      )
     },
   )
 
@@ -1140,17 +1137,25 @@ describe('docs against the review gate after the #13 reviews', () => {
     },
   )
 
-  it.each([adr0002, adr0003])(
-    '%s counts each thread reply as a review that fires the signal and the refresh',
+  it.each([
+    adr0002,
+    adr0003,
+    workflowGuide,
+    'AGENTS.md',
+    lifecycle,
+    loopGate,
+    'context/knowledge/patterns/review-before-merge.md',
+    'context/intent/feature-review-gate.md',
+  ])(
+    '%s neither calls the refresh unproven nor keeps the review signal, gone since #30',
     (file) => {
-      const replies = proseOf(read(file)).filter(
-        (sentence) =>
-          /cada resposta numa thread/i.test(sentence) &&
-          sentence.includes('revisão') &&
-          sentence.includes('sinal') &&
-          sentence.includes('refresh'),
-      )
-      expect(replies, file).not.toEqual([])
+      for (const sentence of proseOf(bodyOf(read(file)))) {
+        expect(sentence, file).not.toMatch(/não foi provad[oa] ao vivo/)
+        // Any mention of the signal, `a run do sinal` included, places it
+        // before #30, which removed it.
+        if (/\bsinal\b|review-signal/i.test(sentence))
+          expect(sentence, file).toContain('#30')
+      }
     },
   )
 
@@ -1273,5 +1278,47 @@ describe('docs against the review gate after the #13 reviews', () => {
       expect(named.length).toBeGreaterThan(0)
       expect([...named].sort()).toEqual([...present].sort())
     })
+  })
+
+  it('no doc offers a re-run of the issue-link as a fresh verdict (#30)', () => {
+    // Bold left out, so that a bullet's bold lead-in is a sentence of its own.
+    const checked = [
+      ...freshVerdictDocs,
+      loopGate,
+      'context/knowledge/glossary.md',
+      'context/knowledge/patterns/review-before-merge.md',
+      'context/intent/feature-review-gate.md',
+    ].flatMap((file) =>
+      proseOf(bodyOf(read(file)).replaceAll('**', ''))
+        .filter(
+          (sentence) =>
+            sentence.includes('veredito fresco') &&
+            sentence.includes('issue-link') &&
+            /\b(?:rerun|re-rod|re-execut)/.test(sentence),
+        )
+        .map((sentence): [string, string] => [file, sentence]),
+    )
+    expect(checked.length).toBeGreaterThan(0)
+    for (const [file, sentence] of checked)
+      expect(sentence, file).toMatch(notFresh)
+  })
+
+  it('no JSDoc of the scripts offers a re-run of the issue-link as a fresh verdict (#30)', () => {
+    const rerun = /re-?run of (?:the )?(?:PR's )?issue-link/
+    const named = readdirSync(path.join(root, 'scripts'))
+      .filter((file) => file.endsWith('.mjs'))
+      .flatMap((file) =>
+        [...read(`scripts/${file}`).matchAll(/\/\*\*([\s\S]*?)\*\//g)]
+          .flatMap(([, doc]) =>
+            doc.replace(/\s*\n\s*\*\s?/g, ' ').split(/(?<=[.!?;])\s+/),
+          )
+          .filter((sentence) => rerun.test(sentence))
+          .map((sentence): [string, string] => [file, sentence]),
+      )
+    expect(named.length).toBeGreaterThan(0)
+    for (const [file, sentence] of named)
+      expect(sentence, file).toMatch(
+        new RegExp(`${rerun.source} is (?:none|no fresh verdict)\\b`),
+      )
   })
 })

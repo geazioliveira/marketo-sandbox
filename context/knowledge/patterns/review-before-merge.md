@@ -17,7 +17,7 @@ Os comandos de cada passo estão em [A revisão do Copilot e as threads](../../.
 
 - **A PR abre em draft, com o monitor.** Ela abre com `gh pr create --draft`, e logo depois o agente liga nela o monitor de CI do app, com auto-fix e comentários. Em draft, os passos de revisão do gate só relatam.
 - **A PR sai de draft só com o Learn commitado.** Sair de draft pede a revisão do Copilot, e todo push depois dela pede outra. Depois de cada push, se a timeline da PR não mostra um `review_requested` do Copilot depois da hora do push e nenhuma revisão dele chega na cabeça nova em uns 10 min, o agente pede de novo com `gh pr edit <n> --add-reviewer @copilot`. Uma revisão que falhou também pede de novo.
-- **Uma revisão do Copilot na cabeça.** O passo `copilot-review` exige, fora de draft, uma revisão do Copilot (`Bot` com `databaseId` 175728472), `COMMENTED` ou `APPROVED`, que não falhou, no commit que é a cabeça da PR, e nenhuma outra dele a caminho ([o gate do loop](loop-gate.md#a-revisão-do-copilot-e-as-threads)).
+- **Uma revisão do Copilot na cabeça.** O passo `copilot-review` exige, no veredito fresco e fora de draft, uma revisão do Copilot (`Bot` com `databaseId` 175728472), `COMMENTED` ou `APPROVED`, que não falhou, no commit que é a cabeça da PR, e nenhuma outra dele a caminho ([o gate do loop](loop-gate.md#a-revisão-do-copilot-e-as-threads)).
 - **Nenhuma thread aberta.** O passo `review-threads` exige zero threads não resolvidas, de qualquer autor, inclusive as desatualizadas.
 - **Responder antes de resolver.** Cada thread recebe uma resposta e só então é resolvida. A resposta traz uma de três coisas, e numa thread do Copilot o motivo da resolução corresponde a ela:
   - o SHA do commit que corrige o achado (`ADDRESSED`);
@@ -25,7 +25,7 @@ Os comandos de cada passo estão em [A revisão do Copilot e as threads](../../.
   - a evidência de que ele não procede (`INVALID`).
 
   Um achado que só aparece no resumo da revisão ganha a mesma resposta num comentário da PR, porque o gate não o lê.
-- **Veredito fresco logo antes do merge.** Depois de resolver as threads, `gh workflow run issue-link-refresh.yml --ref main -f pr=<n>` atualiza o check, mas sozinho não é veredito fresco. O veredito fresco é `node scripts/gate.mjs --pr <n> --branch <branch>` na cabeça da PR, com saída 0, ou o `issue-link` re-rodado com `gh run rerun <run-id>` e acompanhado com `gh run watch <run-id> --exit-status`.
+- **Veredito fresco logo antes do merge.** O veredito fresco é `node scripts/gate.mjs --pr <n> --branch <branch>` na cabeça da PR, com saída 0. Desde a #30, o `issue-link` só relata a revisão e as threads, com um aviso na PR (`--review-report`), então um rerun dele não é veredito fresco, e um disparo do refresh (`gh workflow run issue-link-refresh.yml --ref main -f pr=<n>`) sozinho também não é.
 - **A profundidade vem do risco.** A revisão do Copilot e o gate são o mínimo de toda PR. HIGH ou NORMAL decide o que mais a revisão lê ([revisão classificada por risco](risk-classified-review.md)).
 - **O gate não julga o mérito.**
   - Ele confere a forma do loop ([o gate do loop](loop-gate.md)). O mérito do plano é a leitura do dono no Approve; o da mudança é a revisão, com a profundidade que o risco pede.
@@ -53,3 +53,4 @@ Os comandos de cada passo estão em [A revisão do Copilot e as threads](../../.
 
 - **Criado**: 2026-09-25 (Fase: Build), do que o loop das #2, #3 e #13 já pratica, registrado na #4 (#4)
 - **Status**: Active
+- **Atualizado**: 2026-09-28 (Fase: Build), o veredito fresco passou a ser só o gate em modo CI, porque o `issue-link` só relata a revisão e as threads (#30)

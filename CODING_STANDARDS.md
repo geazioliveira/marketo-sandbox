@@ -16,6 +16,7 @@ As regras vivem no Context Mesh. Esta página só aponta para elas.
 
 ## Anti-patterns
 
+- [Check que espera um evento que não chega](context/knowledge/anti-patterns/check-waiting-for-an-event-that-never-comes.md)
 - [Confiar que a ferramenta processou o arquivo passado pelo nome](context/knowledge/anti-patterns/trusting-a-tool-to-process-a-named-file.md)
 - [Dublê de teste estrito na camada errada](context/knowledge/anti-patterns/test-double-strict-on-the-wrong-layer.md)
 - [Editar código gerado à mão](context/knowledge/anti-patterns/hand-editing-generated-code.md)

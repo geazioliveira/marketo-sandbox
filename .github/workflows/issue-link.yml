@@ -18,9 +18,15 @@
 #
 # What does not trigger a run: an Approve, a label move or a plan comment on the
 # issue. Since #3, issue-link-refresh.yml re-runs this job for every open pull
-# request that closes the issue when one of those happens. Until that re-run is
-# seen working live, re-run this job (or push) right before a merge to refresh
-# the verdict.
+# request that closes the issue when one of those happens.
+#
+# Nor does a review: the Copilot review lands minutes after the run of a push,
+# and resolving a thread is no event. So the gate runs with --review-report
+# (#30): here the Copilot review on the head and the open review threads are
+# only reported, each with a warning on the PR, and this check goes green on
+# everything else. What holds a merge to both is the fresh verdict right before
+# it, the gate in CI mode without the option, with the merge hook (#5) and the
+# audit of main.
 name: Vínculo com issue
 
 on:
@@ -92,4 +98,4 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           PR_HEAD_REF: ${{ github.event.pull_request.head.ref }}
-        run: node "$GITHUB_WORKSPACE/trusted/scripts/gate.mjs" --pr "$PR_NUMBER" --branch "$PR_HEAD_REF"
+        run: node "$GITHUB_WORKSPACE/trusted/scripts/gate.mjs" --pr "$PR_NUMBER" --branch "$PR_HEAD_REF" --review-report

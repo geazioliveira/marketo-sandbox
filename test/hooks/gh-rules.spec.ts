@@ -891,6 +891,26 @@ describe('gh pr merge', () => {
     expectDeny(await judge('gh pr merge 7', { github }), reason)
   })
 
+  // With --review-report (#30), the issue-link check goes green before the
+  // Copilot review lands, so the required checks can be green while the
+  // review is missing or a thread is open: the hook reads both itself.
+  it.each([
+    ['no Copilot review on the head', { review: { ok: false, failed: false } }],
+    ['a Copilot review on its way', { requested: true }],
+    ['a thread still open', { openThreads: [{ isResolved: false }] }],
+  ])(
+    'denies a merge with every required check green but %s (#30)',
+    async (_, state) => {
+      const github = stub({
+        prMergeState: mergeAnswer({
+          checksOk: true,
+          ...(state as Partial<MergeState>),
+        }),
+      })
+      expectDeny(await judge('gh pr merge 7', { github }), /./)
+    },
+  )
+
   it('names every failed item at once', async () => {
     const github = stub({
       prMergeState: mergeAnswer({ requested: true, openThreads: [{}] }),

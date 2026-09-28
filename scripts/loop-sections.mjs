@@ -1584,16 +1584,8 @@ export const skipCiTokens = [
 export const skipChecksTrailer = 'skip-checks: true'
 
 // ---------------------------------------------------------------------------
-// The review signal, the PR refresh and the audit's review pages (#13)
-
-/**
- * The name of .github/workflows/review-signal.yml (reviewSignalWorkflowFile),
- * which issue-link-refresh.yml's workflow_run trigger names: workflow_run
- * matches a workflow by this name, so a rename on either side silently stops
- * the refresh after a review.
- */
-export const reviewSignalWorkflow = 'Sinal de revisão'
-export const reviewSignalWorkflowFile = 'review-signal.yml'
+// The PR refresh and the audit's review pages (#13). The review signal that
+// re-triggered the refresh after a review went away with #30.
 
 /** The workflow that re-runs the issue-link check from main (#3, #13). */
 export const issueLinkRefreshWorkflowFile = 'issue-link-refresh.yml'
@@ -1603,8 +1595,8 @@ export const issueLinkRefreshWorkflowFile = 'issue-link-refresh.yml'
  * its workflow_dispatch input `pr`. A dispatch runs the YAML and the script of
  * the ref it names, not of main, hence `--ref main`. It returns before the
  * refresh runs, and a failed refresh shows nothing on the PR, so it only
- * brings the PR's check up to date: it is no fresh verdict before a merge
- * (gateCiCommand, or a re-run of the issue-link watched to its end, is).
+ * brings the PR's check up to date: it is no fresh verdict before a merge.
+ * Since #30 only gateCiCommand is one.
  */
 export function refreshPrCommand(pr) {
   return `gh workflow run ${issueLinkRefreshWorkflowFile} --ref main -f pr=${shellWord(pr)}`
@@ -1612,9 +1604,10 @@ export function refreshPrCommand(pr) {
 
 /**
  * The gate in CI mode for PR `pr` over branch `branch`, run in a checkout of
- * the PR's head with origin/main fetched: one of the two fresh verdicts
- * before a merge, when it exits 0. The other is `gh run rerun <id>` of the
- * PR's issue-link run followed by `gh run watch <id> --exit-status`.
+ * the PR's head with origin/main fetched: the fresh verdict before a merge,
+ * when it exits 0. Since #30 a re-run of the PR's issue-link is none: that
+ * run passes --review-report, and there the Copilot review and the review
+ * threads are only reported.
  */
 export function gateCiCommand(pr, branch) {
   return `node scripts/gate.mjs --pr ${shellWord(pr)} --branch ${shellWord(branch)}`

@@ -393,10 +393,8 @@ export declare const refreshWaitMs: number
 export declare const skipCiTokens: readonly string[]
 export declare const skipChecksTrailer: string
 
-// The review signal, the PR refresh and the audit's review pages
+// The PR refresh and the audit's review pages
 
-export declare const reviewSignalWorkflow: string
-export declare const reviewSignalWorkflowFile: string
 export declare const issueLinkRefreshWorkflowFile: string
 export declare function refreshPrCommand(pr: number | string): string
 export declare function gateCiCommand(
