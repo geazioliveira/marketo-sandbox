@@ -468,6 +468,7 @@ async function ciOver(
     prepare,
     branch = BRANCH,
     pathOverride,
+    args = [],
   }: {
     env?: Record<string, string>
     /** Runs on the trusted copy of the gate before it runs. */
@@ -475,6 +476,8 @@ async function ciOver(
     branch?: string
     /** A PATH in place of the usual one (pathWithFailingGit). */
     pathOverride?: string
+    /** Arguments after --pr and --branch (the workflow's --review-report). */
+    args?: string[]
   } = {},
 ) {
   const head = await repo.head()
@@ -483,12 +486,15 @@ async function ciOver(
   await repo.git('branch', '-q', '-D', 'main')
   const trusted = installGate(path.join(repo.root, 'trusted'))
   prepare?.(trusted)
-  const run = await repo.gateJson(['--pr', String(PR), '--branch', branch], {
-    fixture: fixture(head),
-    script: trusted,
-    env: { GITHUB_REPOSITORY: `${OWNER}/${NAME}`, ...env },
-    ...(pathOverride === undefined ? {} : { pathOverride }),
-  })
+  const run = await repo.gateJson(
+    ['--pr', String(PR), '--branch', branch, ...args],
+    {
+      fixture: fixture(head),
+      script: trusted,
+      env: { GITHUB_REPOSITORY: `${OWNER}/${NAME}`, ...env },
+      ...(pathOverride === undefined ? {} : { pathOverride }),
+    },
+  )
   return { repo, head, ...run }
 }
 
@@ -3575,6 +3581,191 @@ describe.concurrent('scripts/gate.mjs', () => {
       expect(out).toContain(`Build BLOQUEADO na #${ISSUE}:`)
     })
   })
+
+  // ---------------------------------------------------------------------------
+  // The issue-link workflow's --review-report (#30)
+
+  describe.concurrent(
+    '--review-report, the option of the issue-link workflow (#30)',
+    () => {
+      const REPORT = '--review-report'
+      const WAITING_REVIEW =
+        '::warning title=O merge espera a revisão do Copilot::'
+      const WAITING_THREADS =
+        '::warning title=O merge espera as threads de revisão::'
+
+      /**
+       * CI mode with the option issue-link.yml passes, over this PR, and the
+       * job summary the gate appends to, when it writes one.
+       */
+      const report = async (
+        fresh: Fresh,
+        pr: (head: string) => Record<string, unknown>,
+      ) => {
+        const repo = await fresh()
+        await workBranch(repo)
+        const summary = path.join(repo.root, 'summary.md')
+        const run = await ciOver(
+          repo,
+          (head) => ({ issue: issueAnswer(), pr: prAnswer(head, pr(head)) }),
+          { env: { GITHUB_STEP_SUMMARY: summary }, args: [REPORT] },
+        )
+        return {
+          ...run,
+          summary: existsSync(summary) ? readFileSync(summary, 'utf8') : null,
+        }
+      }
+
+      test('passes a ready PR still waiting for the Copilot review, and warns on the PR', async ({
+        expect,
+        fresh,
+      }) => {
+        const { status, result, stderr, summary } = await report(fresh, () => ({
+          reviews: connection([]),
+        }))
+        expect(step(result, 'copilot-review')).toMatchObject({
+          status: 'no',
+          blocks: false,
+        })
+        // The fresh verdict it points to runs without the option.
+        expect(
+          step(result, 'copilot-review').detail.endsWith(`; ${RENEW}`),
+        ).toBe(true)
+        expect(result.blocked).toEqual([])
+        expect(result.open).toBe(true)
+        expect(status).toBe(0)
+        expect(stderr).toContain(
+          `${WAITING_REVIEW}nenhuma revisão do Copilot nesta PR`,
+        )
+        expect(summary).toContain('O merge espera a revisão do Copilot')
+        expect(summary).toContain('`copilot-review`')
+        expect(summary).toContain(
+          `node scripts/gate.mjs --pr ${PR} --branch ${BRANCH}`,
+        )
+      })
+
+      test('passes a ready PR with an open thread, and warns on the PR', async ({
+        expect,
+        fresh,
+      }) => {
+        const { status, result, stderr, summary } = await report(
+          fresh,
+          (head) => ({
+            reviews: connection([review(head)]),
+            reviewThreads: connection([thread(1)]),
+          }),
+        )
+        expect(step(result, 'review-threads')).toMatchObject({
+          status: 'no',
+          blocks: false,
+        })
+        expect(result.blocked).toEqual([])
+        expect(status).toBe(0)
+        expect(stderr).toContain(`${WAITING_THREADS}1 de 1 thread`)
+        expect(stderr).not.toContain(WAITING_REVIEW)
+        expect(summary).toContain('`review-threads`')
+      })
+
+      test('warns about nothing when the review and the threads are in order', async ({
+        expect,
+        fresh,
+      }) => {
+        const { status, result, stderr, summary } = await report(
+          fresh,
+          () => ({}),
+        )
+        expect(step(result, 'copilot-review').status).toBe('ok')
+        expect(status).toBe(0)
+        expect(stderr).not.toContain('::warning')
+        expect(summary).toBeNull()
+      })
+
+      test('reports a draft as before, with no warning', async ({
+        expect,
+        fresh,
+      }) => {
+        const { status, result, stderr, summary } = await report(fresh, () => ({
+          isDraft: true,
+          reviews: connection([]),
+        }))
+        expect(step(result, 'copilot-review')).toMatchObject({
+          status: 'no',
+          blocks: false,
+        })
+        expect(status).toBe(0)
+        expect(stderr).not.toContain('::warning')
+        expect(summary).toBeNull()
+      })
+
+      test('still blocks every other step', async ({ expect, fresh }) => {
+        const { status, result } = await report(fresh, () => ({
+          reviews: connection([]),
+          body: 'Uma PR sem a linha de fechamento.',
+        }))
+        expect(result.blocked).toEqual(['pr-first-line'])
+        expect(status).toBe(1)
+      })
+
+      test('escapes in the annotation what a workflow command cannot carry', async ({
+        expect,
+        fresh,
+      }) => {
+        const { stderr } = await report(fresh, (head) => ({
+          reviews: connection([review(head)]),
+          reviewThreads: connection([thread(1, { path: 'src/100%.ts' })]),
+        }))
+        // The report a person reads keeps the path as it is; only the
+        // workflow command escapes it.
+        const annotation = stderr
+          .split('\n')
+          .find((line) => line.startsWith('::warning'))
+        expect(annotation).toContain('src/100%25.ts')
+        expect(annotation).not.toContain('src/100%.ts')
+      })
+
+      test('writes the annotations on stdout without --json, where the workflow reads them', async ({
+        expect,
+        fresh,
+      }) => {
+        const repo = await fresh()
+        await workBranch(repo)
+        const head = await repo.head()
+        await repo.git('switch', '-q', '--detach')
+        await repo.git('branch', '-q', '-D', BRANCH)
+        await repo.git('branch', '-q', '-D', 'main')
+        const trusted = installGate(path.join(repo.root, 'trusted'))
+        const run = await repo.gate(
+          ['--pr', String(PR), '--branch', BRANCH, REPORT],
+          {
+            fixture: {
+              issue: issueAnswer(),
+              pr: prAnswer(head, { reviews: connection([]) }),
+            },
+            script: trusted,
+            env: { GITHUB_REPOSITORY: `${OWNER}/${NAME}` },
+          },
+        )
+        expect(run.status).toBe(0)
+        expect(run.stdout).toMatch(
+          new RegExp(
+            `^${WAITING_REVIEW.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`,
+            'm',
+          ),
+        )
+        expect(run.stdout).toContain(`O gate está aberto para a #${ISSUE}.`)
+      })
+
+      test('is refused outside the CI mode', async ({ expect, fresh }) => {
+        const repo = await fresh()
+        await workBranch(repo)
+        const run = await repo.gate([REPORT], {
+          fixture: { issue: issueAnswer() },
+        })
+        expect(run.status).toBe(2)
+        expect(run.stderr).toContain('--review-report só vale no modo CI')
+      })
+    },
+  )
 
   // ---------------------------------------------------------------------------
   // The cache and the command line
