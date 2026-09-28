@@ -38,6 +38,7 @@
 | O script `gate`, `scripts/` no `lint` (`package.json:23`) e o `.claude/**` fora das duas configs do vitest (`vitest.config.ts:12-14`, `vitest.config.e2e.ts:10`) | `8ce2d58` | #2 |
 | `.nvmrc` com `24`, e o workflow `Qualidade`, que lê a versão dele (`.github/workflows/check.yml:48-50`) | `5b33eb2` | #2 |
 | `/.codegen-tmp/`, `/scripts/__pycache__/` e `/coverage/` no `.gitignore` (`.gitignore:41-43`) | `53ebbf7` | #2 |
+| `.claude/hooks/` no `lint`, no `format` e no `format:check` (`package.json`) | `3a6ac45` | #34, fatia 1 da #5 |
 | O Prettier dos geradores lendo só o `.prettierignore` (`3ddceb4:scripts/marketo_codegen.py:229-233`) | `b399cde` | #6 |
 | O Prettier dos geradores sem arquivo de ignore, com a conferência do relatório por arquivo e a saída 2 (`scripts/marketo_codegen.py:268-362`) | `8f358fb` | #7 |
 | `check:all` no fim do `check` (`package.json:32`) | `232b930` | #7 |
@@ -97,3 +98,4 @@ O histórico não registra que alternativas foram avaliadas.
 - **Atualizado**: 2026-09-26 (Fase: Learn), a #9 renomeou o pacote para `marketo-sandbox`, tirou o Hello World, o `deploy` e o `@nestjs/mau`, regenerou o lockfile com o faker como dependência de runtime e pôs no `npm run check` o `format:check`, que cobre `src`, `test` e `scripts`; as citações de `package.json` e do `check.yml` seguiram as linhas novas (#9)
 - **Atualizado**: 2026-09-26 (Fase: Learn), o Prettier dos geradores passou a ler só o `.prettierignore`, e o Python 3.9.9 reproduziu a saída da reescrita multi-API; as citações do `marketo_codegen.py` e do gerador de definições seguiram as linhas novas (#6)
 - **Atualizado**: 2026-09-26 (Fase: Build), o `check:all` entrou no fim do `npm run check` e o CI passou a rodar os geradores com o python3 da imagem, com 3.9 como mínimo declarado; o Prettier dos geradores deixou de ler o `.prettierignore` ([ADR 0011](0011-generators-format-without-ignore-files.md)), o node passou a vir do `PATH` antes dos candidatos fixos, e as citações seguiram as linhas novas (#7)
+- **Atualizado**: 2026-09-28 (Fase: Learn), o `lint`, o `format` e o `format:check` passaram a cobrir `.claude/hooks/` (#5)
