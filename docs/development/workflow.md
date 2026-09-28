@@ -243,7 +243,7 @@ Uma mudança grande demais para uma PR vem numa stack: PRs pequenas, uma sobre a
    gh issue create --repo geazioliveira/marketo-sandbox --parent <mãe> --title "<fatia>" --label enhancement --label stack-slice --body "Fatia da stack da #<mãe>."
    ```
 
-2. **O plano da mãe.** Um `# Plano` na mãe com as seções de sempre e uma seção `Stack` com as branches das fatias, de baixo para cima, uma por item:
+2. **O plano da mãe.** Um `# Plano` na mãe com as seções de sempre e uma seção `## Stack` com as branches das fatias, de baixo para cima: uma lista numerada, na primeira coluna, cada item começando com a branch num code span. Um bullet ou um parágrafo na seção é prosa e não vira fatia, e um item numerado que não começa com uma branch bloqueia a stack:
 
    ```markdown
    ## Stack
@@ -260,8 +260,8 @@ Uma mudança grande demais para uma PR vem numa stack: PRs pequenas, uma sobre a
    git branch --unset-upstream
    ```
 
-   O intent vai no primeiro commit da primeira fatia, e o Learn, com a entrada do changelog citando a mãe, na última.
-4. **As PRs.** Cada uma fecha só a sua sub-issue (`Closes #<sub>.`). A primeira aponta para `main`. Cada outra aponta para a fatia de baixo e fica em draft até ela ser mergeada:
+   O intent vai no primeiro commit da primeira fatia, e o Learn, com a entrada do changelog citando a mãe, na última. Todo commit de uma fatia cita a sub-issue dela (`Refs #<sub>`): acima da primeira fatia, isso bloqueia no CI.
+4. **As PRs.** Cada uma fecha só a sua sub-issue (`Closes #<sub>.`). A primeira aponta para `main`. Cada outra aponta para a fatia de baixo e fica em draft até ela ser mergeada; o gate só aceita `main` como base dela depois de toda fatia de baixo mergeada:
 
    ```sh
    gh pr create --repo geazioliveira/marketo-sandbox --draft --base <fatia de baixo> --title "<título>" --body-file <corpo>
