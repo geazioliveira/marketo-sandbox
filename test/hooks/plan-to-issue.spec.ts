@@ -717,6 +717,30 @@ describe.concurrent('plan-to-issue on Bash: what keeps the marker', () => {
     expect(contextOf(run)).toContain('o marcador continua')
   })
 
+  test.for([
+    ['left blank on a form', '_No response_'],
+    ['with nothing under it', ''],
+  ] as const)(
+    'gh issue create with a required section %s names it, as the gate does (Copilot review of #54)',
+    async ([, content], { fresh, expect }) => {
+      const repo = await pending(fresh)
+      repo.write({
+        'issue.md': sectionsOf(featureSections).replace(
+          'Texto de Riscos.',
+          content,
+        ),
+      })
+      const run = await bash(
+        repo,
+        'gh issue create -t Coisa -l enhancement -F issue.md',
+        `${ISSUE_URL}/23\n`,
+      )
+      expect(existsSync(repo.markerPath(SESSION))).toBe(true)
+      expect(contextOf(run)).toContain('estão vazias Riscos')
+      expect(contextOf(run)).toContain('o marcador continua')
+    },
+  )
+
   test('gh issue create with a feature plan under the bug label', async ({
     fresh,
     expect,
@@ -1468,6 +1492,15 @@ describe.concurrent(
         'without the plan’s sections',
         () => ({ body: 'Só um resumo, sem as seções.' }),
       ],
+      [
+        'with a required section left blank (Copilot review of #54)',
+        () => ({
+          body: sectionsOf(featureSections).replace(
+            'Texto de Riscos.',
+            '_No response_',
+          ),
+        }),
+      ],
     ] as const)(
       'keeps the marker for gh issue create when the account’s one new issue is %s',
       async ([, change], { fresh, expect }) => {
@@ -2070,6 +2103,76 @@ describe.concurrent(
       expect(
         existsSync(path.join(worktree.gitDir, planPendingFile(SESSION))),
       ).toBe(false)
+    })
+
+    test.for([
+      ['another repository', 'https://github.com/alguem/outro.git'],
+      [
+        'this project on another host',
+        'https://gitlab.com/geazioliveira/marketo-sandbox.git',
+      ],
+      ['missing', null],
+    ] as const)(
+      'touches nothing in a repository whose origin is %s, and tells Claude through exit 2 (Copilot review of #54)',
+      async ([, origin], { fresh, scratch, expect }) => {
+        const script = brokenTree(scratch())
+        const repo = await fresh({ origin, cache: true })
+        const before = readdirSync(repo.gitDir).sort()
+        const run = await runBroken(script, repo, {
+          session_id: SESSION,
+          tool_name: 'ExitPlanMode',
+          tool_input: { plan: planComment },
+        })
+        expect(run.status).toBe(2)
+        expect(run.stderr).toContain('não fica neste projeto')
+        expect(run.stderr).toContain(
+          'o hook não grava o marcador do plano nem remove o cache do gate',
+        )
+        expect(readdirSync(repo.gitDir).sort()).toEqual(before)
+        expect(cacheExists(repo)).toBe(true)
+      },
+    )
+
+    test.for([
+      ['over SSH', 'git@github.com:geazioliveira/marketo-sandbox.git'],
+      ['in another case', 'https://github.com/GeaziOliveira/Marketo-Sandbox'],
+    ] as const)(
+      'marks the plan when this project’s origin is written %s',
+      async ([, origin], { fresh, scratch, expect }) => {
+        const script = brokenTree(scratch())
+        const repo = await fresh({ origin })
+        const run = await runBroken(script, repo, {
+          session_id: SESSION,
+          tool_name: 'ExitPlanMode',
+          tool_input: { plan: planComment },
+        })
+        expect(run.status).toBe(2)
+        expect(existsSync(repo.markerPath(SESSION))).toBe(true)
+      },
+    )
+
+    test('keeps failing closed when the origin cannot be read', async ({
+      fresh,
+      scratch,
+      expect,
+    }) => {
+      // Two URLs on the origin: which one gh would use is not read, so the
+      // plan is marked as in this project.
+      const script = brokenTree(scratch())
+      const repo = await fresh()
+      await repo.git(
+        'config',
+        '--add',
+        'remote.origin.url',
+        'https://github.com/alguem/outro.git',
+      )
+      const run = await runBroken(script, repo, {
+        session_id: SESSION,
+        tool_name: 'ExitPlanMode',
+        tool_input: { plan: planComment },
+      })
+      expect(run.status).toBe(2)
+      expect(existsSync(repo.markerPath(SESSION))).toBe(true)
     })
 
     test('names the marker as planPendingFile does, for any session id', async ({

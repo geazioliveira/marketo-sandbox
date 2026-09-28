@@ -308,9 +308,10 @@ function labelsOf(command) {
 /**
  * Whether a body counts as the plan, and why not when it does not.
  * A comment counts when it opens exactly with `# Plano` (commentOpening).
- * An issue counts when no required section is missing for its kind; with no
- * category label either kind will do, and with both it counts as neither:
- * the gate refuses such an issue, so the plan is not published there yet.
+ * An issue counts when no required section is missing or empty for its
+ * kind; with no category label either kind will do, and with both it counts
+ * as neither: the gate refuses such an issue, so the plan is not published
+ * there yet.
  * @returns {{ counts: boolean, note: string | null }}
  */
 function judgeBody(command, kind, baseCwd) {
@@ -331,8 +332,10 @@ function judgeBody(command, kind, baseCwd) {
 
 /**
  * Whether an issue's body counts as the plan, by its category labels: no
- * required section missing for its kind; with no category label either kind
- * will do, and with both it counts as neither.
+ * required section missing or empty for its kind, as the gate's `sections`
+ * step judges it; with no category label either kind will do, and with both
+ * it counts as neither. An empty section, `_No response_` included, is what
+ * a form left blank renders: a report, not a plan (Copilot review of #54).
  * @returns {{ counts: boolean, note: string | null }}
  */
 function planCounts(text, labels) {
@@ -343,17 +346,24 @@ function planCounts(text, labels) {
       note: `a issue criada leva ${found.join(' e ')} ao mesmo tempo, e o gate a recusa; o marcador do plano continua.`,
     }
   const kinds = labelKind === null ? [featureKind, bugKind] : [labelKind]
-  const results = kinds.map((candidate) => ({
-    candidate,
-    missing: checkSections(text, candidate).missing,
-  }))
-  if (results.some((result) => result.missing.length === 0))
+  const results = kinds.map((candidate) => {
+    const { missing, empty } = checkSections(text, candidate)
+    return { candidate, missing, empty }
+  })
+  if (
+    results.some(
+      (result) => result.missing.length === 0 && result.empty.length === 0,
+    )
+  )
     return { counts: true, note: null }
   const detail = results
-    .map(
-      ({ candidate, missing }) =>
-        `${results.length > 1 ? `como ${candidate}, ` : ''}faltam ${missing.join(', ')}`,
-    )
+    .map(({ candidate, missing, empty }) => {
+      const parts = [
+        ...(missing.length > 0 ? [`faltam ${missing.join(', ')}`] : []),
+        ...(empty.length > 0 ? [`estão vazias ${empty.join(', ')}`] : []),
+      ]
+      return `${results.length > 1 ? `como ${candidate}, ` : ''}${parts.join(' e ')}`
+    })
     .join('; ')
   return {
     counts: false,
