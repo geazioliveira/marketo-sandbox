@@ -16,12 +16,12 @@ Uma entrada por mudança mergeada, da mais nova para a mais antiga, escrita no p
 - **Saíram o `Sinal de revisão` e o modo `workflow_run` do refresh.** O refresh ficou com os eventos de issue e o disparo a pedido, e os contratos, o script, os testes e o `gh` falso perderam o que só o sinal usava.
 - **O veredito fresco é só o gate em modo CI na cabeça da PR.** Um rerun do `issue-link` não é mais veredito fresco, porque roda com a opção. A nota de refresh interrompido e as docs passaram a dizer isso.
 - **O hook de `gh pr merge` (#5) e a auditoria de `main` seguem exigindo** a revisão na cabeça, nenhum pedido pendente e nenhuma thread aberta, com testes novos que montam os checks exigidos verdes.
-- **As docs dizem a regra nova:** a ADR 0003, a ADR 0002, o fluxo, o `AGENTS.md`, o glossário e os patterns do gate, da revisão e do ciclo de vida. Nenhuma diz mais que o refresh não foi provado ao vivo, que toda revisão dispara o sinal ou que um rerun do `issue-link` é veredito fresco, e os JSDoc dos scripts também não.
+- **As docs dizem a regra nova:** a ADR 0003, a ADR 0002, o fluxo, o `AGENTS.md`, o glossário, os patterns do gate, da revisão e do ciclo de vida e o intent da #13. Nenhuma diz mais que o refresh não foi provado ao vivo, que toda revisão dispara o sinal ou que um rerun do `issue-link` é veredito fresco, e os JSDoc dos scripts também não.
 
 ### Números medidos
 
 - **Antes**, pelo plano da #30: 32 de 76 tentativas do `issue-link` vermelhas, todas em `copilot-review`, e 4 das 5 PRs mergeadas sob a regra da #13 só ficaram verdes com um `gh run rerun` manual.
-- **`npm run check`**: 3.746 testes em 21 arquivos, com 8 casos novos no `gate.spec.ts`, 2 do veredito fresco no `drift.spec.ts` e os testes do modo `workflow_run` e da busca por branch removidos do `refresh-issue-link.spec.ts`; o e2e com 33.
+- **`npm run check`**: 3.747 testes em 21 arquivos, com 8 casos novos no `gate.spec.ts`, 3 das revisões do Copilot no `drift.spec.ts` e os testes do modo `workflow_run` e da busca por branch removidos do `refresh-issue-link.spec.ts`; o e2e com 33.
 - **Mutações**: as 7 da opção foram pegas pelos testes.
 - **O rerun pelo `GITHUB_TOKEN`** passa, medido ao vivo nas runs 36263677912 (tentativa 2) e 36269762597 (tentativas 3 e 4), e as docs deixaram de dizer o contrário.
 
@@ -44,7 +44,7 @@ Uma entrada por mudança mergeada, da mais nova para a mais antiga, escrita no p
 - **As mutações rodaram numa cópia da árvore fora do git.** Mutar o `scripts/gate.mjs` pelo shell teria escrito no harness sem passar pela confirmação do dono, que é o limite da tripwire registrado na ADR 0002.
 - **Os testes dos hooks falham por tempo quando a máquina está carregada.** Com a média de carga entre 15 e 20, duas rodadas do `npm run check` falharam em testes diferentes do `guard-bash` e do `session-context`, e a terceira passou inteira.
 - **A prova ao vivo depende do merge.** O `issue-link` desta PR ainda roda o gate de `main`, o de antes. A primeira PR depois do merge mostra se ele fica verde sem rerun.
-- **Um teste de drift pela frase exata deixa passar a mesma regra dita de outro jeito.** As revisões do Copilot na PR #56 acharam o sinal ainda no presente e um rerun do `issue-link` ainda dado como veredito fresco, num parêntese de JSDoc e no "Quando usar" do gate. O `drift.spec` passou a conferir toda frase que junta os dois termos, nas docs e nos JSDoc dos scripts.
+- **Um teste de drift pela frase exata deixa passar a mesma regra dita de outro jeito.** As revisões do Copilot na PR #56 acharam o sinal ainda no presente e um rerun do `issue-link` ainda dado como veredito fresco, num parêntese de JSDoc, no "Quando usar" do gate e no intent da #13, que nenhuma lista do drift incluía. O `drift.spec` passou a conferir toda frase que junta os dois termos, nas docs, nesse intent e nos JSDoc dos scripts.
 
 ---
 
