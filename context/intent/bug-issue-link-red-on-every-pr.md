@@ -65,7 +65,7 @@ O que foi construído está na [entrada do changelog](../evolution/changelog.md)
 
 Como foi verificado:
 
-- **`npm run check`** passou com 3.743 testes em 21 arquivos, o e2e com 33, e o gate está aberto para a #30. O `gate.spec.ts` ganhou 8 casos da opção.
+- **`npm run check`** passou com 3.744 testes em 21 arquivos, o e2e com 33, e o gate está aberto para a #30. O `gate.spec.ts` ganhou 8 casos da opção.
 - **Sete mutações da opção** foram pegas, cada uma por pelo menos um caso: a opção que não relaxa, a annotation ausente, o resumo ausente, o aviso numa draft, a opção aceita fora do modo CI, o `%` sem escape e a annotation fora da saída padrão. Elas rodaram numa cópia da árvore fora do git, para não escrever no harness sem a confirmação do dono.
 - **A prova ao vivo fica para depois do merge.** O `issue-link` desta PR ainda roda o gate de `main`, o de antes. A primeira PR depois do merge deve sair de draft e ficar verde no `issue-link` sem rerun, antes e depois da revisão do Copilot; os ids das runs vão para um comentário na #30 e para estes Resultados, no Learn dessa PR. Até lá, esse critério fica aberto.
 

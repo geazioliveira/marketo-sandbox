@@ -21,7 +21,7 @@ Uma entrada por mudança mergeada, da mais nova para a mais antiga, escrita no p
 ### Números medidos
 
 - **Antes**, pelo plano da #30: 32 de 76 tentativas do `issue-link` vermelhas, todas em `copilot-review`, e 4 das 5 PRs mergeadas sob a regra da #13 só ficaram verdes com um `gh run rerun` manual.
-- **`npm run check`**: 3.743 testes em 21 arquivos, com 8 casos novos no `gate.spec.ts` e os testes do modo `workflow_run` e da busca por branch removidos do `refresh-issue-link.spec.ts`; o e2e com 33.
+- **`npm run check`**: 3.744 testes em 21 arquivos, com 8 casos novos no `gate.spec.ts` e os testes do modo `workflow_run` e da busca por branch removidos do `refresh-issue-link.spec.ts`; o e2e com 33.
 - **Mutações**: as 7 da opção foram pegas pelos testes.
 - **O rerun pelo `GITHUB_TOKEN`** passa, medido ao vivo nas runs 36263677912 (tentativa 2) e 36269762597 (tentativas 3 e 4), e as docs deixaram de dizer o contrário.
 
