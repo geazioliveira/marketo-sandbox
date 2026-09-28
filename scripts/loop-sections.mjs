@@ -1584,16 +1584,8 @@ export const skipCiTokens = [
 export const skipChecksTrailer = 'skip-checks: true'
 
 // ---------------------------------------------------------------------------
-// The review signal, the PR refresh and the audit's review pages (#13)
-
-/**
- * The name of .github/workflows/review-signal.yml (reviewSignalWorkflowFile),
- * which issue-link-refresh.yml's workflow_run trigger names: workflow_run
- * matches a workflow by this name, so a rename on either side silently stops
- * the refresh after a review.
- */
-export const reviewSignalWorkflow = 'Sinal de revisão'
-export const reviewSignalWorkflowFile = 'review-signal.yml'
+// The PR refresh and the audit's review pages (#13). The review signal that
+// re-triggered the refresh after a review went away with #30.
 
 /** The workflow that re-runs the issue-link check from main (#3, #13). */
 export const issueLinkRefreshWorkflowFile = 'issue-link-refresh.yml'

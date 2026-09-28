@@ -36,8 +36,6 @@ import {
   refreshWaitMs,
   requiredChecks,
   reviewRuleSince,
-  reviewSignalWorkflow,
-  reviewSignalWorkflowFile,
   skipCiTokens,
   skipChecksTrailer,
   stepIds,
@@ -732,7 +730,6 @@ const asDocs = (command: string, pr: string, branch = '<branch>') =>
 
 describe('docs against the review gate’s contract values (#13)', () => {
   const gate = read('scripts/gate.mjs')
-  const reviewSignal = `.github/workflows/${reviewSignalWorkflowFile}`
   const refresh = `.github/workflows/${issueLinkRefreshWorkflowFile}`
   const reviewSteps = ['copilot-review', 'review-threads']
 
@@ -864,27 +861,6 @@ describe('docs against the review gate’s contract values (#13)', () => {
         // A dispatch runs the YAML and the script of the ref it names.
         expect(rest, file).toContain(' --ref main ')
       }
-    },
-  )
-
-  it.each([adr0003, adr0002, workflowGuide])(
-    '%s names the review signal as its workflow does, with its events and no permissions',
-    (file) => {
-      const yaml = read(reviewSignal)
-      expect(/^name: (.+)$/m.exec(yaml)?.[1]).toBe(reviewSignalWorkflow)
-      expect(yaml).toMatch(/^permissions: \{\}$/m)
-      const types = /^ {2}pull_request_review:\n {4}types: \[([^\]]*)\]/m
-        .exec(yaml)?.[1]
-        .split(',')
-        .map((type) => type.trim())
-      expect(types?.length).toBeGreaterThan(0)
-      const text = read(file)
-      expect(text).toContain(`\`${reviewSignalWorkflow}\``)
-      expect(text).toContain(`\`${reviewSignal}\``)
-      expect(text).toContain(
-        `\`pull_request_review\` (${(types ?? []).map((type) => `\`${type}\``).join(', ')})`,
-      )
-      expect(text).toContain('`permissions: {}`')
     },
   )
 

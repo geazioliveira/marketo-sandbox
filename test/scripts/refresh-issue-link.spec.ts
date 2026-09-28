@@ -18,7 +18,6 @@ import {
   refreshPrCommand,
   refreshWaitMs,
   requiredChecks,
-  reviewSignalWorkflow,
 } from '../../scripts/loop-sections.mjs'
 import { cleanEnv } from '../support/clean-env'
 import { exec, projectRoot } from '../support/temp-repo'
@@ -205,45 +204,15 @@ const pullNow = (number: number, state = 'OPEN', headRefOid = HEAD) => ({
   [`pull:${number}`]: { number, state, headRefOid },
 })
 
-/** The open PRs of a head branch, as the branch query reads them. */
-const branchPulls = (
-  branch: string,
-  nodes: {
-    number: number
-    state?: string
-    headRefOid?: string
-    repo?: string
-  }[],
-  totalCount = nodes.length,
-) => ({
-  [`branch:${branch}`]: {
-    totalCount,
-    nodes: nodes.map(
-      ({ number, state = 'OPEN', headRefOid = HEAD, repo = REPO }) => ({
-        number,
-        state,
-        headRefOid,
-        headRepository: { nameWithOwner: repo },
-      }),
-    ),
-  },
-})
-
 /**
- * The environment issue-link-refresh.yml gives the script on a workflow_run
- * of the review signal or on a dispatch: no issue, the PR number when the
- * event names one, and the branch of a workflow_run.
+ * The environment issue-link-refresh.yml gives the script on a dispatch: no
+ * issue, and the PR number the dispatch names.
  */
-const prMode = (
-  event: 'workflow_run' | 'workflow_dispatch',
-  env: { PR_NUMBER?: string; HEAD_BRANCH?: string; HEAD_REPO?: string } = {},
-) => ({
-  GITHUB_EVENT_NAME: event,
+const prMode = (env: { PR_NUMBER?: string } = {}) => ({
+  GITHUB_EVENT_NAME: 'workflow_dispatch',
   ISSUE_NUMBER: '',
   IS_PR: 'false',
   PR_NUMBER: '',
-  HEAD_BRANCH: event === 'workflow_run' ? BRANCH : '',
-  HEAD_REPO: event === 'workflow_run' ? REPO : '',
   ...env,
 })
 
@@ -880,12 +849,14 @@ describe.concurrent('scripts/refresh-issue-link.mjs', () => {
     ['GITHUB_EVENT_NAME', { GITHUB_EVENT_NAME: 'pull_request_review' }],
     ['REFRESH_POLL_MS', { REFRESH_POLL_MS: '1s' }],
     ['REFRESH_WAIT_MS', { REFRESH_WAIT_MS: '-5' }],
-    ['PR_NUMBER', prMode('workflow_dispatch')],
-    ['PR_NUMBER', prMode('workflow_dispatch', { PR_NUMBER: '014' })],
-    ['PR_NUMBER', prMode('workflow_run', { PR_NUMBER: '14 ' })],
-    ['HEAD_BRANCH', prMode('workflow_run', { HEAD_BRANCH: '' })],
-    ['HEAD_BRANCH', prMode('workflow_run', { HEAD_BRANCH: 'feature/a b' })],
-    ['HEAD_BRANCH', prMode('workflow_run', { HEAD_BRANCH: 'x'.repeat(256) })],
+    ['PR_NUMBER', prMode()],
+    ['PR_NUMBER', prMode({ PR_NUMBER: '014' })],
+    ['PR_NUMBER', prMode({ PR_NUMBER: '14 ' })],
+    // The review signal's workflow_run is gone since #30.
+    [
+      'GITHUB_EVENT_NAME',
+      { ...prMode({ PR_NUMBER: '14' }), GITHUB_EVENT_NAME: 'workflow_run' },
+    ],
   ])(
     'refuses a malformed %s with exit 2',
     async ([name, env], { expect, scratch }) => {
@@ -898,12 +869,11 @@ describe.concurrent('scripts/refresh-issue-link.mjs', () => {
 })
 
 describe.concurrent('scripts/refresh-issue-link.mjs in PR mode (#13)', () => {
-  test.for<['workflow_run' | 'workflow_dispatch', string]>([
-    ['workflow_run', 'depois de uma revisão (Sinal de revisão)'],
+  test.for<['workflow_dispatch', string]>([
     ['workflow_dispatch', 'a pedido (workflow_dispatch)'],
   ])(
     'on %s, re-reads the PR and re-runs the issue-link run of its head',
-    async ([event, why], { expect, scratch }) => {
+    async ([, why], { expect, scratch }) => {
       const run = await scratch.refresh(
         {
           answers: {
@@ -916,7 +886,7 @@ describe.concurrent('scripts/refresh-issue-link.mjs in PR mode (#13)', () => {
             'rerun:4301': true,
           },
         },
-        prMode(event, { PR_NUMBER: String(PR) }),
+        prMode({ PR_NUMBER: String(PR) }),
       )
       expect(run.status, run.stdout).toBe(0)
       expect(keys(run.calls)).toEqual([
@@ -960,7 +930,7 @@ describe.concurrent('scripts/refresh-issue-link.mjs in PR mode (#13)', () => {
           'rerun:4302': true,
         },
       },
-      prMode('workflow_run', { PR_NUMBER: String(PR) }),
+      prMode({ PR_NUMBER: String(PR) }),
     )
     expect(run.status, run.stdout).toBe(0)
     expect(keys(run.calls)).toEqual([
@@ -976,7 +946,7 @@ describe.concurrent('scripts/refresh-issue-link.mjs in PR mode (#13)', () => {
       // Copilot reviewed #10 and #11 minutes after their merges.
       const run = await scratch.refresh(
         { answers: { ...pullNow(PR, state) } },
-        prMode('workflow_run', { PR_NUMBER: String(PR) }),
+        prMode({ PR_NUMBER: String(PR) }),
       )
       expect(run.status, run.stdout).toBe(0)
       expect(keys(run.calls)).toEqual([`pull:${PR}`])
@@ -1008,7 +978,7 @@ describe.concurrent('scripts/refresh-issue-link.mjs in PR mode (#13)', () => {
           ],
         },
       },
-      prMode('workflow_dispatch', { PR_NUMBER: String(PR) }),
+      prMode({ PR_NUMBER: String(PR) }),
     )
     expect(run.status, run.stdout).toBe(0)
     expect(keys(run.calls)).toEqual([
@@ -1034,7 +1004,7 @@ describe.concurrent('scripts/refresh-issue-link.mjs in PR mode (#13)', () => {
         },
       },
       {
-        ...prMode('workflow_run', { PR_NUMBER: String(PR) }),
+        ...prMode({ PR_NUMBER: String(PR) }),
         REFRESH_WAIT_MS: '0',
       },
     )
@@ -1051,7 +1021,7 @@ describe.concurrent('scripts/refresh-issue-link.mjs in PR mode (#13)', () => {
   }) => {
     const run = await scratch.refresh(
       { answers: { ...pullNow(PR), ...runsFor(HEAD) } },
-      prMode('workflow_dispatch', { PR_NUMBER: String(PR) }),
+      prMode({ PR_NUMBER: String(PR) }),
     )
     expect(run.status, run.stdout).toBe(0)
     expect(run.stdout).toContain(
@@ -1062,7 +1032,7 @@ describe.concurrent('scripts/refresh-issue-link.mjs in PR mode (#13)', () => {
   test('goes red when the PR does not exist', async ({ expect, scratch }) => {
     const run = await scratch.refresh(
       { answers: { [`pull:${PR}`]: null } },
-      prMode('workflow_dispatch', { PR_NUMBER: String(PR) }),
+      prMode({ PR_NUMBER: String(PR) }),
     )
     expect(run.status).toBe(1)
     expect(run.stdout).toContain('Could not resolve to a PullRequest')
@@ -1075,7 +1045,7 @@ describe.concurrent('scripts/refresh-issue-link.mjs in PR mode (#13)', () => {
   }) => {
     const run = await scratch.refresh(
       { fail: { [`pull:${PR}`]: 'auth' } },
-      prMode('workflow_run', { PR_NUMBER: String(PR) }),
+      prMode({ PR_NUMBER: String(PR) }),
     )
     expect(run.status).toBe(1)
     expect(run.stdout).toContain('Bad credentials')
@@ -1087,125 +1057,6 @@ describe.concurrent('scripts/refresh-issue-link.mjs in PR mode (#13)', () => {
       `Para só tentar o refresh de novo: ${refreshPrCommand(PR)}; sozinho, isso não é veredito fresco.`,
     )
     expect(run.stdout).not.toMatch(/renove o veredito[^\n]*gh workflow run/)
-  })
-
-  test('with no PR in the run, refreshes the open PR of its head branch in this repository', async ({
-    expect,
-    scratch,
-  }) => {
-    const run = await scratch.refresh(
-      {
-        answers: {
-          ...branchPulls(BRANCH, [
-            { number: 40, repo: 'someone/marketo-sandbox', headRefOid: OTHER },
-            { number: PR },
-          ]),
-          ...runsFor(HEAD, {
-            id: 4305,
-            status: 'completed',
-            conclusion: 'success',
-          }),
-          'rerun:4305': true,
-        },
-      },
-      prMode('workflow_run'),
-    )
-    expect(run.status, run.stdout).toBe(0)
-    expect(keys(run.calls)).toEqual([
-      `branch:${BRANCH}`,
-      `runs:${HEAD}`,
-      'rerun:4305',
-    ])
-    expect(run.stdout).toContain(
-      `Atualiza o issue-link das PRs abertas da branch ${BRANCH}, depois de uma revisão (Sinal de revisão): a run do sinal não nomeou a PR.`,
-    )
-    expect(run.stdout).toContain(
-      `- 1 PR(s) de fork com a branch ${BRANCH} ignorada(s)`,
-    )
-  })
-
-  test('hands the branch to GitHub as a raw string, never as a file to read', async ({
-    expect,
-    scratch,
-  }) => {
-    // gh -F reads a value that starts with @ as a file; -f takes it as is.
-    const branch = '@feature/13-x'
-    const run = await scratch.refresh(
-      { answers: branchPulls(branch, []) },
-      prMode('workflow_run', { HEAD_BRANCH: branch }),
-    )
-    expect(run.status, run.stdout).toBe(0)
-    expect(run.calls[0].argv.slice(6, 8)).toEqual(['-f', `branch=${branch}`])
-    expect(run.stdout).toContain(
-      `Nenhuma PR aberta da branch ${branch} neste repositório: nada a re-rodar.`,
-    )
-  })
-
-  test('refreshes nothing, green, when only a fork has a PR from that branch', async ({
-    expect,
-    scratch,
-  }) => {
-    const run = await scratch.refresh(
-      {
-        answers: branchPulls(BRANCH, [
-          { number: 40, repo: 'someone/marketo-sandbox' },
-        ]),
-      },
-      prMode('workflow_run'),
-    )
-    expect(run.status, run.stdout).toBe(0)
-    expect(keys(run.calls)).toEqual([`branch:${BRANCH}`])
-    expect(run.stdout).toContain(
-      `Nenhuma PR aberta da branch ${BRANCH} neste repositório: nada a re-rodar.`,
-    )
-  })
-
-  test('goes red when the branch has more open PRs than one page holds', async ({
-    expect,
-    scratch,
-  }) => {
-    const run = await scratch.refresh(
-      { answers: branchPulls(BRANCH, [], 11) },
-      prMode('workflow_run'),
-    )
-    expect(run.status).toBe(1)
-    expect(run.stdout).toContain(
-      `A branch ${BRANCH} tem 11 PRs abertas e só 0 foram lidas`,
-    )
-  })
-
-  // A fork's review leaves pull_requests empty; a branch of the same name in
-  // this repository is not where it came from (Copilot review on PR #15).
-  test.for([
-    ['a fork', 'someone/marketo-sandbox'],
-    ['an unnamed repository', ''],
-  ] as const)(
-    'refreshes nothing, green, and asks gh nothing, when the branch came from %s',
-    async ([, headRepo], { expect, scratch }) => {
-      const run = await scratch.refresh(
-        { answers: branchPulls(BRANCH, [{ number: PR, repo: REPO }]) },
-        prMode('workflow_run', { HEAD_REPO: headRepo }),
-      )
-      expect(run.status, run.stdout).toBe(0)
-      expect(keys(run.calls)).toEqual([])
-      expect(run.stdout).toContain(
-        headRepo
-          ? `A revisão veio de uma branch de ${headRepo}`
-          : 'O evento não disse de que repositório veio a branch',
-      )
-    },
-  )
-
-  test('prefers the PR the run names over its branch', async ({
-    expect,
-    scratch,
-  }) => {
-    const run = await scratch.refresh(
-      { answers: { ...pullNow(PR, 'MERGED') } },
-      prMode('workflow_run', { PR_NUMBER: String(PR), HEAD_BRANCH: BRANCH }),
-    )
-    expect(run.status, run.stdout).toBe(0)
-    expect(keys(run.calls)).toEqual([`pull:${PR}`])
   })
 })
 
@@ -1219,7 +1070,7 @@ describe('.github/workflows/issue-link-refresh.yml', () => {
   )
   const runs = [...text.matchAll(/^\s+run:\s*(.+)$/gm)].map((m) => m[1])
 
-  it('reacts to issue events, to a finished review signal and to a dispatch for one PR, and to nothing else', () => {
+  it('reacts to issue events and to a dispatch for one PR, and to nothing else: no review signal since #30', () => {
     expect(text).toMatch(/^name: Atualiza vínculo com issue$/m)
     expect(text).toContain(
       [
@@ -1228,9 +1079,6 @@ describe('.github/workflows/issue-link-refresh.yml', () => {
         '    types: [labeled, unlabeled, edited, closed, reopened]',
         '  issue_comment:',
         '    types: [created, edited, deleted]',
-        '  workflow_run:',
-        `    workflows: ['${reviewSignalWorkflow}']`,
-        '    types: [completed]',
         '  workflow_dispatch:',
         '    inputs:',
         '      pr:',
@@ -1267,16 +1115,16 @@ describe('.github/workflows/issue-link-refresh.yml', () => {
     expect(text).toContain(
       [
         'concurrency:',
-        "  group: issue-link-refresh-${{ github.event.issue && 'issue' || 'pr' }}-${{ github.event.issue.number || github.event.workflow_run.pull_requests[0].number || inputs.pr || github.event.workflow_run.head_branch }}",
+        "  group: issue-link-refresh-${{ github.event.issue && 'issue' || 'pr' }}-${{ github.event.issue.number || inputs.pr }}",
         '  cancel-in-progress: false',
         '',
       ].join('\n'),
     )
   })
 
-  it('skips pull request comments, a review signal that did not succeed and a dispatch off main, before a runner starts', () => {
+  it('skips pull request comments and a dispatch off main, before a runner starts', () => {
     expect(text).toContain(
-      "\n    if: ${{ !github.event.issue.pull_request && (github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success') && (github.event_name != 'workflow_dispatch' || github.ref == 'refs/heads/main') }}\n",
+      "\n    if: ${{ !github.event.issue.pull_request && (github.event_name != 'workflow_dispatch' || github.ref == 'refs/heads/main') }}\n",
     )
   })
 
@@ -1314,9 +1162,7 @@ describe('.github/workflows/issue-link-refresh.yml', () => {
       'GH_TOKEN: ${{ github.token }}',
       'ISSUE_NUMBER: ${{ github.event.issue.number }}',
       'IS_PR: ${{ github.event.issue.pull_request != null }}',
-      'PR_NUMBER: ${{ github.event.workflow_run.pull_requests[0].number || inputs.pr }}',
-      'HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}',
-      'HEAD_REPO: ${{ github.event.workflow_run.head_repository.full_name }}',
+      'PR_NUMBER: ${{ inputs.pr }}',
     ]
     expect(text).toContain(
       `        env:\n${env.map((line) => `          ${line}\n`).join('')}        run: node scripts/refresh-issue-link.mjs\n`,

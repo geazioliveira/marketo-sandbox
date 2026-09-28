@@ -21,8 +21,6 @@ import {
   planHeading,
   readyLabel,
   requiredChecks,
-  reviewSignalWorkflow,
-  reviewSignalWorkflowFile,
   stateLabels,
 } from '../../scripts/loop-sections.mjs'
 
@@ -721,17 +719,16 @@ describe(workflows.check, () => {
 })
 
 // ---------------------------------------------------------------------------
-// The refresh after a review (#13): an untrusted signal, a trusted refresh
+// The refresh (#3, #13): no signal of a review since #30
 
-const reviewSignal = `.github/workflows/${reviewSignalWorkflowFile}`
 const refresh = `.github/workflows/${issueLinkRefreshWorkflowFile}`
 
 describe('every workflow file', () => {
   const dir = path.join(root, '.github', 'workflows')
   const files = readdirSync(dir).filter((file) => /\.ya?ml$/.test(file))
 
-  it('includes the review signal and the refresh', () => {
-    expect(files).toContain(reviewSignalWorkflowFile)
+  it('includes the refresh, and no review signal since #30', () => {
+    expect(files).not.toContain('review-signal.yml')
     expect(files).toContain(issueLinkRefreshWorkflowFile)
   })
 
@@ -752,80 +749,12 @@ describe('every workflow file', () => {
   })
 })
 
-describe(reviewSignal, () => {
-  const text = read(reviewSignal)
-  const steps = stepsOf(text)
-
-  it('is named as the contract names it, in pt-BR', () => {
-    expect(reviewSignalWorkflow).toBe('Sinal de revisão')
-    expect(topScalar(text, 'name')).toBe(reviewSignalWorkflow)
-  })
-
-  it('runs on a review submitted or dismissed, and on nothing else', () => {
-    expect(text).toContain(
-      '\non:\n  pull_request_review:\n    types: [submitted, dismissed]\n\n',
-    )
-    expect(text).not.toMatch(/^ {2}(?:pull_request_target|workflow_run):/m)
-  })
-
-  it('holds no permission at all: it runs the pull request own YAML', () => {
-    // pull_request_review takes this file from the PR's merge ref: whatever
-    // it declared would be the PR's to widen, so it declares nothing.
-    expect(text).toMatch(/^permissions: \{\}$/m)
-    expect(text.match(/permissions:/g)).toHaveLength(1)
-    expect(text).not.toMatch(/:\s*(?:write|read)\b/)
-    expect(text).not.toContain('secrets.')
-    expect(text).not.toContain('github.token')
-  })
-
-  it('runs one short job that checks out nothing, uses no action and runs nothing of the repository', () => {
-    expect(jobsOf(text)).toEqual([{ id: 'signal', name: 'signal' }])
-    expect(text).toMatch(/^ {4}runs-on: ubuntu-latest$/m)
-    expect(text).toMatch(/^ {4}timeout-minutes: 2$/m)
-    expect(steps).toHaveLength(1)
-    expect(stepField(steps[0], 'uses')).toBeUndefined()
-    const scripts = runBlocks(text)
-    expect(scripts).toHaveLength(1)
-    expect(scripts[0]).toMatch(/^echo "[^"`$]*\$PR_NUMBER[^"`$]*"$/)
-  })
-
-  it('hands the PR number to the shell through env only', () => {
-    expect(stepField(steps[0], 'PR_NUMBER')).toBe(
-      '${{ github.event.pull_request.number }}',
-    )
-    for (const script of runBlocks(text)) expect(script).not.toContain('${{')
-  })
-
-  it('is no required check', () => {
-    expect(requiredChecks.map((check) => check.workflow)).not.toContain(
-      reviewSignalWorkflow,
-    )
-  })
-
-  it('names, in its header, the trusted refresh that answers it', () => {
-    const header = text.slice(0, text.indexOf('\nname: '))
-    expect(header).toContain('issue-link-refresh.yml')
-    expect(header).toContain('workflow_run')
-    expect(header).toContain('no permissions')
-  })
-})
-
-describe(`${refresh}, answering ${reviewSignal}`, () => {
+describe(refresh, () => {
   const text = read(refresh)
 
-  it("answers only the signal's completed runs, by the signal's name", () => {
-    // workflow_run matches by name: a rename on either side would silently
-    // stop the refresh after a review.
-    expect(text).toContain(
-      `\n  workflow_run:\n    workflows: ['${reviewSignalWorkflow}']\n    types: [completed]\n`,
-    )
-    expect(topScalar(read(reviewSignal), 'name')).toBe(reviewSignalWorkflow)
-  })
-
-  it('trusts a signal run only when it succeeded', () => {
-    expect(text).toContain(
-      "(github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success')",
-    )
+  it('answers no workflow_run: a review renews nothing here since #30', () => {
+    expect(text).not.toMatch(/^ {2}workflow_run:/m)
+    expect(text).not.toContain('github.event.workflow_run')
   })
 
   it('takes a dispatch for one PR, a required number', () => {
@@ -845,8 +774,8 @@ describe(`${refresh}, answering ${reviewSignal}`, () => {
   })
 
   it('checks out the ref it runs from, main by its guard, and nothing of the pull request', () => {
-    // Issue events and workflow_run run from the default branch; a
-    // workflow_dispatch runs from the ref it was dispatched on, so the job
+    // Issue events run from the default branch; a workflow_dispatch runs
+    // from the ref it was dispatched on, so the job
     // skips a dispatch off main (which only catches accidents).
     expect(text).toContain(
       "(github.event_name != 'workflow_dispatch' || github.ref == 'refs/heads/main')",

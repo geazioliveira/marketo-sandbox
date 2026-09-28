@@ -1,26 +1,25 @@
 #!/usr/bin/env node
 // Re-runs the issue-link check of the open pull requests an event is about:
 // every open PR that closes an issue, when something on that issue changes
-// (#3), or one PR, after a review on it or on demand (#13).
+// (#3), or one PR, on demand (#13).
 //
 // Why: issue-link.yml runs on pull_request_target, and only events on the PR
 // trigger it. A withdrawn Approve, a moved label, a new `# Plano`, a closing
 // or a reopening happen on the issue, and each used to leave a green check
-// with a stale verdict. A review is no pull_request_target event either, and
-// since #13 the gate judges the Copilot review on the head and the open
-// review threads. .github/workflows/issue-link-refresh.yml runs this from
-// main; the gate, re-run, reads the issue and the PR again.
+// with a stale verdict. .github/workflows/issue-link-refresh.yml runs this
+// from main; the gate, re-run, reads the issue and the PR again.
+//
+// A review renews nothing here since #30: issue-link.yml runs the gate with
+// --review-report, so the Copilot review and the review threads are only
+// reported there, and the fresh verdict before a merge judges them. The
+// review signal and the workflow_run mode that answered it went with that.
 //
 // Two modes, by GITHUB_EVENT_NAME:
 // - issues and issue_comment (issue mode): the open PRs that close
 //   ISSUE_NUMBER, as GitHub links them; nothing when IS_PR says the event's
 //   issue is a pull request;
-// - workflow_run, of review-signal.yml, and workflow_dispatch (PR mode):
-//   PR_NUMBER, re-read here, and skipped when it is no longer open (Copilot
-//   reviews merged PRs late, as it did #10 and #11). A workflow_run whose
-//   pull_requests GitHub left empty hands HEAD_BRANCH instead, and the open
-//   PRs of that branch in this repository are refreshed; a fork's branch of
-//   the same name is not one of them.
+// - workflow_dispatch (PR mode): PR_NUMBER, re-read here, and skipped when
+//   it is no longer open.
 //
 // It judges nothing itself and writes nothing but the re-run (actions: write).
 //
@@ -42,15 +41,19 @@
 // - GitHub re-runs a run at most 50 times, and only up to 30 days after it
 //   started; past that the re-run is refused and this goes red, and a push to
 //   the PR brings a fresh run;
-// - whether GITHUB_TOKEN may re-run a pull_request_target run is unmeasured
-//   until the first live event. The fresh verdict before merge stays the rule
-//   (docs/development/workflow.md#pull-requests-e-merge).
+// - a re-run renews what the gate holds with --review-report, and the Copilot
+//   review and the threads are only reported there. The fresh verdict before
+//   merge stays the rule (docs/development/workflow.md#pull-requests-e-merge).
+//
+// That GITHUB_TOKEN may re-run a pull_request_target run was measured live:
+// runs 36263677912 (attempt 2) and 36269762597 (attempts 3 and 4) were
+// re-run by this script.
 //
 // Input comes only from the environment: GITHUB_REPOSITORY and
 // GITHUB_EVENT_NAME, which the runner sets; ISSUE_NUMBER and IS_PR ('true'
-// when the event's issue is a pull request) in issue mode; PR_NUMBER and
-// HEAD_BRANCH in PR mode; GH_TOKEN, which gh reads; REFRESH_POLL_MS and
-// REFRESH_WAIT_MS, for the tests.
+// when the event's issue is a pull request) in issue mode; PR_NUMBER in PR
+// mode; GH_TOKEN, which gh reads; REFRESH_POLL_MS and REFRESH_WAIT_MS, for
+// the tests.
 import { spawnSync } from 'node:child_process'
 import {
   issueLinkEvent,
@@ -71,13 +74,8 @@ const subIssuePageSize = 50
 /** Labels read per sub-issue, to find the slice label; a partial page is read as a slice. */
 const subIssueLabelPageSize = 20
 const issueEvents = ['issues', 'issue_comment']
-const prEvents = ['workflow_run', 'workflow_dispatch']
+const prEvents = ['workflow_dispatch']
 const positive = /^[1-9]\d*$/
-/** A branch name, as git allows one: 1 to 255 characters, no space, no control character. */
-const isBranchName = (text) =>
-  text.length > 0 &&
-  text.length <= 255 &&
-  ![...text].some((char) => char <= ' ' || char === '\u007f')
 
 // includeClosedPrs: false still lists merged PRs (measured on #2, closed by
 // the merged PR #10), so only state OPEN is acted on below. The sub-issues
@@ -86,13 +84,8 @@ const isBranchName = (text) =>
 // too.
 const issueQuery = `query($owner: String!, $name: String!, $number: Int!) { repository(owner: $owner, name: $name) { issue(number: $number) { closedByPullRequestsReferences(first: ${pageSize}, includeClosedPrs: false) { totalCount nodes { number state headRefOid } } subIssues(first: ${subIssuePageSize}) { totalCount nodes { number repository { nameWithOwner } labels(first: ${subIssueLabelPageSize}) { totalCount nodes { name } } closedByPullRequestsReferences(first: ${pageSize}, includeClosedPrs: false) { totalCount nodes { number state headRefOid } } } } } } }`
 
-// PR mode: the PR as it is now, whatever the event carried.
+// PR mode: the PR as it is now, whatever the dispatch carried.
 const pullQuery = `query($owner: String!, $name: String!, $number: Int!) { repository(owner: $owner, name: $name) { pullRequest(number: $number) { number state headRefOid } } }`
-
-// PR mode with no PR number: the open PRs of a head branch. headRefName is
-// only the name, so a fork's branch of the same name comes too, and its
-// headRepository tells it apart.
-const branchQuery = `query($owner: String!, $name: String!, $branch: String!) { repository(owner: $owner, name: $name) { pullRequests(first: ${pageSize}, headRefName: $branch, states: [OPEN]) { totalCount nodes { number state headRefOid headRepository { nameWithOwner } } } } }`
 
 /** A failure that ends the refresh red, with a reason a person can act on. */
 class RefreshError extends Error {}
@@ -165,8 +158,6 @@ function readInput(env) {
   const issue = String(env.ISSUE_NUMBER ?? '')
   const isPr = String(env.IS_PR ?? '')
   const pr = String(env.PR_NUMBER ?? '')
-  const branch = String(env.HEAD_BRANCH ?? '')
-  const headRepo = String(env.HEAD_REPO ?? '')
   if (issueMode) {
     if (!positive.test(issue))
       errors.push(`ISSUE_NUMBER deve ser o número da issue, recebeu "${issue}"`)
@@ -175,13 +166,7 @@ function readInput(env) {
   } else if (event === 'workflow_dispatch' || pr !== '') {
     if (!positive.test(pr))
       errors.push(`PR_NUMBER deve ser o número da PR, recebeu "${pr}"`)
-  } else if (event === 'workflow_run' && !isBranchName(branch))
-    // GitHub left the run's pull_requests empty (it does for a fork's PR,
-    // and the research could not rule out other cases): the branch is all
-    // there is to find the PR by.
-    errors.push(
-      `sem PR_NUMBER, HEAD_BRANCH deve ser a branch da PR, recebeu "${branch}"`,
-    )
+  }
   const pollMs = env.REFRESH_POLL_MS || String(refreshPollMs)
   const waitMs = env.REFRESH_WAIT_MS || String(refreshWaitMs)
   for (const [key, value] of [
@@ -202,9 +187,7 @@ function readInput(env) {
       mode: issueMode ? 'issue' : 'pr',
       issue: issueMode ? Number(issue) : null,
       isPr: issueMode && isPr === 'true',
-      pr: !issueMode && pr !== '' ? Number(pr) : null,
-      branch: !issueMode && pr === '' ? branch : null,
-      headRepo: !issueMode && pr === '' ? headRepo : null,
+      pr: issueMode ? null : Number(pr),
       pollMs: Number(pollMs),
       waitMs: Number(waitMs),
     },
@@ -306,45 +289,6 @@ function readPull({ owner, name }, number) {
     `query=${pullQuery}`,
   ])
   return graphqlData(what, payload, (repository) => repository?.pullRequest)
-}
-
-/**
- * The open PRs of a head branch in this repository. The branch goes as a raw
- * string (-f): -F would read a value that starts with @ as a file.
- */
-function branchPulls({ owner, name, repo }, branch) {
-  const what = `das PRs da branch ${branch}`
-  const payload = ghJson(`as PRs da branch ${branch}`, [
-    'api',
-    'graphql',
-    '-F',
-    `owner=${owner}`,
-    '-F',
-    `name=${name}`,
-    '-f',
-    `branch=${branch}`,
-    '-f',
-    `query=${branchQuery}`,
-  ])
-  const pulls = graphqlData(
-    what,
-    payload,
-    (repository) => repository?.pullRequests,
-  )
-  const nodes = (Array.isArray(pulls.nodes) ? pulls.nodes : []).filter(
-    (pr) => pr != null,
-  )
-  const own = nodes.filter(
-    (pr) =>
-      String(pr.headRepository?.nameWithOwner ?? '').toLowerCase() ===
-      repo.toLowerCase(),
-  )
-  return {
-    nodes: own,
-    others: nodes.length - own.length,
-    total: Number(pulls.totalCount ?? nodes.length),
-    read: nodes.length,
-  }
 }
 
 /** One run, as GET actions/runs/{id} gives it now. */
@@ -504,65 +448,23 @@ function refreshIssue(input, deadline, lines) {
 }
 
 /**
- * PR mode: one PR, re-read now, or the open PRs of a branch. A PR that is no
- * longer open has no verdict left to renew.
+ * PR mode: one PR, re-read now. A PR that is no longer open has no verdict
+ * left to renew.
  */
 function refreshPull(input, deadline, lines) {
-  const why =
-    input.event === 'workflow_run'
-      ? 'depois de uma revisão (Sinal de revisão)'
-      : 'a pedido (workflow_dispatch)'
-  let pulls
-  let exitCode = 0
-  if (input.pr !== null) {
-    lines.push(`Atualiza o issue-link da PR #${input.pr}, ${why}.`)
-    pulls = [readPull(input, input.pr)]
-  } else {
+  lines.push(
+    `Atualiza o issue-link da PR #${input.pr}, a pedido (workflow_dispatch).`,
+  )
+  const pr = readPull(input, input.pr)
+  if (pr.state !== 'OPEN') {
     lines.push(
-      `Atualiza o issue-link das PRs abertas da branch ${input.branch}, ${why}: a run do sinal não nomeou a PR.`,
+      `- PR #${pr.number} ignorada: está ${pr.state}, e o issue-link dela não decide mais nada. Nada a re-rodar.`,
     )
-    // GitHub leaves pull_requests empty for a fork's PR. Its branch name says
-    // nothing about this repository's PRs, so a same-named branch here is no
-    // evidence: look the branch up only when it came from this repository.
-    if (
-      String(input.headRepo ?? '').toLowerCase() !== input.repo.toLowerCase()
-    ) {
-      lines.push(
-        input.headRepo
-          ? `A revisão veio de uma branch de ${input.headRepo}, não deste repositório: o issue-link não vale para fork, e uma branch ${input.branch} daqui não é a origem. Nada a re-rodar.`
-          : `O evento não disse de que repositório veio a branch ${input.branch}: sem essa prova, nenhuma PR daqui é re-rodada.`,
-      )
-      return exitCode
-    }
-    const { nodes, others, total, read } = branchPulls(input, input.branch)
-    if (others > 0)
-      lines.push(
-        `- ${others} PR(s) de fork com a branch ${input.branch} ignorada(s): o issue-link só vale para branches deste repositório.`,
-      )
-    if (nodes.length === 0)
-      lines.push(
-        `Nenhuma PR aberta da branch ${input.branch} neste repositório: nada a re-rodar.`,
-      )
-    if (total > read) {
-      lines.push(
-        `A branch ${input.branch} tem ${total} PRs abertas e só ${read} foram lidas; re-rode o issue-link das outras à mão.`,
-      )
-      exitCode = 1
-    }
-    pulls = nodes
+    return 0
   }
-  for (const pr of pulls) {
-    if (pr.state !== 'OPEN') {
-      lines.push(
-        `- PR #${pr.number} ignorada: está ${pr.state}, e o issue-link dela não decide mais nada. Nada a re-rodar.`,
-      )
-      continue
-    }
-    const refreshed = refresh(input, pr, deadline)
-    lines.push(...refreshed.lines)
-    if (refreshed.failed) exitCode = 1
-  }
-  return exitCode
+  const refreshed = refresh(input, pr, deadline)
+  lines.push(...refreshed.lines)
+  return refreshed.failed ? 1 : 0
 }
 
 function main() {
