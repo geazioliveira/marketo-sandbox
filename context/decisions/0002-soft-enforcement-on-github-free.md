@@ -148,7 +148,8 @@ Esta decisão não finge ser mais forte do que é.
       - a URL de um GitHub Enterprise tomada como este projeto, cuja escrita vai para outro host;
     - no `guard-bash` (PR #52):
       - um programa rodado a partir de um arquivo (`node x.mjs`, `python3 -m`) não é avaliador nem escrita que o hook não vê: tratá-lo assim pediria confirmação em `node scripts/gate.mjs` e nos geradores;
-      - uma escrita no harness por um interpretador (`python3 -c "open('.claude/hooks/…', 'w')"`) não cai na tripwire: casar `.claude/` no texto pegaria todo comando num worktree em `.claude/worktrees/` e todo o que cita `~/.claude/`.
+      - uma escrita no harness por um interpretador (`python3 -c "open('.claude/hooks/…', 'w')"`) não cai na tripwire: casar `.claude/` no texto pegaria todo comando num worktree em `.claude/worktrees/` e todo o que cita `~/.claude/`;
+    - no `plan-to-issue` (PR #54): um `gh` falso no `PATH` do comando, que imprime a URL de uma publicação que não houve.
   - **Um falso positivo conhecido:** um heredoc seguido de `&&`, `||` ou `|` na mesma linha não se lê, e o hook pede confirmação.
 - **O dono consegue mergear com vermelho ou dar push direto em `main`.** Nenhuma camada impede o dono. A auditoria de `main` registra depois do fato o push direto, o commit pelo editor web, o force-push e o histórico reescrito, o merge de uma PR que não fecha issue e o merge de uma PR sem os checks exigidos verdes, mas não desfaz nenhum deles.
 - **A auditoria roda o YAML que está em `main`.** Um push direto que muda ou apaga o `main-audit.yml` é julgado pela cópia que ele deixou, e as auditorias seguintes, a diária inclusive, rodam essa mesma cópia até alguém restaurá-la pelo loop. O push continua no `git log`.

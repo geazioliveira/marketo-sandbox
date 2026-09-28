@@ -9,8 +9,8 @@ O Context Mesh e o fluxo do loop já estão em `main`, mas a orientação mais r
 - [x] `AGENTS.md`, o fluxo, a ADR 0001, o pattern do gate, o glossário, o contrato central e a mensagem do gate distinguem a transição do agente dos atos exclusivos do dono.
 - [x] A PR traz somente a regra compartilhada e não inclui o intent nem a implementação dos hooks da #5.
 - [x] O intent e o changelog registram o resultado; `npm run check:context`, os testes pertinentes e o gate passam.
-- [ ] A PR fecha somente a #17, com os checks exigidos verdes, uma revisão do Copilot na cabeça e nenhuma thread aberta antes do merge.
-- [ ] A branch da #5 é reconciliada com o merge desta PR antes de sua própria PR.
+- [x] A PR fecha somente a #17, com os checks exigidos verdes, uma revisão do Copilot na cabeça e nenhuma thread aberta antes do merge. A PR #18 foi mergeada em `610e101` com a revisão do Copilot na cabeça `b8eeac6` e 0 de 3 threads abertas ([comentário de fechamento na #17](https://github.com/geazioliveira/marketo-sandbox/issues/17#issuecomment-5846403812)).
+- [x] A branch da #5 é reconciliada com o merge desta PR antes de sua própria PR. Feito em `c2c3a60`, na branch de origem da #5, com a versão de `main` nos seis arquivos compartilhados ([comentário na #17](https://github.com/geazioliveira/marketo-sandbox/issues/17#issuecomment-5846431126)). As fatias da stack da #5 saíram de `main`, que já tinha a #17, e a PR da última fatia marca esta caixa.
 
 ## Abordagem técnica
 
@@ -41,3 +41,4 @@ O primeiro commit (`ae5e24d`) trouxe só este intent. O segundo (`1b3f8f0`) levo
 - **Criado**: 2026-09-25 (Fase: Intent), do plano aprovado na issue #17 (#17)
 - **Status**: Completed
 - **Atualizado**: 2026-09-25 (Fase: Learn), regra e contrato central isolados da #5 e checks locais concluídos; veredito final e reconciliação seguem no fluxo da PR (#17)
+- **Atualizado**: 2026-09-28 (Fase: Learn), os dois critérios que ficaram para depois do merge foram marcados, com a evidência da #17, pela PR da última fatia da #5 (#5)

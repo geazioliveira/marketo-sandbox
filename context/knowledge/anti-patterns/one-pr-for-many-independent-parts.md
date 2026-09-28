@@ -19,6 +19,7 @@ A PR #26, da #5, trouxe numa branch só os quatro hooks do Claude Code e a bibli
 - **Quebrar pela dependência entre as peças.** Uma fatia por peça que se revisa sozinha, na ordem em que uma depende da outra, com a que liga tudo por último. Cada fatia fica inerte até a última e pode ser mergeada sem risco ([Stack de PRs](../../../docs/development/workflow.md#stack-de-prs)).
 - **Uma sub-issue por fatia, com o Approve da mãe.** O plano da mãe declara a stack e é aprovado uma vez ([ciclo de vida de issue e branch](../patterns/issue-branch-lifecycle.md#numa-stack)).
 - **Olhar o tamanho antes de abrir a PR.** O passo `pr-size` do `issue-link` relata as linhas alteradas contra a base, com 1.500 como referência ([o gate do loop](../patterns/loop-gate.md)).
+- **Ficar abaixo do limite de revisão do Copilot.** Na stack da #5, uma PR com 241.186 bytes de diff não foi revisada, três vezes, e as de até 222.324 foram. Cada fatia fica abaixo de 180 KiB (`gh pr diff <n> | wc -c`), e uma fatia maior se divide em duas, com os testes cortados entre blocos `describe` de nível zero.
 - **Combinar antes quando um achado vira correção e quando vira limite.** Na #26, cada achado virou correção com teste, e os achados foram ficando mais exóticos a cada rodada. Um critério combinado no plano limita o trabalho de cada rodada.
 
 ## Exemplo do erro
@@ -34,3 +35,4 @@ PR #26  feature/5-hooks-claude-code
 
 - **Criado**: 2026-09-27 (Fase: Learn), das rodadas de revisão da PR #26, que levaram à #31 (#31)
 - **Status**: Active
+- **Atualizado**: 2026-09-28 (Fase: Learn), a stack da #5 mediu o limite de tamanho da revisão do Copilot (#5)
