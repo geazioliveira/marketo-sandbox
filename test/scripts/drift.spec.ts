@@ -1150,7 +1150,9 @@ describe('docs against the review gate after the #13 reviews', () => {
     (file) => {
       for (const sentence of proseOf(bodyOf(read(file)))) {
         expect(sentence, file).not.toMatch(/não foi provad[oa] ao vivo/)
-        if (/[Ss]inal de revisão|review-signal/.test(sentence))
+        // Any mention of the signal, `a run do sinal` included, places it
+        // before #30, which removed it.
+        if (/\bsinal\b|review-signal/i.test(sentence))
           expect(sentence, file).toContain('#30')
       }
     },
