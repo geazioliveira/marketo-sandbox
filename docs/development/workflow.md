@@ -243,7 +243,7 @@ Uma mudança grande demais para uma PR vem numa stack: PRs pequenas, uma sobre a
    gh issue create --repo geazioliveira/marketo-sandbox --parent <mãe> --title "<fatia>" --label enhancement --label stack-slice --body "Fatia da stack da #<mãe>."
    ```
 
-2. **O plano da mãe.** Um `# Plano` na mãe com as seções de sempre e uma seção `## Stack` com as branches das fatias, de baixo para cima: uma lista numerada, na primeira coluna, cada item começando com a branch num code span. Um bullet ou um parágrafo na seção é prosa e não vira fatia, e um item numerado que não começa com uma branch bloqueia a stack:
+2. **O plano da mãe.** Um `# Plano` na mãe com as seções de sempre e uma seção `## Stack` com as branches das fatias, de baixo para cima: uma lista numerada, na primeira coluna, cada item começando com a branch num code span. Um bullet ou um parágrafo na seção é prosa e não vira fatia. Bloqueiam a stack um item numerado que não começa com uma branch e a branch de uma issue que não é fatia da mãe (sub-issue dela, deste repositório, com `stack-slice`):
 
    ```markdown
    ## Stack
