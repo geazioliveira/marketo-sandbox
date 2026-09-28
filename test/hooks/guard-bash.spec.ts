@@ -5,6 +5,7 @@ import {
   readFileSync,
   realpathSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -14,6 +15,7 @@ import {
   copilotReviewer,
   gateCacheFile,
   gateCacheSchema,
+  planPendingFile,
   requiredChecks,
 } from '../../scripts/loop-sections.mjs'
 import {
@@ -2431,6 +2433,1258 @@ describe.concurrent(
         await guard(line, { mode: 'auto' }),
         /Em auto, a confirmação vira negação/,
       )
+    })
+  },
+)
+
+// ---------------------------------------------------------------------------
+// Seventh round of Copilot's review of #26
+
+describe.concurrent(
+  'the git config a gh command gives git (Copilot review of #26, seventh round)',
+  () => {
+    const modes = ['default', 'auto'] as const
+    const project = 'https://github.com/geazioliveira/marketo-sandbox.git'
+    const other = 'https://github.com/alguem/outro.git'
+    const transition =
+      'gh issue edit 5 --remove-label needs-triage --add-label ready-for-human'
+    /** The example of the review, word for word. */
+    const example = `GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=remote.origin.url GIT_CONFIG_VALUE_0=${project} ${transition}`
+    /** git config that sends the other clone's origin to this project. */
+    const redirect = `[url "${project}"]\n\tinsteadOf = ${other}\n`
+    const redirectVars = `GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=url.${project}.insteadOf GIT_CONFIG_VALUE_0=${other}`
+    const inPlan = () => ({
+      issues: {
+        5: {
+          labels: ['enhancement', 'needs-triage'],
+          lastCommentBody: '# Plano\n\n## Contexto e porquê\n\nTexto.',
+        },
+      },
+    })
+    const unknownTransition =
+      /não consegui ler em que repositório o comando troca needs-triage por ready-for-human \(o comando dá ao git uma configuração própria/
+
+    /** A dir of its own for the config files a case writes, removed after it. */
+    const configDir = (files: Record<string, string>) => {
+      const dir = realpathSync.native(
+        mkdtempSync(path.join(tmpdir(), 'guard-bash-config-')),
+      )
+      for (const [file, content] of Object.entries(files)) {
+        mkdirSync(path.dirname(path.join(dir, file)), { recursive: true })
+        writeFileSync(path.join(dir, file), content)
+      }
+      return dir
+    }
+
+    /** The label exception with a target it cannot read: a critical ask, a deny in auto, nothing read live. */
+    function expectUnknownTransition(
+      run: HookRun,
+      mode: string,
+      calls: () => GhCall[],
+      why?: RegExp,
+    ) {
+      if (mode === 'auto') {
+        expectDeny(run, /Em auto, a confirmação vira negação/)
+      } else expectAsk(run)
+      expect(reasonOf(run)).toMatch(unknownTransition)
+      if (why !== undefined) expect(reasonOf(run)).toMatch(why)
+      expect(calls()).toEqual([])
+    }
+
+    test.for(modes)(
+      'the example of the review, from a clone of another repository: the target is unknown, in %s',
+      async (mode, { live }) => {
+        const gh = live(inPlan())
+        expectUnknownTransition(
+          await guard(example, { repo: elsewhere, env: gh.env, mode }),
+          mode,
+          gh.calls,
+          /GIT_CONFIG_COUNT, GIT_CONFIG_KEY_0, GIT_CONFIG_VALUE_0\), e o origin aponta para mais de um repositório/,
+        )
+      },
+    )
+
+    test.for(modes)(
+      'the example of the review, from a clone of this project: read live and passed, as today, in %s',
+      async (mode, { live }) => {
+        const gh = live(inPlan())
+        expectPass(await guard(example, { env: gh.env, mode }))
+        expect(gh.calls()).toEqual([
+          expect.objectContaining({ call: 'issueState', key: '5', mode: 'ok' }),
+        ])
+      },
+    )
+
+    test.for(modes)(
+      'gh pr merge with the variables of the example, from a clone of another repository: reads nothing and says why, in %s',
+      async (mode, { live }) => {
+        const gh = live({ prs: { 26: { pr: readyPr({ number: 26 }) } } })
+        const vars = example.slice(0, example.length - transition.length)
+        // Without the variables, the merge is another repository's: it passes.
+        expectPass(
+          await guard('gh pr merge 26', { repo: elsewhere, env: gh.env, mode }),
+        )
+        const run = await guard(`${vars}gh pr merge 26`, {
+          repo: elsewhere,
+          env: gh.env,
+          mode,
+        })
+        if (mode === 'auto')
+          expectDeny(run, /Em auto, a confirmação vira negação/)
+        else expectAsk(run)
+        expect(reasonOf(run)).toMatch(
+          /não consegui ler o estado da PR \(o repositório da PR não pôde ser lido \(o comando dá ao git uma configuração própria \(GIT_CONFIG_COUNT, GIT_CONFIG_KEY_0, GIT_CONFIG_VALUE_0\), e o origin aponta para mais de um repositório\)\)/,
+        )
+        expect(gh.calls()).toEqual([])
+      },
+    )
+
+    test.for(modes)(
+      'a label the agent never adds, from a clone of another repository sent to this project: denied, in %s',
+      async (mode) => {
+        expectDeny(
+          await guard(
+            `${redirectVars} gh issue edit 5 --add-label ready-for-agent`,
+            { repo: elsewhere, mode },
+          ),
+          /ready-for-agent são do dono/,
+        )
+      },
+    )
+
+    test.for(modes)(
+      'each variable that moves git’s config, from a clone of another repository: the target is unknown, in %s',
+      async (mode, { live }) => {
+        const files = configDir({
+          'redirect.cfg': redirect,
+          'resolved.cfg': `[remote "origin"]\n\tgh-resolved = geazioliveira/marketo-sandbox\n`,
+          'home/.gitconfig': redirect,
+          'xdg/git/config': redirect,
+        })
+        try {
+          const cases: [string, Record<string, string | null>, RegExp][] = [
+            [redirectVars, {}, /reescreve URLs/],
+            [
+              `GIT_CONFIG_PARAMETERS="'url.${project}.insteadof'='${other}'"`,
+              {},
+              /GIT_CONFIG_PARAMETERS\), e ela reescreve URLs/,
+            ],
+            [
+              `GIT_CONFIG_GLOBAL=${files}/redirect.cfg`,
+              {},
+              /GIT_CONFIG_GLOBAL\), e ela reescreve URLs/,
+            ],
+            [
+              `GIT_CONFIG_NOSYSTEM=0 GIT_CONFIG_SYSTEM=${files}/redirect.cfg`,
+              {},
+              /GIT_CONFIG_NOSYSTEM, GIT_CONFIG_SYSTEM\), e ela reescreve URLs/,
+            ],
+            // The hook inherits a system config it does not read; the
+            // command turns it on.
+            [
+              'GIT_CONFIG_NOSYSTEM=0',
+              { GIT_CONFIG_SYSTEM: `${files}/redirect.cfg` },
+              /GIT_CONFIG_NOSYSTEM\), e ela reescreve URLs/,
+            ],
+            [
+              `GIT_CONFIG=${files}/resolved.cfg`,
+              {},
+              /GIT_CONFIG leva o git config que o gh roda a outro arquivo/,
+            ],
+            // HOME and XDG_CONFIG_HOME count where GIT_CONFIG_GLOBAL does
+            // not replace them, as outside the specs.
+            [
+              `HOME=${files}/home`,
+              { GIT_CONFIG_GLOBAL: null },
+              /\(HOME\), e ela reescreve URLs/,
+            ],
+            [
+              `XDG_CONFIG_HOME=${files}/xdg`,
+              { GIT_CONFIG_GLOBAL: null },
+              /\(XDG_CONFIG_HOME\), e ela reescreve URLs/,
+            ],
+          ]
+          for (const [vars, inherited, why] of cases) {
+            const gh = live(inPlan())
+            const env = { ...gh.env }
+            for (const [name, value] of Object.entries(inherited))
+              if (value === null) delete env[name]
+              else env[name] = value
+            // Without the variable, the other clone passes: what changes
+            // the verdict is the config the command gives git.
+            expectPass(await guard(transition, { repo: elsewhere, env, mode }))
+            expectUnknownTransition(
+              await guard(`${vars} ${transition}`, {
+                repo: elsewhere,
+                env,
+                mode,
+              }),
+              mode,
+              gh.calls,
+              why,
+            )
+          }
+        } finally {
+          rmSync(files, { recursive: true, force: true })
+        }
+      },
+    )
+
+    test.for(modes)(
+      'the variables exported earlier on the line, or assigned there, count as on the command, in %s',
+      async (mode, { live }) => {
+        const files = configDir({ 'home/.gitconfig': redirect })
+        try {
+          for (const line of [
+            `export ${redirectVars}; ${transition}`,
+            `export ${redirectVars} && ${transition}`,
+            `HOME=${files}/home; ${transition}`,
+            `declare HOME=${files}/home; ${transition}`,
+          ]) {
+            const gh = live(inPlan())
+            expectUnknownTransition(
+              await guard(line, { repo: elsewhere, env: gh.env, mode }),
+              mode,
+              gh.calls,
+            )
+          }
+        } finally {
+          rmSync(files, { recursive: true, force: true })
+        }
+      },
+    )
+
+    test.for(modes)(
+      'env that takes the config’s variables out of the command: the target is unknown, in %s',
+      async (mode, { live }) => {
+        for (const wrapper of [
+          'env -u HOME',
+          'env --unset=GIT_CONFIG_GLOBAL',
+          'env -i PATH=/usr/bin:/bin',
+          'env - PATH=/usr/bin:/bin',
+        ]) {
+          const gh = live(inPlan())
+          expectUnknownTransition(
+            await guard(`${wrapper} ${transition}`, {
+              repo: elsewhere,
+              env: gh.env,
+              mode,
+            }),
+            mode,
+            gh.calls,
+            /fica vazia ou deixa de existir/,
+          )
+        }
+      },
+    )
+
+    test.for(modes)(
+      'env with a lone -, read as -i, still runs the gh the rules judge, in %s',
+      async (mode) => {
+        expectDeny(
+          await guard('env - gh issue reopen 5', { mode }),
+          /reabrir uma issue/,
+        )
+        expectDeny(
+          await guard('env - PATH=/usr/bin gh issue reopen 5', { mode }),
+          /reabrir uma issue/,
+        )
+      },
+    )
+
+    test.for(modes)(
+      'a value it cannot read, or a config git refuses: the target is unknown, in %s',
+      async (mode, { live }) => {
+        for (const [vars, why] of [
+          [
+            'GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=remote.origin.url GIT_CONFIG_VALUE_0=$URL',
+            /GIT_CONFIG_VALUE_0 traz uma expansão/,
+          ],
+          [
+            'GIT_CONFIG_GLOBAL="$(mktemp)"',
+            /GIT_CONFIG_GLOBAL traz uma expansão/,
+          ],
+          ['export HOME;', /HOME traz uma expansão/],
+          ['unset HOME;', /não sei se HOME fica vazia ou deixa de existir/],
+          [
+            'GIT_CONFIG_COUNT=2 GIT_CONFIG_KEY_0=user.name GIT_CONFIG_VALUE_0=Outro',
+            /o git recusou essa configuração/,
+          ],
+        ] as const) {
+          const gh = live(inPlan())
+          expectUnknownTransition(
+            await guard(`${vars} ${transition}`, {
+              repo: elsewhere,
+              env: gh.env,
+              mode,
+            }),
+            mode,
+            gh.calls,
+            why,
+          )
+        }
+      },
+    )
+
+    test.for(modes)(
+      'a config it reads in full, that leaves the other repository, still passes there, in %s',
+      async (mode) => {
+        for (const vars of [
+          'GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=user.name GIT_CONFIG_VALUE_0=Outro',
+          `GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=remote.origin.url GIT_CONFIG_VALUE_0=${other}`,
+          `HOME=${elsewhere.env().HOME}`,
+        ])
+          expectPass(
+            await guard(`${vars} gh issue edit 5 --add-label ready-for-agent`, {
+              repo: elsewhere,
+              mode,
+            }),
+          )
+      },
+    )
+
+    test.for(modes)(
+      'a gh api placeholder filled from such a config is not filled with the other repository, in %s',
+      async (mode) => {
+        const line = `gh api -X POST 'repos/{owner}/{repo}/issues/5/labels' -f 'labels[]=ready-for-agent'`
+        expectPass(await guard(line, { repo: elsewhere, mode }))
+        expectDeny(
+          await guard(`${redirectVars} ${line}`, { repo: elsewhere, mode }),
+          /o agente não escreve label de estado por gh api/,
+        )
+      },
+    )
+
+    test.for(modes)(
+      'a remote an earlier command of the line changed is not read again from the disk, in %s',
+      async (mode, { live }) => {
+        const gh = live(inPlan())
+        expectUnknownTransition(
+          await guard(
+            `git remote set-url origin ${other} && GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=user.name GIT_CONFIG_VALUE_0=Outro ${transition}`,
+            { repo: elsewhere, env: gh.env, mode },
+          ),
+          mode,
+          gh.calls,
+          /um comando anterior da linha mudou os remotes/,
+        )
+      },
+    )
+  },
+)
+
+// ---------------------------------------------------------------------------
+// Eighth round of Copilot's review of #26
+
+describe.concurrent(
+  'writes through links, on disk or made earlier on the line (Copilot review of #26, eighth round)',
+  () => {
+    // A repository of its own, whose escape hatch exists on disk, and a
+    // directory under no repository that holds links into it.
+    let linked: HookRepo
+    let links = ''
+    const at = (name: string) => path.join(links, name)
+    const hatch = /saída de emergência do dono/
+    const loopFile = /só o gate e os hooks escrevem/
+    const harness = /caminho do harness: confira/
+    const inGitDir = /dentro do diretório git/
+    const opening = /não abre como Approve/
+
+    beforeAll(async () => {
+      linked = await hookRepo({ branch: FEATURE, cache: true })
+      linked.write({
+        '.claude/settings.local.json': '{}\n',
+        'body.md': 'Recado.\n',
+      })
+      links = realpathSync.native(
+        mkdtempSync(path.join(tmpdir(), 'guard-bash-links-')),
+      )
+      const inRepo = (name: string) => path.join(linked.dir, name)
+      symlinkSync(inRepo('.claude/settings.local.json'), at('hatch'))
+      symlinkSync(path.join(linked.gitDir, gateCacheFile), at('gate'))
+      // Dangling: no marker exists, and a write through the link makes one.
+      symlinkSync(
+        path.join(linked.gitDir, planPendingFile('sessao-1')),
+        at('marker'),
+      )
+      symlinkSync(path.join(linked.gitDir, 'HEAD'), at('head'))
+      symlinkSync(inRepo('.claude'), at('claude'))
+      // Dangling harness paths: the repository has neither.
+      symlinkSync(inRepo('.github/workflows/novo.yml'), at('workflow'))
+      symlinkSync(inRepo('scripts/gate.mjs'), at('gate-script'))
+      // A chain, its last link relative to its own directory.
+      symlinkSync('hatch', at('chain2'))
+      symlinkSync(at('chain2'), at('chain1'))
+      symlinkSync(at('loop-b'), at('loop-a'))
+      symlinkSync(at('loop-a'), at('loop-b'))
+      symlinkSync(inRepo('README.md'), at('readme'))
+      symlinkSync(inRepo('body.md'), at('body-link'))
+      writeFileSync(at('alvo.txt'), 'Nada do loop.\n')
+      symlinkSync(at('alvo.txt'), at('unrelated'))
+      // Ninth: a link inside .claude that leads out of the repository, a
+      // link to a directory, a body on disk that opens as the Approve, and a
+      // script whose loop gives PWD a value the line does not spell.
+      symlinkSync(at('alvo.txt'), inRepo('.claude/fora'))
+      mkdirSync(at('pasta'))
+      writeFileSync(path.join(at('pasta'), 'f.md'), 'Recado.\n')
+      symlinkSync(at('pasta'), at('pasta-link'))
+      mkdirSync(at('aprova-dir'))
+      writeFileSync(path.join(at('aprova-dir'), 'f.md'), '# Owner Approve\n')
+      // Links to that directory, named as a plan marker and inside the git
+      // dir: what they lead to is no file of the loop, but they are.
+      symlinkSync(at('pasta'), inRepo(`.claude/${planPendingFile('sessao-2')}`))
+      symlinkSync(at('pasta'), path.join(linked.gitDir, 'pasta-link'))
+      writeFileSync(at('aprova.md'), '# Owner Approve\n')
+      symlinkSync(at('aprova.md'), at('aprova-link'))
+      writeFileSync(
+        at('muda-pwd.sh'),
+        'for PWD in /tmp; do echo x > "$PWD/.claude/settings.json"; done\n',
+      )
+    }, setupTimeout)
+
+    afterAll(() => {
+      linked?.remove()
+      if (links) rmSync(links, { recursive: true, force: true })
+    }, setupTimeout)
+
+    const run = (line: string, mode = 'default') =>
+      guard(line, { repo: linked, mode })
+
+    /** Refused in every mode. */
+    const denies = async (line: string, reason: RegExp) => {
+      const [plain, auto] = await Promise.all([run(line), run(line, 'auto')])
+      expectDeny(plain, reason)
+      expectDeny(auto, reason)
+    }
+
+    /** Asked, critical: a person confirms it, and auto refuses it. */
+    const asksCritical = async (line: string, reason: RegExp) => {
+      const [plain, auto] = await Promise.all([run(line), run(line, 'auto')])
+      expectAsk(plain, reason)
+      expectDeny(auto, reason)
+      expect(reasonOf(auto)).toMatch(/Em auto, a confirmação vira negação/)
+    }
+
+    const passes = async (line: string) => {
+      const [plain, auto] = await Promise.all([run(line), run(line, 'auto')])
+      expectPass(plain)
+      expectPass(auto)
+    }
+
+    it.each([
+      // On disk: each link was there before the line.
+      [
+        'a link to the escape hatch',
+        () => `echo '{"disableAllHooks":true}' > ${at('hatch')}`,
+        hatch,
+      ],
+      [
+        'a link to the gate cache, appended',
+        () => `echo x >> ${at('gate')}`,
+        loopFile,
+      ],
+      [
+        'a dangling link to a plan marker',
+        () => `echo '{}' > ${at('marker')}`,
+        loopFile,
+      ],
+      [
+        'a chain of links, the last one relative to its directory',
+        () => `printf x > ${at('chain1')}`,
+        hatch,
+      ],
+      ['tee through a link', () => `echo '{}' | tee ${at('hatch')}`, hatch],
+      ['cp onto a link', () => `cp /tmp/x ${at('gate')}`, loopFile],
+      ['mv onto a link', () => `mv /tmp/x ${at('hatch')}`, hatch],
+      [
+        'install onto a link',
+        () => `install -m 644 /tmp/x ${at('gate')}`,
+        loopFile,
+      ],
+      ['rsync onto a link', () => `rsync -a /tmp/x ${at('hatch')}`, hatch],
+      ['dd onto a link', () => `dd if=/dev/null of=${at('gate')}`, loopFile],
+      [
+        'truncate of a dangling link',
+        () => `truncate -s 0 ${at('marker')}`,
+        loopFile,
+      ],
+      [
+        'sed -i through a link',
+        () => `sed -i '' 's/a/b/' ${at('hatch')}`,
+        hatch,
+      ],
+      // Made earlier on the same line: not on disk while the hook reads it.
+      [
+        'a link to the escape hatch made on the line',
+        () =>
+          `ln -s "$PWD/.claude/settings.local.json" ${at('novo-hatch')} && echo '{"disableAllHooks":true}' > ${at('novo-hatch')}`,
+        hatch,
+      ],
+      [
+        'a link to the gate cache made on the line',
+        () =>
+          `ln -s "$PWD/.git/${gateCacheFile}" ${at('novo-gate')} && echo x > ${at('novo-gate')}`,
+        loopFile,
+      ],
+      [
+        'a link to a plan marker made with ln -sfn',
+        () =>
+          `ln -sfn "$PWD/.git/${planPendingFile('sessao-1')}" ${at('novo-marker')} && echo '{}' > ${at('novo-marker')}`,
+        loopFile,
+      ],
+      [
+        'a link ln -r makes from the cwd',
+        () =>
+          `ln -sr .claude/settings.local.json ${at('novo-r')} && echo x > ${at('novo-r')}`,
+        hatch,
+      ],
+      [
+        'a link placed in a directory, under the source’s name',
+        () =>
+          `ln -s "$PWD/.claude/settings.local.json" ${links} && echo x > ${at('settings.local.json')}`,
+        hatch,
+      ],
+      [
+        'a link placed with -t',
+        () =>
+          `ln -st ${links} "$PWD/.claude/settings.local.json" && echo x > ${at('settings.local.json')}`,
+        hatch,
+      ],
+      [
+        'a relative link read from its own directory',
+        () => `ln -s hatch ${at('novo-rel')} && echo x > ${at('novo-rel')}`,
+        hatch,
+      ],
+      [
+        'a chain made on the line',
+        () =>
+          `ln -s "$PWD/.claude/settings.local.json" ${at('c1')} && ln -s ${at('c1')} ${at('c2')} && echo x > ${at('c2')}`,
+        hatch,
+      ],
+      [
+        'a symbolic link made by cp -s',
+        () =>
+          `cp -s "$PWD/.claude/settings.local.json" ${at('novo-cs')} && echo x > ${at('novo-cs')}`,
+        hatch,
+      ],
+      [
+        'a link copied as a link by cp -P',
+        () => `cp -P ${at('hatch')} ${at('copia')} && echo x > ${at('copia')}`,
+        hatch,
+      ],
+      [
+        'a link the line made, copied as a link',
+        () =>
+          `ln -s "$PWD/.claude/settings.local.json" ${at('p1')} && cp -P ${at('p1')} ${at('p2')} && echo x > ${at('p2')}`,
+        hatch,
+      ],
+      [
+        'a directory copied with a link the line made inside',
+        () =>
+          `mkdir ${at('d1')} && ln -s "$PWD/.claude/settings.local.json" ${at('d1')}/l && cp -R ${at('d1')} ${at('d2')} && echo x > ${at('d2')}/l`,
+        hatch,
+      ],
+      [
+        'ln -sf over an existing link',
+        () =>
+          `ln -sf "$PWD/.claude/settings.local.json" ${at('unrelated')} && echo x > ${at('unrelated')}`,
+        hatch,
+      ],
+      // Hard links: the new name is the same file, so making one is
+      // writing the file, and so is writing through it.
+      [
+        'a hard link to the escape hatch',
+        () => `ln .claude/settings.local.json ${at('h1')}`,
+        hatch,
+      ],
+      [
+        'a write through a hard link made on the line',
+        () => `ln .git/${gateCacheFile} ${at('h2')} ; echo x > ${at('h2')}`,
+        loopFile,
+      ],
+      ['link(1)', () => `link .git/${gateCacheFile} ${at('h3')}`, loopFile],
+      ['cp -l', () => `cp -l .claude/settings.local.json ${at('h4')}`, hatch],
+      [
+        'rsync --link-dest into the directory of the escape hatch',
+        () => `rsync -a --link-dest="$PWD/.claude" /tmp/x/ ${at('bk')}/`,
+        /contém .claude\/settings.local.json/,
+      ],
+      // A source it cannot read, whose text names a file of the loop, is
+      // judged by that name, as a write to such a path is.
+      [
+        'a link whose source it cannot read, naming the gate cache',
+        () =>
+          `ln -s "$(git rev-parse --git-dir)/${gateCacheFile}" ${at('u1')} && echo x > ${at('u1')}`,
+        loopFile,
+      ],
+    ])('denies %s', async (_, line, reason) => {
+      await denies(line(), reason)
+    })
+
+    it.each([
+      [
+        'a dangling link to a harness file',
+        () => `echo x > ${at('gate-script')}`,
+        harness,
+      ],
+      [
+        'a dangling link to a workflow',
+        () => `echo x > ${at('workflow')}`,
+        harness,
+      ],
+      [
+        'a link to a file of the git dir',
+        () => `echo x > ${at('head')}`,
+        inGitDir,
+      ],
+      [
+        'a symlinked directory that holds the harness',
+        () => `cp /tmp/x ${at('claude')}/hooks/novo.mjs`,
+        harness,
+      ],
+      [
+        'a loop of links',
+        () => `echo x > ${at('loop-a')}`,
+        /link simbólico que não consegui seguir/,
+      ],
+      [
+        'a link to the git dir made on the line',
+        () =>
+          `ln -s "$PWD/.git" ${at('novo-git')} && echo x > ${at('novo-git')}/HEAD`,
+        inGitDir,
+      ],
+      [
+        'a link to .claude made on the line',
+        () =>
+          `ln -s "$PWD/.claude" ${at('novo-claude')} && cp /tmp/x ${at('novo-claude')}/hooks/guard-bash.mjs`,
+        harness,
+      ],
+      [
+        'a link to .github made on the line',
+        () =>
+          `ln -sf "$PWD/.github" ${at('novo-github')} && echo x > ${at('novo-github')}/workflows/ci.yml`,
+        harness,
+      ],
+      [
+        'a hard link to a harness file',
+        () => `ln .claude/hooks/x.mjs ${at('h5')}`,
+        harness,
+      ],
+      [
+        'a write through a link whose source it cannot read',
+        () => `ln -s "$ALVO" ${at('u2')} && echo x > ${at('u2')}`,
+        /aonde leva o link/,
+      ],
+      [
+        'a $PWD after a cd, read as the directory the command runs in',
+        () => 'cd .claude && echo x > "$PWD/hooks/novo.mjs"',
+        harness,
+      ],
+      [
+        'a $PWD the line may have set',
+        () => 'read -r PWD < /tmp/x; echo x > "$PWD/README.md"',
+        /não consegui ler onde o comando escreve/,
+      ],
+    ])('asks, critical, for %s', async (_, line, reason) => {
+      await asksCritical(line(), reason)
+    })
+
+    it.each([
+      // Copilot's own example: README.md is an ordinary file of the
+      // project, and a shell write to one passes, through a link or not
+      // (the documented limit of ADR 0002).
+      [
+        'Copilot’s example, a link to README.md',
+        () => 'ln -s "$PWD/README.md" /tmp/link && echo x > /tmp/link',
+      ],
+      ['a link to README.md on disk', () => `echo x > ${at('readme')}`],
+      [
+        'a hard link to README.md',
+        () => `ln README.md ${at('h-readme')} && echo x > ${at('h-readme')}`,
+      ],
+      ['a link to an unrelated file', () => `echo x > ${at('unrelated')}`],
+      [
+        'a link to an unrelated file made on the line',
+        () =>
+          `ln -s ${at('alvo.txt')} ${at('novo-alvo')} && echo x > ${at('novo-alvo')}`,
+      ],
+      [
+        'a relative link that names the hatch from its own directory',
+        () =>
+          `ln -s .claude/settings.local.json ${at('novo-fora')} && echo x > ${at('novo-fora')}`,
+      ],
+      [
+        'a link over an existing entry, which ln refuses without -f',
+        () =>
+          `ln -s "$PWD/.claude/settings.local.json" ${at('unrelated')} ; echo x > ${at('unrelated')}`,
+      ],
+      [
+        'a link to the hatch that nothing writes through',
+        () =>
+          `ln -s "$PWD/.claude/settings.local.json" ${at('so-link')} && cat ${at('so-link')}`,
+      ],
+      ['a write to /tmp', () => 'echo x > /tmp/guard-bash-links.txt'],
+      ['a write to $PWD/README.md', () => 'echo x > "$PWD/README.md"'],
+    ])('passes %s', async (_, line) => {
+      await passes(line())
+    })
+
+    it('keeps what a copy takes from a file the line wrote, under a path with a link in it', async () => {
+      // Where /tmp is a link (on macOS, to /private/tmp), the copy reads the
+      // same file the line wrote, however the two spell it. The other
+      // spelling is taken from this machine: on Linux /tmp is no link, and
+      // a /private/tmp path would name another, unread file.
+      const realTmp = realpathSync.native('/tmp')
+      if (realTmp !== '/tmp')
+        await denies(
+          `printf '# Owner Approve\\n' > /tmp/guard-bash-corpo.md && cp ${realTmp}/guard-bash-corpo.md body-copia.md && gh issue comment 5 -F body-copia.md`,
+          opening,
+        )
+      await denies(
+        "printf '# Owner Approve\\n' > /tmp/guard-bash-corpo.md && cp /tmp/guard-bash-corpo.md body-copia.md && gh issue comment 5 -F body-copia.md",
+        opening,
+      )
+    })
+
+    it('reads a body written through a link as the file the link reaches', async () => {
+      await denies(
+        `ln -s "$PWD/body.md" ${at('corpo')} && printf '# Owner Approve\\n' > ${at('corpo')} && gh issue comment 5 -F body.md`,
+        opening,
+      )
+      await denies(
+        `printf '# Owner Approve\\n' > body.md && gh issue comment 5 -F ${at('body-link')}`,
+        opening,
+      )
+    })
+
+    // What the verification of the eighth round found untested, or open.
+    const body = /não consegui ler o corpo do comentário/
+
+    it.each([
+      [
+        'a `..` taken from the directory a link reaches, as the kernel does',
+        () => `echo x > ${at('claude')}/../.claude/settings.local.json`,
+        hatch,
+      ],
+      [
+        'a link ln -T puts in place of a link to a directory',
+        () =>
+          `ln -sfT "$PWD/.claude/settings.local.json" ${at('pasta-link')} && echo x > ${at('pasta-link')}`,
+        hatch,
+      ],
+      [
+        'a link ln -n puts in place of a link to a directory',
+        () =>
+          `ln -sfn "$PWD/.claude/settings.local.json" ${at('pasta-link')} && echo x > ${at('pasta-link')}`,
+        hatch,
+      ],
+      [
+        'a link ln -h puts in place of a link to a directory',
+        () =>
+          `ln -sfh "$PWD/.claude/settings.local.json" ${at('pasta-link')} && echo x > ${at('pasta-link')}`,
+        hatch,
+      ],
+      [
+        'rsync --link-dest relative to the destination',
+        () => 'rsync -a --link-dest=../.claude /tmp/x/ sub/',
+        /contém .claude\/settings.local.json/,
+      ],
+      [
+        'a link the line made, copied as a link by rsync',
+        () =>
+          `ln -s "$PWD/.claude/settings.local.json" ${at('r1')} && rsync -a ${at('r1')} ${at('r2')} && echo x > ${at('r2')}`,
+        hatch,
+      ],
+      [
+        'a link the line made, copied as a link by ditto',
+        () =>
+          `ln -s "$PWD/.claude/settings.local.json" ${at('t1')} && ditto ${at('t1')} ${at('t2')} && echo x > ${at('t2')}`,
+        hatch,
+      ],
+      // Listed after the line's own commands, a `bash -c` script or a
+      // substitution runs before the command that holds it.
+      [
+        'a write through a link a `bash -c` script makes',
+        () =>
+          `bash -c 'ln -s "$PWD/.claude/settings.local.json" ${at('b1')}' && echo x > ${at('b1')}`,
+        hatch,
+      ],
+      [
+        'a write through a link a substitution makes',
+        () =>
+          `echo "$(ln -s "$PWD/.git/${gateCacheFile}" ${at('b2')})" ; echo x > ${at('b2')}`,
+        loopFile,
+      ],
+      [
+        'a write through a link a substitution replaces',
+        () =>
+          `link ${at('alvo.txt')} ${at('s1')} && echo "$(ln -sf "$PWD/.claude/settings.local.json" ${at('s1')})" && echo x > ${at('s1')}`,
+        hatch,
+      ],
+      [
+        'a write through a link a `bash -c` script copies',
+        () =>
+          `bash -c 'ln -s "$PWD/.claude/settings.local.json" ${at('k1')} && cp -P ${at('k1')} ${at('k2')}' && echo x > ${at('k2')}`,
+        hatch,
+      ],
+      [
+        'a write through links of the line and of a substitution listed after them, in the order that reaches the hatch',
+        () =>
+          `true $(ln -sfn /tmp ${at('x1')}; ln -s "$PWD/.claude/settings.local.json" ${at('pasta')}/y) && ln -sfn ${at('pasta')} ${at('x1')} && echo x > ${at('x1')}/y`,
+        hatch,
+      ],
+      [
+        'rm of a link named as a plan marker',
+        () => `rm .claude/${planPendingFile('sessao-2')}`,
+        loopFile,
+      ],
+      // Bodies: what the line leaves where a link lands.
+      [
+        'a body written through a hard link the line made',
+        () =>
+          `ln body.md ${at('hb')} && printf '# Owner Approve\\n' > ${at('hb')} && gh issue comment 5 -F body.md`,
+        opening,
+      ],
+      [
+        'a body written through a link mv carried',
+        () =>
+          `ln -s "$PWD/body.md" ${at('mv1')} && mv ${at('mv1')} ${at('mv2')} && printf '# Owner Approve\\n' > ${at('mv2')} && gh issue comment 5 -F body.md`,
+        opening,
+      ],
+      [
+        'a body cat reads through a link the line made',
+        () =>
+          `ln -s "$PWD/body.md" ${at('lc')} && printf '# Owner Approve\\n' > body.md && cat ${at('lc')} > copia-cat.md && gh issue comment 5 -F copia-cat.md`,
+        opening,
+      ],
+      [
+        'a body read through a link the line put over one on disk',
+        () =>
+          `ln -sf ${at('aprova.md')} ${at('unrelated')} && gh issue comment 5 -F ${at('unrelated')}`,
+        opening,
+      ],
+    ])('denies %s', async (_, line, reason) => {
+      await denies(line(), reason)
+    })
+
+    it.each([
+      // The entry itself: sed -i and rm replace or remove the link, not
+      // what it leads to.
+      [
+        'sed -i of a link in .claude',
+        () => "sed -i '' 's/a/b/' .claude/fora",
+        harness,
+      ],
+      ['rm of a link in .claude', () => 'rm .claude/fora', harness],
+      [
+        'rm of a link in .claude, reached through a link to the directory',
+        () => `rm ${at('claude')}/fora`,
+        harness,
+      ],
+      ['rm of a link in the git dir', () => 'rm .git/pasta-link', inGitDir],
+      [
+        'a $PWD a script the line runs may have set',
+        () => `cd ${links} && bash muda-pwd.sh`,
+        /não consegui ler onde o comando escreve/,
+      ],
+      [
+        'a $PWD a quoted name may have set',
+        () =>
+          `cd ${links} && read -r P''WD < /tmp/x; echo x > "$PWD/.claude/settings.json"`,
+        /não consegui ler onde o comando escreve/,
+      ],
+      // Where the write lands is not certain: the files it may land in are
+      // not known after it.
+      [
+        'a body the disk’s link may have taken, under a link the line made',
+        () =>
+          `ln -sfn ${linked.dir} ${at('pasta-link')} ; printf '# Owner Approve\\n' > ${at('pasta-link')}/f.md ; gh issue comment 5 -F ${at('pasta')}/f.md`,
+        body,
+      ],
+      [
+        'a body the line wrote under two spellings that differ in case',
+        () =>
+          `printf 'Recado.\\n' > ${at('Caso.md')} && printf '# Owner Approve\\n' > ${at('CASO.md')} && gh issue comment 5 -F ${at('Caso.md')}`,
+        body,
+      ],
+      [
+        'a body a link of a `bash -c` script may have taken',
+        () =>
+          `bash -c 'ln -s "$PWD/body.md" ${at('b3')}' && printf '# Owner Approve\\n' > ${at('b3')} && gh issue comment 5 -F body.md`,
+        body,
+      ],
+      [
+        'a body read through a link a substitution listed later makes',
+        () =>
+          `echo "$(ln -sf ${at('aprova.md')} ${at('unrelated')})" && gh issue comment 5 -F ${at('unrelated')}`,
+        body,
+      ],
+      [
+        'a body cat reads through a link a substitution listed later makes',
+        () =>
+          `printf 'Recado.\\n' > ${at('unrelated')} && echo "$(ln -sf ${at('aprova.md')} ${at('unrelated')})" && cat ${at('unrelated')} > copia-cat2.md && gh issue comment 5 -F copia-cat2.md`,
+        body,
+      ],
+      [
+        'a body cp copies through a directory a substitution listed later links',
+        () =>
+          `printf 'Recado.\\n' > ${at('pasta-link')}/f.md && echo "$(ln -sfn ${at('aprova-dir')} ${at('pasta-link')})" && cp ${at('pasta-link')}/f.md copia-cp2.md && gh issue comment 5 -F copia-cp2.md`,
+        body,
+      ],
+      [
+        'a body cp copies from a link a substitution listed later replaces',
+        () =>
+          `cp ${at('aprova-link')} copia-cp3.md && gh issue comment 5 -F copia-cp3.md && echo "$(ln -sf ${at('alvo.txt')} ${at('aprova-link')})"`,
+        body,
+      ],
+      [
+        'a body cp copies through a link a substitution listed later makes',
+        () =>
+          `printf 'Recado.\\n' > ${at('unrelated')} && echo "$(ln -sf ${at('aprova.md')} ${at('unrelated')})" && cp ${at('unrelated')} copia-cp.md && gh issue comment 5 -F copia-cp.md`,
+        body,
+      ],
+    ])('asks, critical, for %s', async (_, line, reason) => {
+      await asksCritical(line(), reason)
+    })
+
+    it('names a file that is no link as the file, not as the link itself', async () => {
+      const line = 'cp /tmp/x .claude/hooks/novo.mjs'
+      await asksCritical(line, harness)
+      expect(reasonOf(await run(line))).not.toMatch(/em si/)
+    })
+
+    it('asks, not denies, for a body on disk after a write through a link it cannot read', async () => {
+      // aprova.md opens as the Approve on disk, but the write may have
+      // rewritten it: uncertain, so a critical ask.
+      const line = `ln -s "$ALVO" ${at('u3')} ; printf 'x\\n' > ${at('u3')} ; gh issue comment 5 -F ${at('aprova.md')}`
+      await asksCritical(line, body)
+      expect(reasonOf(await run(line))).not.toMatch(opening)
+    })
+
+    it.each([
+      [
+        'a second link over one the line made, which ln refuses without -f',
+        () =>
+          `ln -s ${at('alvo.txt')} ${at('e1')} && ln -s "$PWD/.claude/settings.local.json" ${at('e1')} ; echo x > ${at('e1')}`,
+      ],
+    ])('passes %s', async (_, line) => {
+      await passes(line())
+    })
+
+    it('reads the repository around a directory once, however a write spells it', async () => {
+      const root = mkdtempSync(path.join(tmpdir(), 'guard-bash-git-calls-'))
+      try {
+        const log = path.join(root, 'git.log')
+        const bin = gitShim(root, `printf '%s\\n' "$*" >> '${log}'`)
+        const env = linked.env({
+          PATH: [bin, linked.bin, process.env.PATH ?? ''].join(path.delimiter),
+        })
+        // ${links}/claude is <repo>/.claude: one directory, two spellings.
+        expectAsk(
+          await guard(`echo x > ${at('claude')}/nota.txt`, {
+            repo: linked,
+            env,
+          }),
+          harness,
+        )
+        const reads = readFileSync(log, 'utf8')
+          .split('\n')
+          .filter((call) => call.includes('--show-toplevel'))
+        expect(reads).toHaveLength(1)
+      } finally {
+        rmSync(root, { recursive: true, force: true })
+      }
+    })
+  },
+)
+
+// ---------------------------------------------------------------------------
+// Ninth round of Copilot's review of #26
+
+describe.concurrent(
+  'the account a gh command runs as (Copilot review of #26, ninth round)',
+  () => {
+    const modes = ['default', 'auto'] as const
+    const accountVariables = [
+      'GH_TOKEN',
+      'GITHUB_TOKEN',
+      'GH_ENTERPRISE_TOKEN',
+      'GITHUB_ENTERPRISE_TOKEN',
+      'GH_CONFIG_DIR',
+    ] as const
+    type AccountVariable = (typeof accountVariables)[number]
+
+    /** What the hook inherits for each variable: the account its live reads use. */
+    const hookValue = (name: AccountVariable) =>
+      name === 'GH_CONFIG_DIR'
+        ? path.join(feature.root, 'gh-do-hook')
+        : `valor-do-hook-${name}`
+
+    const merge = 'gh pr merge 7'
+    const transition =
+      'gh issue edit 5 --remove-label needs-triage --add-label ready-for-human'
+    const resolve = `gh api graphql -f query='mutation { resolveReviewThread(input: {threadId: "PRRT_1"}) { thread { isResolved } } }'`
+    /**
+     * What each check would read: a merge that is not ready (a deny), and a
+     * transition and a thread in order (a pass). Read with the hook's
+     * account, each would be judged by the wrong one.
+     */
+    const fixtures: Record<string, unknown> = {
+      [merge]: {
+        prs: { 7: { pr: readyPr({ threads: [{ isResolved: false }] }) } },
+      },
+      [transition]: {
+        issues: {
+          5: {
+            labels: ['enhancement', 'needs-triage'],
+            lastCommentBody: '# Plano\n\n## Contexto e porquê\n\nTexto.',
+          },
+        },
+      },
+      [resolve]: {
+        viewer: { login: 'geazioliveira' },
+        threads: { PRRT_1: { lastAuthor: 'geazioliveira' } },
+      },
+    }
+    const other = /o comando pode rodar o gh com outra conta que a do hook/
+    const switched =
+      /a linha tem um gh auth login, logout, switch ou refresh, ou um gh config set/
+
+    /**
+     * `env -i` with what it takes out of the clean environment put back as
+     * the hook has it (HOME, XDG_CONFIG_HOME and the git config), so that
+     * only the account variables change: the git config gh reads would
+     * otherwise leave the target unknown (seventh round) before any read.
+     */
+    const envI = (env: NodeJS.ProcessEnv) =>
+      `env -i ${[
+        'HOME',
+        'XDG_CONFIG_HOME',
+        'GIT_CONFIG_GLOBAL',
+        'GIT_CONFIG_NOSYSTEM',
+      ]
+        .map((name) => `${name}='${env[name]}'`)
+        .join(' ')}`
+
+    /**
+     * The ways a line changes a variable for the command: on it, exported or
+     * assigned before it, taken out by env -u, or by env -i (envI). `env` is
+     * the hook's environment.
+     */
+    const forms: [
+      string,
+      (name: AccountVariable, line: string, env: NodeJS.ProcessEnv) => string,
+    ][] = [
+      ['on the command', (name, line) => `${name}=outro ${line}`],
+      ['exported before it', (name, line) => `export ${name}=outro; ${line}`],
+      ['assigned before it', (name, line) => `${name}=outro; ${line}`],
+      ['taken out by env -u', (name, line) => `env -u ${name} ${line}`],
+      ['taken out by env -i', (_, line, env) => `${envI(env)} ${line}`],
+    ]
+
+    /** A critical ask that read nothing: an ask, a deny in auto. */
+    function expectUnread(
+      run: HookRun,
+      mode: string,
+      calls: () => GhCall[],
+      reason: RegExp,
+    ) {
+      if (mode === 'auto')
+        expectDeny(run, /Em auto, a confirmação vira negação/)
+      else expectAsk(run)
+      expect(reasonOf(run)).toMatch(reason)
+      expect(calls()).toEqual([])
+    }
+
+    test.for(
+      modes.flatMap((mode) =>
+        accountVariables.flatMap((name) =>
+          forms.map(([form, line]) => [mode, name, form, line] as const),
+        ),
+      ),
+    )(
+      'gh pr merge with %s … %s %s reads nothing and asks, critical',
+      async ([mode, name, , line], { live }) => {
+        const gh = live(fixtures[merge], { [name]: hookValue(name) })
+        const run = await guard(line(name, merge, gh.env), {
+          env: gh.env,
+          mode,
+        })
+        expectUnread(run, mode, gh.calls, other)
+        expect(reasonOf(run)).toContain(name)
+      },
+    )
+
+    test.for(
+      modes.flatMap((mode) =>
+        [transition, resolve].flatMap((check) =>
+          accountVariables.map((name) => [mode, check, name] as const),
+        ),
+      ),
+    )(
+      'in %s, %s with its own %s reads nothing and asks, critical',
+      async ([mode, check, name], { live }) => {
+        const gh = live(fixtures[check], { [name]: hookValue(name) })
+        expectUnread(
+          await guard(`${name}=outro ${check}`, { env: gh.env, mode }),
+          mode,
+          gh.calls,
+          other,
+        )
+      },
+    )
+
+    test.for(
+      modes.flatMap((mode) =>
+        [
+          `gh auth switch --user outra && ${merge}`,
+          `gh auth login --with-token < /dev/null; ${merge}`,
+          `gh auth logout --hostname github.com --user outra; ${merge}`,
+          `gh auth refresh --hostname github.com -s repo && ${merge}`,
+          `gh config set -h github.com git_protocol ssh && ${merge}`,
+          // A substitution runs before the command that holds it.
+          `${merge} --subject "$(gh auth switch --user outra)"`,
+          // An alias the line defines, run before the merge.
+          `gh alias set sw 'auth switch' && gh sw --user outra && ${merge}`,
+          `gh auth switch --user outra && ${transition}`,
+          `gh auth switch --user outra && ${resolve}`,
+        ].map((line) => [mode, line] as const),
+      ),
+    )(
+      'in %s, `%s` reads nothing and asks, critical',
+      async ([mode, line], { live }) => {
+        const check = line.endsWith(transition)
+          ? transition
+          : line.endsWith(resolve)
+            ? resolve
+            : merge
+        const gh = live(fixtures[check])
+        const run = await guard(line, { env: gh.env, mode })
+        if (mode === 'auto') expectDeny(run)
+        else expectAsk(run)
+        expect(reasonOf(run)).toMatch(switched)
+        expect(gh.calls()).toEqual([])
+      },
+    )
+
+    /**
+     * Lines whose gh runs with the hook's own account: read live, as today,
+     * with the environment the hook inherited. `inherited` is what the hook
+     * inherits besides the clean environment.
+     */
+    const controls: [
+      string,
+      (env: NodeJS.ProcessEnv) => string,
+      Partial<Record<AccountVariable, true>>,
+    ][] = [
+      ['no override', () => merge, { GH_TOKEN: true, GH_CONFIG_DIR: true }],
+      [
+        'GH_TOKEN equal to the inherited one',
+        () => `GH_TOKEN=${hookValue('GH_TOKEN')} ${merge}`,
+        { GH_TOKEN: true },
+      ],
+      [
+        'GH_CONFIG_DIR exported equal to the inherited one',
+        () => `export GH_CONFIG_DIR='${hookValue('GH_CONFIG_DIR')}'; ${merge}`,
+        { GH_CONFIG_DIR: true },
+      ],
+      [
+        'env -u of a variable the hook does not inherit',
+        () => `env -u GH_TOKEN -u GITHUB_TOKEN ${merge}`,
+        {},
+      ],
+      [
+        'env -i with no account variable inherited',
+        (env) => `${envI(env)} ${merge}`,
+        {},
+      ],
+      // gh's config dir is XDG_CONFIG_HOME/gh while it is set: HOME alone
+      // does not move it.
+      ['HOME under XDG_CONFIG_HOME', () => `HOME=/outra ${merge}`, {}],
+      [
+        'gh auth status and gh auth token before it',
+        () => `gh auth status && gh auth token >/dev/null && ${merge}`,
+        { GH_TOKEN: true },
+      ],
+    ]
+
+    test.for(
+      modes.flatMap((mode) =>
+        controls.map(
+          ([name, line, inherited]) => [mode, name, line, inherited] as const,
+        ),
+      ),
+    )(
+      'in %s, %s: read live with the hook’s own account, as today',
+      async ([mode, , line, inherited], { live }) => {
+        const extra = Object.fromEntries(
+          Object.keys(inherited).map((name) => [
+            name,
+            hookValue(name as AccountVariable),
+          ]),
+        )
+        const gh = live(fixtures[merge], extra)
+        expectDeny(
+          await guard(line(gh.env), { env: gh.env, mode }),
+          /1 thread\(s\) de revisão aberta\(s\)/,
+        )
+        const calls = gh.calls()
+        expect(calls).toEqual([
+          expect.objectContaining({ call: 'prByNumber', key: '7' }),
+        ])
+        // The read authenticated with what the hook inherits, nothing else.
+        for (const name of accountVariables)
+          expect(calls[0].auth?.[name]).toBe(extra[name] ?? null)
+        expect(calls[0].auth?.HOME).toBe(gh.env.HOME)
+        expect(calls[0].auth?.XDG_CONFIG_HOME).toBe(gh.env.XDG_CONFIG_HOME)
+      },
+    )
+
+    // A relative GH_CONFIG_DIR is gh's from the directory it runs in. From
+    // one the hook cannot read (`cd "$X"`), it may be any, even when its
+    // text leads, from the input's cwd, to the hook's own; the merge names
+    // its repository (-R), so its target is still read.
+    const byName = `${merge} -R geazioliveira/marketo-sandbox`
+    const relative: [string, () => string, boolean][] = [
+      [
+        'relative, after a cd the hook cannot read',
+        () => `cd "$X" && GH_CONFIG_DIR=../../gh-do-hook ${byName}`,
+        true,
+      ],
+      [
+        'relative, in the input’s cwd, the hook’s own dir',
+        () => `GH_CONFIG_DIR=../gh-do-hook ${merge}`,
+        false,
+      ],
+      [
+        'absolute, the hook’s own dir, after a cd the hook cannot read',
+        () =>
+          `cd "$X" && GH_CONFIG_DIR='${hookValue('GH_CONFIG_DIR')}' ${byName}`,
+        false,
+      ],
+    ]
+
+    test.for(
+      modes.flatMap((mode) =>
+        relative.map(
+          ([name, line, changed]) => [mode, name, line, changed] as const,
+        ),
+      ),
+    )('in %s, GH_CONFIG_DIR %s', async ([mode, , line, changed], { live }) => {
+      const inherited = hookValue('GH_CONFIG_DIR')
+      const gh = live(fixtures[merge], { GH_CONFIG_DIR: inherited })
+      const run = await guard(line(), { env: gh.env, mode })
+      if (changed) {
+        expectUnread(run, mode, gh.calls, other)
+        expect(reasonOf(run)).toContain('GH_CONFIG_DIR')
+        return
+      }
+      expectDeny(run, /1 thread\(s\) de revisão aberta\(s\)/)
+      const calls = gh.calls()
+      expect(calls).toEqual([
+        expect.objectContaining({ call: 'prByNumber', key: '7' }),
+      ])
+      expect(calls[0].auth?.GH_CONFIG_DIR).toBe(inherited)
     })
   },
 )
