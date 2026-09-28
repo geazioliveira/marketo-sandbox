@@ -22,8 +22,8 @@ A auditoria de `main` registra o merge que chegar sem as duas coisas.
   - `review-threads` exige zero threads não resolvidas, inclusive as desatualizadas, e lista `path:line` e o link de cada uma.
   - Uma página lida pela metade fica `unchecked` e bloqueia.
 - [x] O re-disparo é confiável:
-  - `review-signal.yml` ("Sinal de revisão") roda em `pull_request_review` (`submitted`, `dismissed`) com `permissions: {}` e só sinaliza;
-  - `issue-link-refresh.yml` ganha `workflow_run` desse sinal e `workflow_dispatch` com o número da PR;
+  - `review-signal.yml` ("Sinal de revisão") roda em `pull_request_review` (`submitted`, `dismissed`) com `permissions: {}` e só sinaliza, até a #30;
+  - `issue-link-refresh.yml` ganha `workflow_run` desse sinal, até a #30, e `workflow_dispatch` com o número da PR;
   - o `refresh-issue-link.mjs` ganha um modo PR.
 - [x] A auditoria de `main` deixa um merge fora do loop quando não houve revisão do Copilot na cabeça antes do merge, ou quando alguma thread aberta até o merge continua não resolvida na hora da auditoria.
 - [x] Nova ADR 0003 (revisão na cabeça e zero threads como condições de merge). A ADR 0002 ganha as camadas e os limites. O `docs/development/workflow.md` e o `AGENTS.md` descrevem o fluxo:
@@ -40,7 +40,7 @@ A auditoria de `main` registra o merge que chegar sem as duas coisas.
 ## Abordagem técnica
 
 - **Identidade do Copilot.** Ela é casada por `__typename === 'Bot'` e `databaseId`, não pelo login, porque existe uma organização com esse nome.
-- **Re-disparo em duas etapas.** Um evento de revisão roda o YAML da própria PR, então o sinal não tem permissão nenhuma. Quem re-executa o `issue-link` é o refresh, que roda de `main`.
+- **Re-disparo em duas etapas, até a #30.** Um evento de revisão roda o YAML da própria PR, então o sinal não tinha permissão nenhuma até a #30, que o tirou. Quem re-executava o `issue-link` era o refresh, que roda de `main`.
 - **Threads resolvidas.** Resolver uma thread não dispara evento nenhum. Por isso o agente renova o veredito à mão depois de resolver, e a auditoria julga as threads na hora dela.
 - **Resumo da revisão.** Um achado que aparece só no resumo, sem thread, não é lido pelo gate, porque o formato não é documentado. O agente o trata na PR.
 
@@ -78,7 +78,7 @@ Desvios do plano, descobertos nas revisões adversariais e medidos em PRs reais 
 
   Sem essa regra, o fim da cota de Copilot do dono deixaria o gate verde sem revisão nenhuma. As três falhas bloqueiam, porque não há bypass. Uma revisão sem corpo, ou com o corpo vazio ou só com espaços, também conta como falha, porque nada nela mostra que o Copilot revisou alguma coisa (achado da revisão do Copilot na PR #15).
 - **Página parcial de revisões.** Cada resposta numa thread também é uma revisão, então uma PR longa passa de 100. Uma revisão do Copilot que conta entre as 100 mais recentes basta, porque as mais antigas não a desfazem. A página fica `unchecked` só quando nenhuma das lidas conta. Isso afrouxa o texto do critério sobre "página lida pela metade", da mesma forma que a auditoria já fazia.
-- **O veredito fresco antes do merge** é o gate em modo CI rodado na cabeça, ou `gh run rerun` do `issue-link` seguido de `gh run watch --exit-status`. Um `gh workflow run` do refresh sozinho não é veredito fresco, porque retorna antes de o refresh rodar. As mensagens do gate dizem como renovar.
+- **O veredito fresco antes do merge** era o gate em modo CI rodado na cabeça, ou `gh run rerun` do `issue-link` seguido de `gh run watch --exit-status`, até a [#30](bug-issue-link-red-on-every-pr.md); desde ela, um rerun do `issue-link` não é veredito fresco. Um `gh workflow run` do refresh sozinho não é veredito fresco, porque retorna antes de o refresh rodar. As mensagens do gate dizem como renovar.
 - **O `workflow_dispatch` roda a ref disparada,** não `main`. O comando é emitido com `--ref main`, e o job pula um disparo de outra ref. Isso só pega acidentes, porque a cópia do YAML na ref disparada pode tirar a guarda. Não é uma fronteira de confiança, nem precisa ser: só quem tem escrita no repositório dispara um `workflow_dispatch`, e quem tem escrita já pode rodar qualquer workflow por um push numa branch.
 - **Pedir a revisão de novo** virou uma regra verificável: depois de cada push, se o timeline não mostra um pedido ao Copilot depois do push, o agente pede.
 - **Uma revisão do Copilot a caminho também bloqueia.** O plano pedia que a consulta da PR lesse `reviewRequests`, e a primeira versão do gate não lia; a revisão do Copilot na PR #15 apontou a falta. Agora um pedido pendente ao Copilot (`copilotRequested`, o `Bot` com o `databaseId`) segura o merge mesmo com uma revisão na cabeça, porque as threads da revisão nova ainda não existem, e a mensagem manda esperá-la em vez de pedir outra. Com uma revisão na cabeça e os pedidos lidos pela metade (ou sem `totalCount`), sem o do Copilot entre eles, o passo fica `unchecked`. Medido na PR #15: o GraphQL mostra o pedido pendente, e o `requested_reviewers` do REST vem vazio.
@@ -91,3 +91,4 @@ O último critério depende do GitHub ao vivo: a PR desta issue esperar a revis�
 - **Criado**: 2026-09-25 (Fase: Intent), do plano aprovado na #13 (#13)
 - **Status**: Completed
 - **Atualizado**: 2026-09-25 (Fase: Learn), a PR #15 foi mergeada com a revisão do Copilot na cabeça e zero threads abertas, e o último critério foi marcado com a evidência da #13 (#4)
+- **Atualizado**: 2026-09-28 (Fase: Build), o sinal de revisão e o `workflow_run` do refresh saíram, e o veredito fresco passou a ser só o gate em modo CI (#30)

@@ -1145,6 +1145,7 @@ describe('docs against the review gate after the #13 reviews', () => {
     lifecycle,
     loopGate,
     'context/knowledge/patterns/review-before-merge.md',
+    'context/intent/feature-review-gate.md',
   ])(
     '%s neither calls the refresh unproven nor keeps the review signal, gone since #30',
     (file) => {
@@ -1286,6 +1287,7 @@ describe('docs against the review gate after the #13 reviews', () => {
       loopGate,
       'context/knowledge/glossary.md',
       'context/knowledge/patterns/review-before-merge.md',
+      'context/intent/feature-review-gate.md',
     ].flatMap((file) =>
       proseOf(bodyOf(read(file)).replaceAll('**', ''))
         .filter(
