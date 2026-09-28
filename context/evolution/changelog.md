@@ -12,13 +12,13 @@ Uma entrada por mudança mergeada, da mais nova para a mais antiga, escrita no p
 ### O que foi construído / corrigido
 
 - **A stack no contrato.** O plano vigente da issue mãe declara a stack numa seção `## Stack`: a lista numerada das branches das fatias, de baixo para cima (`stackOf`, `slicePosition`). Cada fatia é uma sub-issue da mãe, com a label de categoria e `stack-slice` e sem label de estado.
-- **O gate julga uma fatia pela mãe.** O estado, as seções, os critérios e o Approve vêm do plano vigente da mãe, e toda revogação do Approve da mãe vale para todas as fatias. A branch precisa estar na `Stack`, e a mãe precisa ser deste repositório, estar aberta e ser lida, senão o veredito fica não verificado.
+- **O gate julga uma fatia pela mãe.** O estado, as seções, os critérios e o Approve vêm do plano vigente da mãe, e toda revogação do Approve da mãe vale para todas as fatias. A branch precisa estar na `Stack`. A mãe precisa ser deste repositório, estar aberta, ter exatamente uma label de categoria e não ser ela mesma uma fatia, e uma mãe que não se lê deixa o veredito não verificado.
 - **Os passos numa fatia.**
   - `pr-base` aceita a fatia logo abaixo só em draft, e `main` na primeira fatia ou, nas outras, depois de as de baixo mergearem.
   - `stacked` não conta como estranhas as fatias de baixo nem o merge delas, e isenta uma fatia de cima só quando ela foi cortada desta.
   - `intent-first` bloqueia só na primeira fatia, e `learn` só na última, citando a mãe. `commits-cite-issue` bloqueia acima da primeira fatia, no CI fora de draft.
 - **O `pr-size`**, um passo novo que só relata as linhas alteradas da PR contra a base, com 1.500 de referência.
-- **O refresh** re-roda também as PRs abertas das sub-issues deste repositório quando há um evento na mãe.
+- **O refresh** re-roda também as PRs abertas das sub-issues deste repositório com `stack-slice` quando há um evento na mãe.
 - **A label `stack-slice`** foi criada. A ADR 0001, o ciclo de vida de issue e branch, o gate do loop, o fluxo, o glossário e o `AGENTS.md` descrevem como montar, revisar, atualizar e mergear uma stack, e "fatia" ficou reservada para a fatia de uma stack.
 - **A verificação adversarial**, antes da PR, achou dez pontos. Nove foram corrigidos com caso de teste:
   - a ordem do merge de baixo para cima;
@@ -32,14 +32,25 @@ Uma entrada por mudança mergeada, da mais nova para a mais antiga, escrita no p
   - os casos de teste que faltavam.
 
   O décimo é de antes da #31 e virou a #32.
+- **A revisão do Copilot** na PR #33 achou cinco pontos, dois em threads e três só no resumo. Os cinco foram corrigidos com caso de teste:
+  - a mãe que também é fatia;
+  - a mãe sem categoria ou com duas, cujo plano era julgado como de feature;
+  - as falhas de leitura da mãe que o cache guardava como verificadas;
+  - o code span de mais de uma crase na `Stack`;
+  - o refresh das sub-issues que não são fatias.
 
 ### Números medidos
 
-- **Os testes**, contados com `npx vitest list --json`: 1.402 em `main` (`63f69ec`) e 1.461 na cabeça.
-  - O `gate.spec.ts` foi de 293 para 336: 40 casos no bloco da stack e 3 mutações novas do gh falso.
-  - O `loop-sections.spec.ts` foi de 447 para 456, o `refresh-issue-link.spec.ts` de 65 para 71 e o `drift.spec.ts` de 184 para 185.
-- **Os checks**: `npm run check` com saída 0, 1.461 testes em 9 arquivos, o `check:context` sem problemas e as linhas "are current" do `check:all`; o e2e com 33.
-- **O tamanho desta PR**: 2.887 linhas alteradas contra `main` antes do Learn (`git diff --numstat origin/main...HEAD`), 1.868 delas em testes e 844 em `scripts/`. É o que o `pr-size` relatou na própria PR, acima da referência de 1.500.
+- **Os testes**, contados com `npx vitest list --json`: 1.402 em `main` (`63f69ec`) e 1.465 depois da primeira revisão do Copilot.
+  - O `gate.spec.ts` foi de 293 para 338: 42 casos no bloco da stack e 3 mutações novas do gh falso.
+  - O `loop-sections.spec.ts` foi de 447 para 457, o `refresh-issue-link.spec.ts` de 65 para 72 e o `drift.spec.ts` de 184 para 185.
+- **Os checks**: `npm run check` com saída 0, 1.465 testes em 9 arquivos, o `check:context` sem problemas e as linhas "are current" do `check:all`; o e2e com 33.
+- **As mutações**: cada uma das 8 mutações das correções da revisão do Copilot derruba pelo menos um caso.
+- **O tamanho desta PR**, contado com `git diff --numstat origin/main...HEAD`:
+  - antes do Learn, 2.887 linhas alteradas contra `main`, o que o `pr-size` relatou na própria PR;
+  - depois da primeira revisão do Copilot, 3.270 (+3.100 −170), 2.060 delas em testes e 909 em `scripts/`.
+
+  As duas contagens passam da referência de 1.500.
 - **A PR #26**, que motivou a issue: +34.550 −61 em 50 arquivos, e dez revisões do Copilot, com 6, 6, 11, 4, 5, 3, 2, 1, 1 e 2 comentários.
 
 ### Decisões tomadas
@@ -62,6 +73,7 @@ Uma entrada por mudança mergeada, da mais nova para a mais antiga, escrita no p
 - **Prosa que cita uma branch não pode virar regra.** A primeira versão da `Stack` aceitava qualquer item de lista com uma branch, então uma nota do plano que citasse uma branch a punha na stack e a isentava do `stacked`. O formato estrito separa a lista da prosa.
 - **Uma isenção precisa de uma condição que a feche.** Isentar de uma vez as fatias de cima abria o `stacked` para uma fatia de baixo que trouxesse os commits da de cima.
 - **A ordem do merge precisa ser conferida, e não só escrita.** Sem o `pr-base` olhar as fatias de baixo, uma fatia de cima apontada para `main` levaria as de baixo junto, sem o gate delas.
+- **Quem empresta as regras de outra issue precisa conferir que ela é o que diz ser.** O gate lia da mãe o estado, o plano e o Approve, mas não conferia que ela fosse uma raiz: uma categoria só e nenhum `stack-slice`. A revisão do Copilot achou as duas faltas.
 
 ---
 

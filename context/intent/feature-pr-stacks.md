@@ -59,14 +59,15 @@ Nenhuma. O Approve do dono na #31 (2026-09-27, "Pode seguir com suas recomendaç
 
 O que foi construído está na [entrada do changelog](../evolution/changelog.md), e a PR é a #33.
 
-Desvios do plano, todos da verificação adversarial feita antes da PR e sempre para o lado que bloqueia:
+Desvios do plano, da verificação adversarial feita antes da PR e da revisão do Copilot nela, sempre para o lado que bloqueia:
 
 - **A ordem do merge é conferida.** Uma fatia acima da primeira só aponta para `main` depois de toda fatia de baixo mergeada. O plano só dizia que a de cima ficava em draft até a de baixo mergear, e uma fatia apontada para `main` antes disso levaria as de baixo junto, sem o gate delas.
 - **Os commits de uma fatia acima da primeira precisam citar a sub-issue dela**, no CI fora de draft. Ali o `intent-first`, que só bloqueia na primeira fatia, já não pega uma branch cortada de trabalho de fora da stack.
 - **A isenção de uma fatia de cima tem condição.** A ref dela só fica fora do `stacked` quando o que ela divide com o HEAD, fora de `main` e das fatias de baixo, cita a issue desta fatia. Isentar toda fatia de cima deixava passar uma fatia de baixo que trouxe os commits da de cima.
-- **A `Stack` tem formato estrito.** Só os itens numerados na primeira coluna, começando pela branch, são fatias, e um bullet, um item indentado ou um parágrafo é prosa. Antes, uma nota que citasse uma branch virava fatia e a isentava do `stacked`. Duas branches da mesma issue e a branch da própria mãe bloqueiam.
-- **A mãe precisa ser deste repositório.** Uma mãe que não se lê deixa o veredito não verificado, com aviso no modo local, e o refresh deixa de fora as sub-issues de outro repositório.
-- **O tamanho.** São cerca de 2,9 mil linhas contra `main`, 1.868 delas em testes, acima da referência de 1.500 que a própria #31 criou. Ela não podia vir numa stack, porque é ela que ensina o loop a aceitar uma.
+- **A `Stack` tem formato estrito.** Só os itens numerados na primeira coluna, começando pela branch num code span, de uma crase ou de mais, são fatias, e um bullet, um item indentado ou um parágrafo é prosa. Antes, uma nota que citasse uma branch virava fatia e a isentava do `stacked`. Duas branches da mesma issue e a branch da própria mãe bloqueiam.
+- **A mãe precisa ser deste repositório.** Uma mãe que não se lê, por qualquer falha, deixa o veredito não verificado, com aviso no modo local quando o GitHub está inacessível. O refresh deixa de fora as sub-issues de outro repositório e as que não levam `stack-slice`.
+- **A mãe precisa ser a raiz.** Uma mãe que também leva `stack-slice` é recusada, porque uma stack não se aninha. Ela precisa de exatamente uma label de categoria, que dá as seções do plano. As duas regras vieram da revisão do Copilot na PR #33.
+- **O tamanho.** Depois da primeira revisão do Copilot, são cerca de 3,3 mil linhas contra `main`, 2.060 delas em testes, acima da referência de 1.500 que a própria #31 criou. Ela não podia vir numa stack, porque é ela que ensina o loop a aceitar uma.
 - **Um relato novo, de antes da #31**: a #32, o remédio errado que o `stacked` dá a um merge de fora quando a branch já foi publicada. Só a mensagem está errada, e o veredito está certo.
 - **Um anti-pattern novo**: [uma PR que prende partes independentes](../knowledge/anti-patterns/one-pr-for-many-independent-parts.md), dos fatos da PR #26.
 
