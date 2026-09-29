@@ -2081,6 +2081,10 @@ describe.concurrent('scripts/gate.mjs', () => {
         { [CHANGELOG]: `# Changelog\n\n${ENTRY}\n` },
         'Learn (Refs #42)',
       )
+      // Before the push too: no copy of the branch is published yet.
+      const unpublished = await judge(repo)
+      expectRecut(unpublished.result)
+      expect(unpublished.status).toBe(1)
       await repo.publish(BRANCH)
       const local = await judge(repo)
       expectRecut(local.result)
