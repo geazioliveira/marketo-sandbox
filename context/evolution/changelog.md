@@ -16,13 +16,20 @@ Uma entrada por mudança mergeada, da mais nova para a mais antiga, escrita no p
 - **Da revisão do Copilot na PR #61, todo processo tem o próprio timeout.** O guarda passou a achar cada chamada de processo e a exigir o `timeout` dela, nos specs e em `test/support/`. Ele também passou a ler os imports por alias, a somar os repetidos e a deixar de fora os de tipo. As 15 chamadas sem timeout dos specs e as 4 dos helpers ganharam um.
 - **Da segunda revisão, o guarda lê o código com o parser do TypeScript.** Por regex, ele deixava passar uma chamada no `${…}` de um template, um `vi.setConfig` comentado, um import de namespace e um timeout de helper que não resolve. Pelo parser, o repasse do timeout é conferido por chamada, e um timeout que não resolve é recusado.
 - **Da terceira revisão, o guarda fecha a classe, e não só os casos.** Ele passou a resolver os nomes pela ligação, os spreads na ordem, os módulos carregados na chamada e os namespaces entre helpers, e a aceitar só o `vi.setConfig` do topo. Uma função de processo usada fora de uma chamada direta passou a ser recusada, e o pattern lista o que o guarda não segue.
+- **Da quarta revisão:**
+  - o ponto fixo do guarda termina com helpers que se chamam;
+  - um timeout dado a um helper que tem o próprio entra na conta;
+  - vale o último `vi.setConfig`;
+  - os helpers JavaScript são lidos;
+  - o `rev-parse` do `HookRepo`, que ganhou timeout, confere o status.
 - **A regra virou pattern:** [Timeouts de testes que disparam processos](../knowledge/patterns/process-test-timeouts.md).
 
 ### Números medidos
 
 - **O guarda**, em `e5b013c`, recusou exatamente os dois specs, e passa depois da correção. Com o `testTimeout` do `check-context.spec.ts` baixado para 30 s, ele recusa o arquivo citando os dois processos de 30 s.
 - **Sob carga**, em `37864d8`, com uma rodada sozinha e cinco de duas `npx vitest run` ao mesmo tempo, as 11 rodadas de 3.754 testes somaram 625 falhas, de 8 (sozinha) a 162 por rodada. Nenhuma veio de um caso com timeout menor ou igual ao do processo que ele espera. São 488 respostas de hook que mudam sob carga, 110 casos acima de 120 s e 27 processos mortos pelo próprio timeout antes do caso.
-- **Depois da revisão**, `vitest run` em `64ff029` deu 3.774 de 3.779, com os 12 casos do guarda. As 5 falhas, em `guard-bash`, `plan-to-issue` e `session-context`, foram o `git` de 10 s da lib dos hooks com `ETIMEDOUT` e load average perto de 18, a classe da #59. Os três arquivos rodados juntos passam com 689 de 689.
+- **Depois da quarta revisão**, `vitest run` em `be26d7e` deu 3.792 de 3.792, com load average perto de 12.
+- **Depois da primeira revisão**, `vitest run` em `64ff029` deu 3.774 de 3.779, com os 12 casos do guarda. As 5 falhas, em `guard-bash`, `plan-to-issue` e `session-context`, foram o `git` de 10 s da lib dos hooks com `ETIMEDOUT` e load average perto de 18, a classe da #59. Os três arquivos rodados juntos passam com 689 de 689.
 - **`npm run check`**, depois do merge de `main` (#19 e #20): 3.774 testes em 22 arquivos, com os 7 do guarda. Houve 1 falha, em `plan-to-issue.spec.ts:617`, pelo `git` de 10 s da lib dos hooks com `ETIMEDOUT` e load average perto de 18, a classe da #59. O arquivo passa isolado (145 de 145), e o `check:context`, o build e o `check:all` passam. O e2e passa com 33.
 
 ### Decisões tomadas
