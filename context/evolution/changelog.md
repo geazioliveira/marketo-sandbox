@@ -42,6 +42,11 @@ Uma entrada por mudança mergeada, da mais nova para a mais antiga, escrita no p
 - **Da décima segunda revisão:**
   - uma função do arquivo é seguida até cada caso ou hook que a nomeia ou chama;
   - quatro chamadas com timeout novo conferem o `status` antes de usar a saída.
+- **Da décima terceira revisão:**
+  - as opções de um caso são lidas na ordem;
+  - o vitest é reconhecido por namespace;
+  - um namespace re-exportado é recusado;
+  - o `realGit` confere o `status`.
 - **A regra virou pattern:** [Timeouts de testes que disparam processos](../knowledge/patterns/process-test-timeouts.md).
 
 ### Números medidos

@@ -86,7 +86,13 @@ A branch `fix/23-test-timeout-child-process` nasce de `origin/main` em `e5b013c`
     Uma sexta mutação, o `setupTimeout` tirado do `beforeAll` do `guard-bash.spec.ts`, fica vermelha contra os `git` de 90 s do `hookRepo`;
   - `df9a58b` e `9088332`, da décima segunda revisão do Copilot:
     - uma função do arquivo passada a um caso ou hook pelo nome, ou chamada de dentro de um, passou a ser comparada com cada um deles;
-    - quatro chamadas que ganharam timeout nesta PR passaram a conferir o `status` antes de usar a saída. São a segunda do `gh api user` do `repo.spec.ts`, o `command -v git` do `audit-main.spec.ts` e os dois do `gate.spec.ts`. Um processo morto pelo timeout sai com `status` `null` e a saída vazia, e a falha tem de apontar para ele.
+    - quatro chamadas que ganharam timeout nesta PR passaram a conferir o `status` antes de usar a saída. São a segunda do `gh api user` do `repo.spec.ts`, o `command -v git` do `audit-main.spec.ts` e os dois do `gate.spec.ts`. Um processo morto pelo timeout sai com `status` `null` e a saída vazia, e a falha tem de apontar para ele;
+  - `02ef9ab` e `1339dc0`, da décima terceira revisão do Copilot:
+    - as opções de um caso passaram a ser lidas na ordem, com spreads, atalhos e `const`;
+    - o vitest passou a ser reconhecido também por namespace;
+    - um namespace re-exportado por um helper passou a ser recusado;
+    - o `realGit` passou a conferir o `status` do `command -v git`;
+    - o pattern deixou de listar como limite o timeout dado a `it`, que o guarda lê.
 - **O guarda foi conferido por mutação e pela contagem.** As 19 chamadas sem timeout que ele acusou em `09974a8` são as mesmas que um script à parte contou. Ele reconhece como disparadores 15 specs: os de `test/hooks/`, menos `budget`, `settings` e `shell`, que carregam as libs no mesmo processo, e os de `test/scripts/`, menos `drift` e `forms-parity`. Com o `testTimeout` do `check-context.spec.ts` baixado para 30 s, ele recusa o arquivo citando `:183` e `:216`.
 - **A causa raiz se confirmou, e era a menor parte do problema.** O descompasso existia, mas a medição mostrou que a carga derruba a suíte por outras causas.
 - **Medido** em `37864d8`, numa worktree destacada com `npm ci` feito: uma rodada sozinha e cinco rodadas de duas `npx vitest run` ao mesmo tempo, com load average entre 16 e 26 no início de cada uma:
@@ -119,4 +125,4 @@ A branch `fix/23-test-timeout-child-process` nasce de `origin/main` em `e5b013c`
 
 - **Criado**: 2026-09-28 (Fase: Intent), do plano vigente na issue #23 (#23)
 - **Status**: Resolved
-- **Atualizado**: 2026-09-29 (Fase: Build), das doze revisões do Copilot na PR #61: o guarda confere o timeout de cada chamada de processo, lendo o código com o parser do TypeScript, e as 19 chamadas sem timeout ganharam um (#23)
+- **Atualizado**: 2026-09-29 (Fase: Build), das treze revisões do Copilot na PR #61: o guarda confere o timeout de cada chamada de processo, lendo o código com o parser do TypeScript, e as 19 chamadas sem timeout ganharam um (#23)
