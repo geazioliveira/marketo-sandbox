@@ -66,6 +66,10 @@ import {
   type TimelineEvent,
 } from '../../scripts/loop-sections.mjs'
 
+// The shellWord cases run sh as a process, with 30 s of its own: the case
+// waits longer, where vitest's default would give it 5 s (#23).
+vi.setConfig({ testTimeout: 60_000 })
+
 /**
  * The loop's contracts, one function at a time. The gate spec drives them
  * end to end through a fake GitHub; these pin each rule where it lives, so a
@@ -1995,6 +1999,7 @@ describe('shellWord', () => {
       cwd: root,
       encoding: 'utf8',
       env: { PATH: process.env.PATH ?? '', HOME: '/nonexistent-home' },
+      timeout: 30_000,
     })
     expect(run.status).toBe(0)
     expect(run.stdout).toBe(word)

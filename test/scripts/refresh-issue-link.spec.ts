@@ -141,7 +141,9 @@ const test = base.extend<{ scratch: Scratch }>({
   },
 })
 
-vi.setConfig({ testTimeout: 60_000 })
+// Each case runs the refresh as a process with 60 s of its own (above): the
+// case waits longer, so a slow refresh fails with its output (#23).
+vi.setConfig({ testTimeout: 120_000 })
 
 // ---------------------------------------------------------------------------
 // What GitHub answers
