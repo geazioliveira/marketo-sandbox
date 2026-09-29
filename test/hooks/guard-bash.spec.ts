@@ -1879,6 +1879,30 @@ describe.concurrent('the time budget of a run (Copilot review of #26)', () => {
     )
   })
 
+  test('ends a hung read of the rules at the timeout LOOP_HOOKS_GIT_TIMEOUT_MS gives it (#59)', async ({
+    live,
+  }) => {
+    // The same hung read, with the shipped budget: the git's own timeout
+    // ends it, and the read counts as a git that failed, a plain ask.
+    const bin = gitShim(
+      path.join(feature.root, 'log-hangs-own'),
+      'for arg in "$@"; do [ "$arg" = --no-walk ] && exec sleep 15; done',
+    )
+    const gh = live(
+      {},
+      {
+        PATH: [bin, feature.bin, process.env.PATH ?? ''].join(path.delimiter),
+        LOOP_HOOKS_GIT_TIMEOUT_MS: '2000',
+      },
+    )
+    const started = Date.now()
+    const run = await guard('git cherry-pick main', { env: gh.env })
+    // Before the 10 s a git gets when the variable is not read.
+    expect(Date.now() - started).toBeLessThan(10_000)
+    expectAsk(run)
+    expect(reasonOf(run)).not.toMatch(/o prazo de/)
+  })
+
   test('keeps a deny found before the budget ran out', async ({ live }) => {
     // Room for the first command's git reads on a busy machine; the slow
     // read of the second is what runs out.
