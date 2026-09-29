@@ -16,6 +16,10 @@
 //     its folder, or that lacks exactly one `## Status` block, as its last
 //     section (no ATX or setext heading after it), with one status line valid
 //     for its kind and no status declared anywhere else (statusDeclaration);
+//     in that block, an `Atualizado` line (statusUpdatedDeclaration, #66)
+//     outside the guide's shape (statusUpdatedLine) or dated before the
+//     Criado or a line above it, and, in a kind without keepsEveryUpdate
+//     (every kind but the decision), any `Atualizado` line after the first;
 // (c) a decision missing from context/decisions/README.md, listed twice, or
 //     listed with a status other than the one its file declares;
 // (d) a changelog `## ` line outside changelogHeading;
@@ -56,9 +60,13 @@ import {
   contextKindOf,
   isUntypedContextFile,
   repositoryFileUrl,
+  statusCreatedLine,
   statusDeclaration,
   statusHeading,
   statusLine,
+  statusPhases,
+  statusUpdatedDeclaration,
+  statusUpdatedLine,
   untypedContextPaths,
 } from './loop-sections.mjs'
 
@@ -490,6 +498,12 @@ const count = (n, one, many) => `${n} ${n === 1 ? one : many}`
 const quote = (text) =>
   `"${text.length > 100 ? `${text.slice(0, 99)}…` : text}"`
 
+/** Whether `AAAA-MM-DD` names a day the calendar has: 2026-02-30 does not. */
+const isCalendarDate = (date) => {
+  const day = new Date(`${date}T00:00:00Z`)
+  return !Number.isNaN(day.getTime()) && day.toISOString().slice(0, 10) === date
+}
+
 function checkRepository(cwd) {
   const repository = locate(cwd)
   const { root, git } = repository
@@ -737,6 +751,53 @@ function checkRepository(cwd) {
         `a seção ${quote(prose[nextSection].trim() || lines[nextSection].trim())} vem depois do bloco Status (linha ${start + 1}); o bloco Status é a última seção do arquivo`,
       )
     const end = nextSection < 0 ? lines.length : nextSection
+
+    // The Atualizado lines (#66), read from the prose like the status line.
+    // A decision keeps every one, oldest first; any other kind keeps only the
+    // last. No line is dated before the latest date above it, the Criado's
+    // included; a line out of the guide's shape has no date to hold.
+    let latest = null
+    for (let index = start + 1; index < end && latest === null; index += 1) {
+      const text = prose[index]
+      const created = text === null ? null : statusCreatedLine.exec(text)
+      if (created !== null && isCalendarDate(created[1]))
+        latest = {
+          date: created[1],
+          line: index + 1,
+          name: `do Criado de ${created[1]}`,
+        }
+    }
+    let firstUpdate = -1
+    for (let index = start + 1; index < end; index += 1) {
+      const text = prose[index]
+      if (text === null || !statusUpdatedDeclaration.test(text)) continue
+      const update = statusUpdatedLine.exec(text)
+      const date =
+        update !== null && isCalendarDate(update[1]) ? update[1] : null
+      if (date === null)
+        report(
+          file,
+          index + 1,
+          `linha Atualizado fora do formato "- **Atualizado**: AAAA-MM-DD (Fase: ${statusPhases.join(' | ')}), …": ${quote(lines[index].trim())}`,
+        )
+      if (firstUpdate < 0) firstUpdate = index
+      else if (!expected.keepsEveryUpdate)
+        report(
+          file,
+          index + 1,
+          `linha "- **Atualizado**:" a mais no bloco Status (a primeira está na linha ${firstUpdate + 1}); fora das decisões, o bloco guarda só a última linha Atualizado`,
+        )
+      if (date === null) continue
+      if (latest !== null && date < latest.date)
+        report(
+          file,
+          index + 1,
+          `linha "- **Atualizado**:" de ${date} antes ${latest.name} (linha ${latest.line}); as linhas Atualizado vão da mais antiga para a mais nova, e nenhuma vem antes do Criado`,
+        )
+      else if (latest === null || date > latest.date)
+        latest = { date, line: index + 1, name: `da de ${date}` }
+    }
+
     // Read from the prose: a status in code or in an HTML comment is an
     // example, not a declaration.
     const declared = []

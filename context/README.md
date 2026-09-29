@@ -81,7 +81,8 @@ Todo intent, decisão, pattern, anti-pattern e agente termina com um único bloc
 - **Atualizado**: AAAA-MM-DD (Fase: Intent | Build | Learn), <o que mudou e por quê> (#issue)
 ```
 
-- Uma decisão mantém todas as linhas `Atualizado`, da mais antiga para a mais nova, porque uma emenda faz parte do registro. Os outros arquivos mantêm só a última; o `git log` guarda o resto.
+- Uma decisão mantém todas as linhas `Atualizado`, da mais antiga para a mais nova, porque uma emenda faz parte do registro. Os outros arquivos mantêm só a última; o `git log` guarda o resto. Quem registra uma mudança num arquivo que não é decisão troca a linha `Atualizado` que está lá, em vez de acrescentar outra.
+- O `npm run check:context` confere essas linhas desde a #66. Recusa uma segunda linha `Atualizado` fora das decisões, uma linha fora do formato acima (a data de calendário e a fase de `Intent`, `Build` ou `Learn`) e uma linha com data anterior à do `Criado` ou à de uma linha acima dela. Uma linha `Atualizado` numa lista numerada, numa citação ou em negrito com `__` também conta, e o check a recusa pelo formato.
 - Uma decisão `Superseded` acrescenta, depois de `Status`, a linha `- **Substituída por**: [NNNN: <título>](NNNN-<slug>.md)`.
 - O título diz o tipo do arquivo em inglês e o assunto em pt-BR, separados por dois-pontos: `# Project intent: marketo-sandbox`, `# Feature: <título>`, `# Bug: <título>`, `# ADR 0001: <título>`, `# Pattern: <nome>`, `# Anti-pattern: <nome>`, `# Agent: <nome>`.
 

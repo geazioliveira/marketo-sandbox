@@ -1091,6 +1091,24 @@ describe('scripts/check-context.mjs', () => {
       )
     })
 
+    it('holds every decision Atualizado line to the latest date above it, naming its first line', async () => {
+      // A line out of order does not lower the bar for the lines under it,
+      // and a repeated date keeps pointing at the line that set it first.
+      const run = await check({
+        'context/decisions/0001-first.md': `${typed('ADR 0001: Primeira', 'Accepted')}${lines(
+          updated('2026-09-27'),
+          updated('2026-09-27'),
+          updated('2026-09-26'),
+          updated('2026-09-26'),
+        )}`,
+      })
+      expectProblems(
+        run,
+        /^context\/decisions\/0001-first\.md:13: linha "- \*\*Atualizado\*\*:" de 2026-09-26 antes da de 2026-09-27 \(linha 11\);/,
+        /^context\/decisions\/0001-first\.md:14: linha "- \*\*Atualizado\*\*:" de 2026-09-26 antes da de 2026-09-27 \(linha 11\);/,
+      )
+    })
+
     it.each([
       ['context/decisions/0001-first.md', 'ADR 0001: Primeira', 'Accepted'],
       ['context/knowledge/patterns/gate.md', 'Pattern: Gate', 'Active'],
@@ -1468,8 +1486,9 @@ describe('the context vocabularies in scripts/loop-sections.mjs', () => {
       path.join(projectRoot, 'context', 'README.md'),
       'utf8',
     )
+    // Split by the section headings only: the sketch itself opens with `## Status`.
     const [, afterBlock = ''] = guide.split('\n## O bloco Status\n')
-    const [section = ''] = afterBlock.split('\n## ')
+    const [section = ''] = afterBlock.split('\n## Templates\n')
     expect(section).toContain(
       'Uma decisão mantém todas as linhas `Atualizado`, da mais antiga para a mais nova',
     )
