@@ -118,10 +118,16 @@ export function spawnWith(
 
 /** The git the machine has, for a shim that wraps it. */
 export function realGit(): string {
-  const found = spawnSync('sh', ['-c', 'command -v git'], {
+  const run = spawnSync('sh', ['-c', 'command -v git'], {
     encoding: 'utf8',
     timeout: spawnTimeout,
-  }).stdout.trim()
+  })
+  // A timed-out lookup has status null: say so, not that git is missing.
+  if (run.status !== 0)
+    throw new Error(
+      `command -v git falhou (status ${run.status}): ${run.stderr}`,
+    )
+  const found = run.stdout.trim()
   if (!path.isAbsolute(found)) throw new Error('git não está no PATH')
   return found
 }
