@@ -2047,6 +2047,79 @@ describe.concurrent('scripts/gate.mjs', () => {
       expect(status).toBe(1)
     })
 
+    // Once the branch is published, origin/<branch> holds the merge itself,
+    // and every parent of every merge is its ancestor: ancestry no longer
+    // tells the own copy from another branch the push published along (#32).
+    const expectRecut = (result: GateResult) => {
+      expect(step(result, 'stacked').status).toBe('no')
+      expect(step(result, 'stacked').detail).toContain(
+        'corte a branch de origin/main atualizado',
+      )
+      expect(step(result, 'stacked').detail).not.toContain('cópia publicada')
+      expect(step(result, 'stacked').detail).not.toContain('git pull --rebase')
+    }
+
+    test('names the recut for a published merge of another branch, in both modes', async ({
+      expect,
+      fresh,
+    }) => {
+      const repo = await fresh()
+      await repo.git('switch', '-q', '-c', 'feature/41-other', 'main')
+      await repo.commit({ 'src/other.ts': 'x\n' }, 'Build (Refs #41)')
+      await repo.git('switch', '-q', '-c', BRANCH, 'main')
+      await repo.commit({ [INTENT]: '# Intent\n' }, 'Intent (Refs #42)')
+      await repo.git(
+        'merge',
+        '-q',
+        '--no-ff',
+        '-m',
+        'Merge other (Refs #42)',
+        'feature/41-other',
+      )
+      await repo.git('branch', '-q', '-D', 'feature/41-other')
+      await repo.commit(
+        { [CHANGELOG]: `# Changelog\n\n${ENTRY}\n` },
+        'Learn (Refs #42)',
+      )
+      await repo.publish(BRANCH)
+      const local = await judge(repo)
+      expectRecut(local.result)
+      expect(local.status).toBe(1)
+      const ci = await ciOver(repo, passingCi)
+      expectRecut(ci.result)
+      expect(ci.status).toBe(1)
+    })
+
+    test('names the recut, not the own copy, once a merge of the own copy is published, in both modes', async ({
+      expect,
+      fresh,
+    }) => {
+      const repo = await fresh()
+      await repo.git('switch', '-q', '-c', BRANCH, 'main')
+      await repo.commit({ [INTENT]: '# Intent\n' }, 'Intent (Refs #42)')
+      await repo.git('switch', '-q', '-c', 'remote-copy')
+      await repo.commit({ 'src/suggested.ts': 'x\n' }, 'Sugestão (Refs #42)')
+      await repo.publish(BRANCH)
+      await repo.git('switch', '-q', BRANCH)
+      await repo.git('branch', '-q', '-D', 'remote-copy')
+      await repo.commit({ 'src/local.ts': 'x\n' }, 'Build (Refs #42)')
+      await repo.git(
+        'merge',
+        '-q',
+        '--no-ff',
+        '-m',
+        'Merge origin copy (Refs #42)',
+        `origin/${BRANCH}`,
+      )
+      await repo.publish(BRANCH)
+      const local = await judge(repo)
+      expectRecut(local.result)
+      expect(local.status).toBe(1)
+      const ci = await ciOver(repo, passingCi)
+      expectRecut(ci.result)
+      expect(ci.status).toBe(1)
+    })
+
     test('opens right after the cut from origin/main', async ({
       expect,
       fresh,
