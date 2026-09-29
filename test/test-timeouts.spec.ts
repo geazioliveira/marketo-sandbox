@@ -11,6 +11,8 @@ import ts from 'typescript'
 // timeout with vi.setConfig. This guard parses the specs and test/support/
 // with the TypeScript compiler, so comments, strings and template literals
 // read as they run, and checks both rules on every process call it finds.
+// What it cannot follow, a process function used other than by a direct
+// call, it refuses.
 
 const root = path.resolve(__dirname, '..')
 
@@ -28,6 +30,8 @@ interface Helper {
   needsTimeout: boolean
   /** The timeouts it gives its processes, its own and those of the exports it uses. */
   timeouts: Timeout[]
+  /** The position of its parameter typed with a `timeout`, where a call gives one. */
+  optionsAt?: number
 }
 
 /** The child_process functions that start a process. */
@@ -72,18 +76,39 @@ function* walk(node: ts.Node): Generator<ts.Node> {
   for (const child of children) yield* walk(child)
 }
 
+/** `expression` without the parentheses and the `await` around it. */
+function unwrap(expression: ts.Expression): ts.Expression {
+  while (
+    ts.isParenthesizedExpression(expression) ||
+    ts.isAwaitExpression(expression)
+  )
+    expression = expression.expression
+  return expression
+}
+
+/** The outermost parentheses or `await` around `node`, or `node` itself. */
+function wrapped(node: ts.Node): ts.Node {
+  while (
+    ts.isParenthesizedExpression(node.parent) ||
+    ts.isAwaitExpression(node.parent)
+  )
+    node = node.parent
+  return node
+}
+
 /** The constants the specs name in place of a number: `export const <x>Timeout = <n>`. */
 function namedTimeouts(file: ts.SourceFile): Map<string, number> {
   const names = new Map<string, number>()
-  for (const node of walk(file))
-    if (
-      ts.isVariableDeclaration(node) &&
-      ts.isIdentifier(node.name) &&
-      node.name.text.endsWith('Timeout') &&
-      node.initializer !== undefined &&
-      ts.isNumericLiteral(node.initializer)
-    )
-      names.set(node.name.text, Number(node.initializer.text))
+  for (const statement of file.statements)
+    if (ts.isVariableStatement(statement))
+      for (const declaration of statement.declarationList.declarations)
+        if (
+          ts.isIdentifier(declaration.name) &&
+          declaration.name.text.endsWith('Timeout') &&
+          declaration.initializer !== undefined &&
+          ts.isNumericLiteral(declaration.initializer)
+        )
+          names.set(declaration.name.text, Number(declaration.initializer.text))
   return names
 }
 
@@ -95,9 +120,7 @@ interface Imports {
 
 /** The module a `import(…)` or `require(…)` call loads, if it is one. */
 function loadedModule(expression: ts.Expression): string | undefined {
-  const call = ts.isAwaitExpression(expression)
-    ? expression.expression
-    : expression
+  const call = unwrap(expression)
   if (
     !ts.isCallExpression(call) ||
     call.arguments.length !== 1 ||
@@ -111,9 +134,9 @@ function loadedModule(expression: ts.Expression): string | undefined {
 }
 
 /**
- * What `file` imports, by static import, `await import(…)` or `require(…)`.
- * A type-only import or name starts nothing and is left out; `a as b` is
- * read under `b`; every import of a module counts.
+ * What `file` imports, by static import, `await import(…)` or `require(…)`
+ * into a name. A type-only import or name starts nothing and is left out;
+ * `a as b` is read under `b`; every import of a module counts.
  */
 function importsOf(file: ts.SourceFile): Imports {
   const imports: Imports = { named: new Map(), namespaces: new Map() }
@@ -154,44 +177,75 @@ function importsOf(file: ts.SourceFile): Imports {
   return imports
 }
 
-/** What a call starts: a child_process function, or a test/support/ export. */
+/** How a file's names resolve. */
+interface Scope {
+  imports: Imports
+  /** The test/support/ module an import path names, if it names one. */
+  supportOf: (module: string) => string | undefined
+  /** In a test/support/ module: its name and its own exports. */
+  own?: { module: string; names: Set<string> }
+  /** test/support/hooks.ts's named timeouts, by the name it exports. */
+  names: Map<string, number>
+}
+
+/** What an expression names: a child_process function, or a test/support/ export. */
 type Target = { kind: 'api' } | { kind: 'helper'; module: string; name: string }
 
+/** A name that declares or labels something here, not one that uses a binding. */
+function declares(node: ts.Identifier): boolean {
+  const parent = node.parent
+  return (
+    ts.isImportSpecifier(parent) ||
+    ts.isImportClause(parent) ||
+    ts.isNamespaceImport(parent) ||
+    ((ts.isBindingElement(parent) ||
+      ts.isVariableDeclaration(parent) ||
+      ts.isFunctionDeclaration(parent) ||
+      ts.isClassDeclaration(parent) ||
+      ts.isParameter(parent) ||
+      ts.isPropertyAssignment(parent) ||
+      ts.isMethodDeclaration(parent) ||
+      ts.isPropertyDeclaration(parent)) &&
+      parent.name === node) ||
+    (ts.isBindingElement(parent) && parent.propertyName === node) ||
+    (ts.isPropertyAccessExpression(parent) && parent.name === node)
+  )
+}
+
 /**
- * The target of a call, from the callee: a name the file imports, one of
- * its own exports (`own`), or `namespace.name`. `supportOf` turns an import
- * path into a test/support/ module name.
+ * What an expression names: an imported name, one of the module's own
+ * exports, or `receiver.name` where the receiver is a namespace or a loaded
+ * module (`require('node:child_process').spawnSync`).
  */
-function targetOf(
-  call: ts.CallExpression,
-  imports: Imports,
-  supportOf: (module: string) => string | undefined,
-  own?: { module: string; names: Set<string> },
-): Target | undefined {
+function targetOf(expression: ts.Node, scope: Scope): Target | undefined {
   const origin = (module: string, name: string): Target | undefined => {
     if (isChildProcess(module))
       return processApis.has(name) ? { kind: 'api' } : undefined
-    const support = supportOf(module)
+    const support = scope.supportOf(module)
     return support === undefined
       ? undefined
       : { kind: 'helper', module: support, name }
   }
-  const callee = call.expression
-  if (ts.isIdentifier(callee)) {
-    const named = imports.named.get(callee.text)
+  if (ts.isIdentifier(expression) && !declares(expression)) {
+    const named = scope.imports.named.get(expression.text)
     if (named !== undefined) return origin(named.module, named.imported)
-    if (own?.names.has(callee.text) === true)
-      return { kind: 'helper', module: own.module, name: callee.text }
+    if (scope.own?.names.has(expression.text) === true)
+      return { kind: 'helper', module: scope.own.module, name: expression.text }
   }
-  if (
-    ts.isPropertyAccessExpression(callee) &&
-    ts.isIdentifier(callee.expression)
-  ) {
-    const module = imports.namespaces.get(callee.expression.text)
-    if (module !== undefined) return origin(module, callee.name.text)
+  if (ts.isPropertyAccessExpression(expression)) {
+    const receiver = unwrap(expression.expression)
+    const module = ts.isIdentifier(receiver)
+      ? scope.imports.namespaces.get(receiver.text)
+      : loadedModule(receiver)
+    if (module !== undefined) return origin(module, expression.name.text)
   }
   return undefined
 }
+
+/** `node` is the callee of a call, not a value passed around. */
+const calledDirectly = (node: ts.Node): boolean =>
+  ts.isCallExpression(wrapped(node).parent) &&
+  (wrapped(node).parent as ts.CallExpression).expression === wrapped(node)
 
 /**
  * The functions a node sits in, the nearest first. A closure sees its outer
@@ -228,27 +282,75 @@ function hasTimeoutMember(
   return false
 }
 
-/** The value of `expression` in ms, if the guard can read it as a number. */
+const declarationCache = new WeakMap<
+  ts.SourceFile,
+  Map<string, ts.VariableDeclaration[]>
+>()
+
+/** The variables a file declares under `name`, at any depth. */
+function declarationsOf(
+  file: ts.SourceFile,
+  name: string,
+): ts.VariableDeclaration[] {
+  let byName = declarationCache.get(file)
+  if (byName === undefined) {
+    byName = new Map()
+    for (const node of walk(file))
+      if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name))
+        byName.set(node.name.text, [
+          ...(byName.get(node.name.text) ?? []),
+          node,
+        ])
+    declarationCache.set(file, byName)
+  }
+  return byName.get(name) ?? []
+}
+
+/**
+ * The value of `expression` in ms, if the guard can read it as a number. A
+ * name resolves where it is bound: a parameter of a function around it (its
+ * default, if it has one), a declaration in the file, or an import of
+ * test/support/hooks.ts's named timeouts. A local `processTimeout` is the
+ * local one, not hooks.ts's.
+ */
 function valueOf(
   expression: ts.Expression,
-  names: Map<string, number>,
+  scope: Scope,
+  seen: Set<string> = new Set(),
 ): number | undefined {
+  expression = unwrap(expression)
   if (ts.isNumericLiteral(expression)) return Number(expression.text)
-  if (!ts.isIdentifier(expression)) return undefined
-  const named = names.get(expression.text)
-  if (named !== undefined) return named
-  // A destructured parameter with a default: `{ timeout = spawnTimeout }`.
+  if (!ts.isIdentifier(expression) || seen.has(expression.text))
+    return undefined
+  const name = expression.text
+  const next = new Set([...seen, name])
   for (const fn of enclosingFunctions(expression))
-    for (const parameter of fn.parameters)
-      if (ts.isObjectBindingPattern(parameter.name))
-        for (const element of parameter.name.elements)
-          if (
-            ts.isIdentifier(element.name) &&
-            element.name.text === expression.text &&
-            element.initializer !== undefined
-          )
-            return valueOf(element.initializer, names)
-  return undefined
+    for (const parameter of fn.parameters) {
+      const bound = ts.isIdentifier(parameter.name)
+        ? parameter.name.text === name
+          ? parameter
+          : undefined
+        : ts.isObjectBindingPattern(parameter.name)
+          ? parameter.name.elements.find(
+              (element) =>
+                ts.isIdentifier(element.name) && element.name.text === name,
+            )
+          : undefined
+      if (bound !== undefined)
+        return bound.initializer === undefined
+          ? undefined
+          : valueOf(bound.initializer, scope, next)
+    }
+  const declarations = declarationsOf(expression.getSourceFile(), name)
+  if (declarations.length > 0)
+    return declarations.length === 1 &&
+      declarations[0].initializer !== undefined
+      ? valueOf(declarations[0].initializer, scope, next)
+      : undefined
+  const named = scope.imports.named.get(name)
+  return named !== undefined && scope.supportOf(named.module) === 'hooks'
+    ? scope.names.get(named.imported)
+    : undefined
 }
 
 /**
@@ -260,6 +362,7 @@ function delegates(
   expression: ts.Expression,
   functions: ts.SignatureDeclaration[],
 ): boolean {
+  expression = unwrap(expression)
   if (!ts.isIdentifier(expression)) return false
   const file = expression.getSourceFile()
   return functions.some((fn) =>
@@ -287,21 +390,29 @@ type CallTimeout =
   | { kind: 'delegated' }
 
 /**
- * The timeout in a call's arguments: a `timeout` property of an object
- * literal, or the caller's options that the call's function hands on.
+ * The timeout in a call's arguments, read in order as the object is built: a
+ * `timeout` property, or a spread that comes after it and may replace it.
+ * A spread of the caller's options (a parameter typed with a `timeout`)
+ * hands the timeout to the caller; a spread the guard cannot see into makes
+ * it unreadable.
  */
 function timeoutOf(
   call: ts.CallExpression,
-  names: Map<string, number>,
+  scope: Scope,
+  target: Target | undefined,
+  helperOf: (target: Target | undefined) => Helper | undefined,
 ): CallTimeout {
-  const fn = enclosingFunctions(call)
-  let delegated = false
-  for (const argument of call.arguments) {
-    if (delegates(argument, fn)) delegated = true
-    if (!ts.isObjectLiteralExpression(argument)) continue
-    for (const property of argument.properties) {
-      if (ts.isSpreadAssignment(property) && delegates(property.expression, fn))
-        delegated = true
+  const functions = enclosingFunctions(call)
+  let timeout: CallTimeout = { kind: 'none' }
+  const read = (object: ts.ObjectLiteralExpression): void => {
+    for (const property of object.properties) {
+      if (ts.isSpreadAssignment(property)) {
+        const spread = unwrap(property.expression)
+        if (ts.isObjectLiteralExpression(spread)) read(spread)
+        else if (delegates(spread, functions)) timeout = { kind: 'delegated' }
+        else timeout = { kind: 'unread', text: `...${spread.getText()}` }
+        continue
+      }
       const value = ts.isPropertyAssignment(property)
         ? property.initializer
         : ts.isShorthandPropertyAssignment(property)
@@ -309,21 +420,95 @@ function timeoutOf(
           : undefined
       if (value === undefined || property.name?.getText() !== 'timeout')
         continue
-      if (delegates(value, fn)) return { kind: 'delegated' }
-      const ms = valueOf(value, names)
-      return ms === undefined || ms <= 0
-        ? { kind: 'unread', text: value.getText() }
-        : { kind: 'value', ms }
+      if (delegates(value, functions)) {
+        timeout = { kind: 'delegated' }
+        continue
+      }
+      const ms = valueOf(value, scope)
+      timeout =
+        ms === undefined || !(ms > 0)
+          ? { kind: 'unread', text: value.getText() }
+          : { kind: 'value', ms }
     }
   }
-  return delegated ? { kind: 'delegated' } : { kind: 'none' }
+  // Any object handed to a child_process function is its options; a helper
+  // takes them at its parameter typed with a `timeout`, and only there (a
+  // hook's input, say, is not options).
+  const optionsAt = helperOf(target)?.optionsAt
+  const options =
+    target?.kind === 'api'
+      ? call.arguments
+      : optionsAt === undefined
+        ? []
+        : call.arguments.slice(optionsAt, optionsAt + 1)
+  for (const argument of options) {
+    const value = unwrap(argument)
+    if (ts.isObjectLiteralExpression(value)) read(value)
+    else if (delegates(value, functions)) timeout = { kind: 'delegated' }
+  }
+  return timeout
 }
 
 const untimed = (call: ts.CallExpression): string =>
   `${where(call)}: ${call.expression.getText()}(…) sem timeout: o processo precisa do próprio, o do caso não o encerra`
 
 const unread = (call: ts.CallExpression, text: string): string =>
-  `${where(call)}: ${call.expression.getText()}(…) dá o timeout ${text}, que o guarda não lê como um número positivo: use um número ou um nome de test/support/hooks.ts`
+  `${where(call)}: ${call.expression.getText()}(…) dá o timeout ${text}, que o guarda não lê como um número positivo: use um número ou um nome importado de test/support/hooks.ts`
+
+/**
+ * Every place `root` uses a process function (a child_process one, or a
+ * helper that `required` says needs its caller's timeout) other than by a
+ * direct call: an alias, `.call`, a callback, a namespace or a loaded module
+ * passed around. The guard cannot follow the process from there.
+ */
+function indirectUses(
+  root: ts.Node,
+  scope: Scope,
+  required: (target: Target | undefined) => boolean,
+): string[] {
+  const problems: string[] = []
+  const refuse = (node: ts.Node, what: string): void => {
+    problems.push(
+      `${where(node)}: ${what} fora de uma chamada direta: o guarda não segue o processo; chame a função pelo nome`,
+    )
+  }
+  for (const node of walk(root)) {
+    if (
+      (ts.isIdentifier(node) || ts.isPropertyAccessExpression(node)) &&
+      required(targetOf(node, scope)) &&
+      !calledDirectly(node)
+    )
+      refuse(node, node.getText())
+    if (ts.isIdentifier(node) && !declares(node)) {
+      const module = scope.imports.namespaces.get(node.text)
+      const parent = wrapped(node).parent
+      if (
+        module !== undefined &&
+        (isChildProcess(module) || scope.supportOf(module) !== undefined) &&
+        !(
+          ts.isPropertyAccessExpression(parent) &&
+          parent.expression === wrapped(node)
+        )
+      )
+        refuse(node, node.text)
+    }
+    if (ts.isCallExpression(node)) {
+      const module = loadedModule(node)
+      const parent = wrapped(node).parent
+      if (
+        module !== undefined &&
+        (isChildProcess(module) || scope.supportOf(module) !== undefined) &&
+        !ts.isVariableDeclaration(parent) &&
+        !(
+          ts.isPropertyAccessExpression(parent) &&
+          parent.expression === wrapped(node)
+        )
+      )
+        refuse(node, node.getText())
+    }
+  }
+  return problems
+}
 
 // ---------------------------------------------------------------------------
 // test/support/
@@ -361,6 +546,35 @@ function exportedNames(statement: ts.Statement): string[] {
   return []
 }
 
+/** The position of an exported function's parameter typed with a `timeout`. */
+function optionsIndex(
+  statement: ts.Statement,
+  name: string,
+): number | undefined {
+  const fn = ts.isFunctionDeclaration(statement)
+    ? statement
+    : ts.isVariableStatement(statement)
+      ? statement.declarationList.declarations
+          .filter(
+            (declaration) =>
+              ts.isIdentifier(declaration.name) &&
+              declaration.name.text === name,
+          )
+          .map((declaration) => declaration.initializer)
+          .find(
+            (initializer) =>
+              initializer !== undefined &&
+              (ts.isArrowFunction(initializer) ||
+                ts.isFunctionExpression(initializer)),
+          )
+      : undefined
+  if (fn === undefined || !ts.isFunctionLike(fn)) return undefined
+  const index = fn.parameters.findIndex((parameter) =>
+    hasTimeoutMember(parameter.type, statement.getSourceFile()),
+  )
+  return index < 0 ? undefined : index
+}
+
 /**
  * The exports of the test/support/ modules, and every process call in them
  * whose timeout is missing or unreadable. A process call whose options come
@@ -372,18 +586,25 @@ function analyzeSupport(
   names: Map<string, number>,
 ): { helpers: Map<string, Map<string, Helper>>; problems: string[] } {
   interface Export {
-    module: string
     statement: ts.Statement
-    imports: Imports
-    own: Set<string>
+    scope: Scope
     helper: Helper
   }
   const helpers = new Map<string, Map<string, Helper>>()
   const exports: Export[] = []
+  const files: { file: ts.SourceFile; scope: Scope }[] = []
   for (const module of modules) {
     const file = parse(module.file, module.source)
-    const imports = importsOf(file)
-    const own = new Set(file.statements.flatMap(exportedNames))
+    const scope: Scope = {
+      imports: importsOf(file),
+      supportOf: supportFromSupport,
+      own: {
+        module: module.name,
+        names: new Set(file.statements.flatMap(exportedNames)),
+      },
+      names,
+    }
+    files.push({ file, scope })
     const byName = new Map<string, Helper>()
     helpers.set(module.name, byName)
     for (const statement of file.statements)
@@ -392,42 +613,28 @@ function analyzeSupport(
           spawns: false,
           needsTimeout: false,
           timeouts: [],
+          optionsAt: optionsIndex(statement, name),
         }
         byName.set(name, helper)
-        exports.push({ module: module.name, statement, imports, own, helper })
+        exports.push({ statement, scope, helper })
       }
   }
   const helperOf = (target: Target | undefined): Helper | undefined =>
     target?.kind === 'helper'
       ? helpers.get(target.module)?.get(target.name)
       : undefined
-  const callsOf = (entry: Export) =>
-    [...walk(entry.statement)].filter(ts.isCallExpression).map((call) => ({
-      call,
-      target: targetOf(call, entry.imports, supportFromSupport, {
-        module: entry.module,
-        names: entry.own,
-      }),
-    }))
-  /** The exports a statement names, by identifier or `namespace.name`. */
-  const usedBy = (entry: Export): Helper[] =>
-    [...walk(entry.statement)].flatMap((node) => {
-      if (ts.isIdentifier(node)) {
-        const named = entry.imports.named.get(node.text)
-        const module =
-          named === undefined ? undefined : supportFromSupport(named.module)
-        const helper =
-          module !== undefined
-            ? helpers.get(module)?.get(named!.imported)
-            : entry.own.has(node.text)
-              ? helpers.get(entry.module)?.get(node.text)
-              : undefined
-        return helper === undefined || helper === entry.helper ? [] : [helper]
-      }
-      return []
-    })
   const required = (target: Target | undefined): boolean =>
     target?.kind === 'api' || helperOf(target)?.needsTimeout === true
+  const requiredCalls = (entry: Export): ts.CallExpression[] =>
+    [...walk(entry.statement)]
+      .filter(ts.isCallExpression)
+      .filter((call) => required(targetOf(call.expression, entry.scope)))
+  /** The other exports a statement names, by name, namespace or loaded module. */
+  const usedBy = (entry: Export): Helper[] =>
+    [...walk(entry.statement)].flatMap((node) => {
+      const helper = helperOf(targetOf(node, entry.scope))
+      return helper === undefined || helper === entry.helper ? [] : [helper]
+    })
   const key = (helper: Helper): string =>
     JSON.stringify([
       helper.spawns,
@@ -438,22 +645,24 @@ function analyzeSupport(
   for (let changed = true; changed;) {
     changed = false
     for (const entry of exports) {
-      const calls = callsOf(entry).filter(({ target }) => required(target))
-      const timeouts = calls.map(({ call }) => ({
+      const calls = requiredCalls(entry).map((call) => ({
         call,
-        timeout: timeoutOf(call, names),
+        timeout: timeoutOf(
+          call,
+          entry.scope,
+          targetOf(call.expression, entry.scope),
+          helperOf,
+        ),
       }))
       const used = usedBy(entry)
       const next: Helper = {
         spawns:
-          calls.length > 0 ||
-          callsOf(entry).some(({ target }) => target?.kind === 'api') ||
-          used.some((other) => other.spawns),
-        needsTimeout: timeouts.some(
-          ({ timeout }) => timeout.kind === 'delegated',
-        ),
+          [...walk(entry.statement)].some(
+            (node) => targetOf(node, entry.scope)?.kind === 'api',
+          ) || used.some((other) => other.spawns),
+        needsTimeout: calls.some(({ timeout }) => timeout.kind === 'delegated'),
         timeouts: [
-          ...timeouts.flatMap(({ call, timeout }) =>
+          ...calls.flatMap(({ call, timeout }) =>
             timeout.kind === 'value'
               ? [{ ms: timeout.ms, at: where(call) }]
               : [],
@@ -467,43 +676,54 @@ function analyzeSupport(
       }
     }
   }
-  const problems = exports.flatMap((entry) =>
-    callsOf(entry)
-      .filter(({ target }) => required(target))
-      .flatMap(({ call }) => {
-        const timeout = timeoutOf(call, names)
+  const problems = [
+    ...exports.flatMap((entry) =>
+      requiredCalls(entry).flatMap((call) => {
+        const timeout = timeoutOf(
+          call,
+          entry.scope,
+          targetOf(call.expression, entry.scope),
+          helperOf,
+        )
         if (timeout.kind === 'none') return [untimed(call)]
         if (timeout.kind === 'unread') return [unread(call, timeout.text)]
         return []
       }),
-  )
+    ),
+    ...files.flatMap(({ file, scope }) => indirectUses(file, scope, required)),
+  ]
   return { helpers, problems: [...new Set(problems)] }
 }
 
 // ---------------------------------------------------------------------------
 // A spec
 
-/** The case timeout a spec gives with `vi.setConfig({ testTimeout })`, if any. */
+/**
+ * The case timeout a spec gives with `vi.setConfig({ testTimeout })` as a
+ * statement of the file itself: one inside a function may never run.
+ */
 function caseTimeout(
   file: ts.SourceFile,
-  names: Map<string, number>,
+  scope: Scope,
 ): (Timeout & { text: string }) | undefined {
-  for (const node of walk(file)) {
+  for (const statement of file.statements) {
+    if (!ts.isExpressionStatement(statement)) continue
+    const call = statement.expression
     if (
-      !ts.isCallExpression(node) ||
-      node.expression.getText() !== 'vi.setConfig' ||
-      node.arguments.length === 0 ||
-      !ts.isObjectLiteralExpression(node.arguments[0])
+      !ts.isCallExpression(call) ||
+      call.expression.getText() !== 'vi.setConfig' ||
+      call.arguments.length === 0 ||
+      !ts.isObjectLiteralExpression(call.arguments[0])
     )
       continue
-    for (const property of node.arguments[0].properties)
+    for (const property of call.arguments[0].properties)
       if (
         ts.isPropertyAssignment(property) &&
         property.name.getText() === 'testTimeout'
       )
         return {
-          ms: valueOf(property.initializer, names) ?? Number.NaN,
-          at: where(node),
+          ms: valueOf(property.initializer, scope) ?? Number.NaN,
+          at: where(call),
           text: property.initializer.getText(),
         }
   }
@@ -513,8 +733,9 @@ function caseTimeout(
 /**
  * What is wrong with one spec: nothing when it starts no process. Otherwise
  * every call of child_process, or of a helper that takes the timeout from
- * its caller, gives one the guard reads as a number; and the spec declares
- * a case timeout above every timeout its calls and its helpers give.
+ * its caller, gives one the guard reads as a number; no process function is
+ * used other than by a direct call; and the spec declares a case timeout
+ * above every timeout its calls and its helpers give.
  */
 function auditSpec(
   fileName: string,
@@ -523,51 +744,40 @@ function auditSpec(
   names: Map<string, number>,
 ): string[] {
   const file = parse(fileName, source)
-  const imports = importsOf(file)
+  const scope: Scope = {
+    imports: importsOf(file),
+    supportOf: supportFromSpec,
+    names,
+  }
   const helperOf = (target: Target | undefined): Helper | undefined =>
     target?.kind === 'helper'
       ? helpers.get(target.module)?.get(target.name)
       : undefined
-  /** The spawning helpers the spec names, by import or `namespace.name`. */
+  const required = (target: Target | undefined): boolean =>
+    target?.kind === 'api' || helperOf(target)?.needsTimeout === true
+  /** The spawning helpers the spec names, and whether it names child_process. */
   const used = new Map<string, Helper>()
+  let startsProcesses = [
+    ...[...scope.imports.named.values()].map(({ module }) => module),
+    ...scope.imports.namespaces.values(),
+  ].some(isChildProcess)
   for (const node of walk(file)) {
-    let origin: { module: string; name: string } | undefined
-    if (ts.isIdentifier(node) && imports.named.has(node.text)) {
-      const named = imports.named.get(node.text)!
-      origin = { module: named.module, name: named.imported }
-    }
-    if (
-      ts.isPropertyAccessExpression(node) &&
-      ts.isIdentifier(node.expression) &&
-      imports.namespaces.has(node.expression.text)
-    )
-      origin = {
-        module: imports.namespaces.get(node.expression.text)!,
-        name: node.name.text,
-      }
-    const module =
-      origin === undefined ? undefined : supportFromSpec(origin.module)
-    const helper =
-      module === undefined ? undefined : helpers.get(module)?.get(origin!.name)
+    const target = targetOf(node, scope)
+    const helper = helperOf(target)
+    if (target?.kind === 'api') startsProcesses = true
     if (helper?.spawns === true) used.set(node.getText(), helper)
   }
-  const importsChildProcess = [
-    ...[...imports.named.values()].map(({ module }) => module),
-    ...imports.namespaces.values(),
-  ].some(isChildProcess)
-  if (used.size === 0 && !importsChildProcess) return []
+  if (used.size === 0 && !startsProcesses) return []
   const problems: string[] = []
   const timeouts: Timeout[] = []
   for (const call of [...walk(file)].filter(ts.isCallExpression)) {
-    const target = targetOf(call, imports, supportFromSpec)
-    const helper = helperOf(target)
+    const target = targetOf(call.expression, scope)
     if (
       target === undefined ||
-      (target.kind === 'helper' && helper?.spawns !== true)
+      (target.kind === 'helper' && helperOf(target)?.spawns !== true)
     )
       continue
-    const timeout = timeoutOf(call, names)
-    const required = target.kind === 'api' || helper?.needsTimeout === true
+    const timeout = timeoutOf(call, scope, target, helperOf)
     if (timeout.kind === 'value')
       timeouts.push({ ms: timeout.ms, at: where(call) })
     else if (timeout.kind === 'unread')
@@ -576,23 +786,24 @@ function auditSpec(
       problems.push(
         `${where(call)}: ${call.expression.getText()}(…) repassa o timeout de quem a chama: num spec, dê o valor na própria chamada`,
       )
-    else if (required) problems.push(untimed(call))
+    else if (required(target)) problems.push(untimed(call))
   }
+  problems.push(...indirectUses(file, scope, required))
   for (const [name, helper] of used)
     for (const timeout of helper.timeouts)
       timeouts.push({ ms: timeout.ms, at: `${timeout.at} (${name})` })
-  const declared = caseTimeout(file, names)
+  const declared = caseTimeout(file, scope)
   if (declared === undefined)
     return [
       ...problems,
       `${fileName}: dispara processos (${
         [...used.keys()].join(', ') || 'node:child_process'
-      }) e não declara vi.setConfig({ testTimeout }): o caso fica nos 5 s do vitest`,
+      }) e não declara vi.setConfig({ testTimeout }) no topo do arquivo: o caso fica nos 5 s do vitest`,
     ]
-  if (Number.isNaN(declared.ms))
+  if (!(declared.ms > 0))
     return [
       ...problems,
-      `${declared.at}: testTimeout ${declared.text}, que o guarda não lê: use um número ou um nome de test/support/hooks.ts`,
+      `${declared.at}: testTimeout ${declared.text}, que o guarda não lê como um número positivo: use um número ou um nome importado de test/support/hooks.ts`,
     ]
   return [
     ...problems,
@@ -693,6 +904,15 @@ describe('the timeouts of a test that starts processes (#23)', () => {
 
 const lines = (...text: string[]): string => text.join('\n')
 
+const untimedAt = (at: string, callee: string): string =>
+  `${at}: ${callee}(…) sem timeout: o processo precisa do próprio, o do caso não o encerra`
+
+const unreadAt = (at: string, callee: string, text: string): string =>
+  `${at}: ${callee}(…) dá o timeout ${text}, que o guarda não lê como um número positivo: use um número ou um nome importado de test/support/hooks.ts`
+
+const indirectAt = (at: string, what: string): string =>
+  `${at}: ${what} fora de uma chamada direta: o guarda não segue o processo; chame a função pelo nome`
+
 describe('importsOf', () => {
   it('reads aliases, merges repeated imports and leaves type-only names out', () => {
     const imports = importsOf(
@@ -735,44 +955,74 @@ const tempRepoSource = lines(
 )
 
 describe('analyzeSupport', () => {
-  const analyze = (source: string) =>
-    analyzeSupport([{ name: 'temp-repo', file: 'temp-repo.ts', source }], names)
+  const analyze = (...modules: [string, string][]) =>
+    analyzeSupport(
+      modules.map(([name, source]) => ({ name, file: `${name}.ts`, source })),
+      names,
+    )
 
   it('lets a helper take the timeout from its caller, and asks its callers for one', () => {
-    const { helpers, problems } = analyze(
+    const { helpers, problems } = analyze([
+      'temp-repo',
       lines(tempRepoSource, `export const git = () => exec('git')`),
-    )
+    ])
     expect(helpers.get('temp-repo')?.get('exec')?.needsTimeout).toBe(true)
     expect(helpers.get('temp-repo')?.get('TempRepo')).toEqual({
       spawns: true,
       needsTimeout: false,
       timeouts: [{ ms: 60_000, at: 'temp-repo.ts:7' }],
     })
-    expect(problems).toEqual([
-      'temp-repo.ts:9: exec(…) sem timeout: o processo precisa do próprio, o do caso não o encerra',
-    ])
+    expect(problems).toEqual([untimedAt('temp-repo.ts:9', 'exec')])
   })
 
   it('does not take a timeout parameter for a timeout the process gets', () => {
     // The options type has a timeout, but nothing hands it to the process.
     expect(
-      analyze(
+      analyze([
+        'temp-repo',
         lines(
           `import { spawn } from 'node:child_process'`,
           `export function helper(options: { timeout?: number } = {}) {`,
           '  return spawn(`x ${options.timeout}`)',
           `}`,
         ),
-      ).problems,
-    ).toEqual([
-      'temp-repo.ts:3: spawn(…) sem timeout: o processo precisa do próprio, o do caso não o encerra',
-    ])
+      ]).problems,
+    ).toEqual([untimedAt('temp-repo.ts:3', 'spawn')])
   })
 
-  it('refuses a helper timeout it cannot read, and a default it can', () => {
-    const { helpers, problems } = analyze(
+  it('reads the object in order: a later spread of the caller options wins', () => {
+    const { helpers, problems } = analyze([
+      'temp-repo',
+      lines(
+        `import { spawn } from 'node:child_process'`,
+        `export function late(options: { timeout?: number } = {}) {`,
+        `  return spawn('git', [], { timeout: 30_000, ...options })`,
+        `}`,
+        `export function early(options: { timeout?: number } = {}) {`,
+        `  return spawn('git', [], { ...options, timeout: 30_000 })`,
+        `}`,
+        `export function hidden(extra: object) {`,
+        `  return spawn('git', [], { timeout: 30_000, ...extra })`,
+        `}`,
+      ),
+    ])
+    expect(helpers.get('temp-repo')?.get('late')).toMatchObject({
+      needsTimeout: true,
+      timeouts: [],
+    })
+    expect(helpers.get('temp-repo')?.get('early')).toMatchObject({
+      needsTimeout: false,
+      timeouts: [{ ms: 30_000, at: 'temp-repo.ts:6' }],
+    })
+    expect(problems).toEqual([unreadAt('temp-repo.ts:9', 'spawn', '...extra')])
+  })
+
+  it('refuses a helper timeout it cannot read, and reads a default it can', () => {
+    const { helpers, problems } = analyze([
+      'temp-repo',
       lines(
         `import { spawn, spawnSync } from 'node:child_process'`,
+        `import { processTimeout } from './hooks'`,
         `export function slow(limit: number) {`,
         `  return spawnSync('git', [], { timeout: limit })`,
         `}`,
@@ -780,44 +1030,103 @@ describe('analyzeSupport', () => {
         `  return spawn('git', [], { timeout })`,
         `}`,
       ),
-    )
-    expect(problems).toEqual([
-      'temp-repo.ts:3: spawnSync(…) dá o timeout limit, que o guarda não lê como um número positivo: use um número ou um nome de test/support/hooks.ts',
     ])
+    expect(problems).toEqual([unreadAt('temp-repo.ts:4', 'spawnSync', 'limit')])
     expect(helpers.get('temp-repo')?.get('withDefault')?.timeouts).toEqual([
-      { ms: names.get('processTimeout'), at: 'temp-repo.ts:6' },
+      { ms: names.get('processTimeout'), at: 'temp-repo.ts:7' },
     ])
   })
 
   it('finds a process started inside a template literal, not one written in a string', () => {
     expect(
-      analyze(
+      analyze([
+        'temp-repo',
         lines(
           `import { spawnSync } from 'node:child_process'`,
           'export const version = () => `git ${spawnSync("git", ["--version"]).stdout}`',
           `export const script = "spawnSync('git')"`,
         ),
-      ).problems,
+      ]).problems,
+    ).toEqual([untimedAt('temp-repo.ts:2', 'spawnSync')])
+  })
+
+  it('follows a helper that calls another through a namespace or a loaded module', () => {
+    const { helpers, problems } = analyze(
+      [
+        'base',
+        lines(
+          `import { spawnSync } from 'node:child_process'`,
+          `export function run() {`,
+          `  return spawnSync('git', [], { timeout: 60_000 })`,
+          `}`,
+        ),
+      ],
+      [
+        'wrapper',
+        lines(
+          `import * as base from './base'`,
+          `export const go = () => base.run()`,
+          `export const again = () => require('./base').run()`,
+        ),
+      ],
+    )
+    for (const name of ['go', 'again'])
+      expect(helpers.get('wrapper')?.get(name), name).toEqual({
+        spawns: true,
+        needsTimeout: false,
+        timeouts: [{ ms: 60_000, at: 'base.ts:3' }],
+      })
+    expect(problems).toEqual([])
+  })
+
+  it('refuses a process function it cannot follow', () => {
+    expect(
+      analyze([
+        'temp-repo',
+        lines(
+          `import * as cp from 'node:child_process'`,
+          `import { spawnSync } from 'node:child_process'`,
+          `export const alias = spawnSync`,
+          `export const all = cp`,
+          `export const bound = () => cp.spawnSync.call(null, 'git')`,
+        ),
+      ]).problems,
     ).toEqual([
-      'temp-repo.ts:2: spawnSync(…) sem timeout: o processo precisa do próprio, o do caso não o encerra',
+      indirectAt('temp-repo.ts:3', 'spawnSync'),
+      indirectAt('temp-repo.ts:4', 'cp'),
+      indirectAt('temp-repo.ts:5', 'cp.spawnSync'),
     ])
   })
 })
 
 describe('auditSpec', () => {
   const helpers = analyzeSupport(
-    [{ name: 'temp-repo', file: 'temp-repo.ts', source: tempRepoSource }],
+    [
+      { name: 'temp-repo', file: 'temp-repo.ts', source: tempRepoSource },
+      {
+        name: 'hooks',
+        file: 'hooks.ts',
+        source: lines(
+          `import { spawn } from 'node:child_process'`,
+          `export function runHook(name: string, input: unknown, { timeout = 90_000 }: { timeout?: number } = {}) {`,
+          `  return spawn(name, [], { timeout })`,
+          `}`,
+        ),
+      },
+    ],
     names,
   ).helpers
   const audit = (...text: string[]): string[] =>
     auditSpec('x.spec.ts', lines(...text), helpers, names)
   const noCase = (what: string): string =>
-    `x.spec.ts: dispara processos (${what}) e não declara vi.setConfig({ testTimeout }): o caso fica nos 5 s do vitest`
+    `x.spec.ts: dispara processos (${what}) e não declara vi.setConfig({ testTimeout }) no topo do arquivo: o caso fica nos 5 s do vitest`
 
   it('leaves a spec that starts no process alone', () => {
     expect(audit(`import { projectRoot } from '../support/temp-repo'`)).toEqual(
       [],
     )
+    // Importing a helper that spawns, and never using it, starts nothing.
+    expect(audit(`import { TempRepo } from '../support/temp-repo'`)).toEqual([])
     // A child_process call inside a string is a script for a child, not a
     // process this spec starts; a type-only import starts nothing either.
     expect(audit("const script = `require('node:child_process')`")).toEqual([])
@@ -835,6 +1144,8 @@ describe('auditSpec', () => {
         `import {\n  exec as run,\n  projectRoot,\n} from '../support/temp-repo'`,
         `// vi.setConfig({ testTimeout: 60_000 })`,
         `const text = 'vi.setConfig({ testTimeout: 60_000 })'`,
+        `function configure() { vi.setConfig({ testTimeout: 120_000 }) }`,
+        `await run('git', { timeout: 30_000 })`,
       ),
     ).toEqual([noCase('run')])
     // A namespace import reaches the helper as well.
@@ -844,6 +1155,18 @@ describe('auditSpec', () => {
         `await repo.exec('git', { timeout: 30_000 })`,
       ),
     ).toEqual([noCase('repo.exec')])
+  })
+
+  it('finds a process started from a loaded module, with no import', () => {
+    expect(
+      audit(
+        `require('node:child_process').spawnSync('git')`,
+        `;(await import('node:child_process')).execFileSync('git', [], { timeout: 1_000 })`,
+      ),
+    ).toEqual([
+      untimedAt('x.spec.ts:1', `require('node:child_process').spawnSync`),
+      noCase('node:child_process'),
+    ])
   })
 
   it('asks every process call for a timeout of its own, one it can read', () => {
@@ -861,15 +1184,29 @@ describe('auditSpec', () => {
         `spawnSync('sh', ['-c', 'timeout 5 git status'])`,
         'const out = `${spawnSync("git", [], { timeout: 0 }).stdout}`',
         `await repo.exec('git')`,
+        `const alias = run`,
       ),
     ).toEqual([
-      'x.spec.ts:7: run(…) sem timeout: o processo precisa do próprio, o do caso não o encerra',
-      'x.spec.ts:8: cp.execFileSync(…) sem timeout: o processo precisa do próprio, o do caso não o encerra',
-      'x.spec.ts:9: spawnSync(…) dá o timeout limit, que o guarda não lê como um número positivo: use um número ou um nome de test/support/hooks.ts',
-      'x.spec.ts:10: spawnSync(…) sem timeout: o processo precisa do próprio, o do caso não o encerra',
-      'x.spec.ts:11: spawnSync(…) dá o timeout 0, que o guarda não lê como um número positivo: use um número ou um nome de test/support/hooks.ts',
-      'x.spec.ts:12: repo.exec(…) sem timeout: o processo precisa do próprio, o do caso não o encerra',
+      untimedAt('x.spec.ts:7', 'run'),
+      untimedAt('x.spec.ts:8', 'cp.execFileSync'),
+      unreadAt('x.spec.ts:9', 'spawnSync', 'limit'),
+      untimedAt('x.spec.ts:10', 'spawnSync'),
+      unreadAt('x.spec.ts:11', 'spawnSync', '0'),
+      untimedAt('x.spec.ts:12', 'repo.exec'),
+      indirectAt('x.spec.ts:13', 'run'),
     ])
+  })
+
+  it('reads the options of a helper only where it takes them', () => {
+    // runHook's second argument is the hook's input, not options.
+    expect(
+      audit(
+        `import { runHook } from '../support/hooks'`,
+        `vi.setConfig({ testTimeout: 120_000 })`,
+        `runHook('x', { ...input, timeout: 'input' })`,
+        `runHook('x', {}, { timeout: limit })`,
+      ),
+    ).toEqual([unreadAt('x.spec.ts:4', 'runHook', 'limit')])
   })
 
   it('refuses a case timeout equal to or below a process timeout', () => {
@@ -888,16 +1225,40 @@ describe('auditSpec', () => {
       audit(
         `import { TempRepo as Repo } from '../support/temp-repo'`,
         `vi.setConfig({ testTimeout: 30_000 })`,
+        `const repo = new Repo()`,
       ),
     ).toEqual([
       'x.spec.ts:2: o caso tem 30000 ms, e o processo de temp-repo.ts:7 (Repo) tem 60000 ms: o caso precisa esperar mais que o processo',
     ])
   })
 
+  it('reads a name where it is bound, not by its text', () => {
+    // A local processTimeout is the local one, not hooks.ts's 120 s.
+    expect(
+      audit(
+        `import { spawnSync } from 'node:child_process'`,
+        `const processTimeout = 1`,
+        `spawnSync('git', [], { timeout: 90_000 })`,
+        `vi.setConfig({ testTimeout: processTimeout })`,
+      ),
+    ).toEqual([
+      'x.spec.ts:4: o caso tem 1 ms, e o processo de x.spec.ts:3 tem 90000 ms: o caso precisa esperar mais que o processo',
+    ])
+    // Not imported from test/support/hooks.ts, the name reads as nothing.
+    expect(
+      audit(
+        `import { spawnSync } from 'node:child_process'`,
+        `spawnSync('git', [], { timeout: spawnTimeout })`,
+        `vi.setConfig({ testTimeout: 120_000 })`,
+      ),
+    ).toEqual([unreadAt('x.spec.ts:2', 'spawnSync', 'spawnTimeout')])
+  })
+
   it('accepts a case timeout above every process timeout, by number or by name', () => {
     expect(
       audit(
         `import { TempRepo } from '../support/temp-repo'`,
+        `import { processTimeout, spawnTimeout } from '../support/hooks'`,
         `import { spawnSync } from 'node:child_process'`,
         `spawnSync('sh', [], { timeout: spawnTimeout })`,
         `vi.setConfig({ testTimeout: processTimeout, maxConcurrency: 12 })`,
