@@ -509,7 +509,12 @@ async function pathWithFailingGit(
   name: string,
   failWhen: string,
 ): Promise<string> {
-  const realGit = (await exec('sh', ['-c', 'command -v git'])).stdout.trim()
+  const which = await exec('sh', ['-c', 'command -v git'], {
+    timeout: 60_000,
+  })
+  if (which.status !== 0)
+    throw new Error(`command -v git falhou: ${which.stderr}`)
+  const realGit = which.stdout.trim()
   const dir = path.join(repo.bin, '..', name)
   mkdirSync(dir, { recursive: true })
   writeFileSync(
@@ -855,7 +860,11 @@ describe.concurrent('scripts/gate.mjs', () => {
       const repo = await fresh()
       await workBranch(repo)
       // A PATH holding git and nothing else, so no gh, fake or real, is found.
-      const which = await exec('sh', ['-c', 'command -v git'])
+      const which = await exec('sh', ['-c', 'command -v git'], {
+        timeout: 60_000,
+      })
+      if (which.status !== 0)
+        throw new Error(`command -v git falhou: ${which.stderr}`)
       const onlyGit = path.join(repo.root, 'only-git')
       mkdirSync(onlyGit)
       symlinkSync(which.stdout.trim(), path.join(onlyGit, 'git'))
@@ -3857,6 +3866,7 @@ describe.concurrent('scripts/gate.mjs', () => {
       path.join(repo.bin, 'gh'),
       ['issue', 'view', String(ISSUE), '--json', 'body'],
       {
+        timeout: 60_000,
         env: repo.env({
           FAKE_GH_LOG: repo.log,
           FAKE_GH_FIXTURE: repo.fixturePath,
@@ -6025,6 +6035,7 @@ describe.concurrent('scripts/gate.mjs', () => {
           `query=${query}`,
         ],
         {
+          timeout: 60_000,
           env: repo.env({
             FAKE_GH_LOG: repo.log,
             FAKE_GH_FIXTURE: repo.fixturePath,

@@ -118,9 +118,16 @@ export function spawnWith(
 
 /** The git the machine has, for a shim that wraps it. */
 export function realGit(): string {
-  const found = spawnSync('sh', ['-c', 'command -v git'], {
+  const run = spawnSync('sh', ['-c', 'command -v git'], {
     encoding: 'utf8',
-  }).stdout.trim()
+    timeout: spawnTimeout,
+  })
+  // A timed-out lookup has status null: say so, not that git is missing.
+  if (run.status !== 0)
+    throw new Error(
+      `command -v git falhou (status ${run.status}): ${run.stderr}`,
+    )
+  const found = run.stdout.trim()
   if (!path.isAbsolute(found)) throw new Error('git não está no PATH')
   return found
 }
@@ -516,7 +523,11 @@ export class HookRepo {
 
   /** git in the repository; rejects with git's stderr when it fails. */
   async git(...args: string[]): Promise<string> {
-    const run = await exec('git', args, { cwd: this.dir, env: this.gitEnv() })
+    const run = await exec('git', args, {
+      cwd: this.dir,
+      env: this.gitEnv(),
+      timeout: spawnTimeout,
+    })
     if (run.status !== 0)
       throw new Error(`git ${args.join(' ')} falhou: ${run.stderr}`)
     return run.stdout.trim()
@@ -612,7 +623,10 @@ export class HookRepo {
     const run = await exec('git', ['rev-parse', '--absolute-git-dir'], {
       cwd: dir,
       env: this.gitEnv(),
+      timeout: spawnTimeout,
     })
+    if (run.status !== 0)
+      throw new Error(`git rev-parse falhou em ${dir}: ${run.stderr}`)
     return { dir, gitDir: run.stdout.trim() }
   }
 

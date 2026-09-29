@@ -849,6 +849,7 @@ describe('the Swagger source record of every registered target (#19)', () => {
         cwd: projectRoot,
         encoding: 'utf8',
         env: { ...process.env, PYTHONDONTWRITEBYTECODE: '1' },
+        timeout: 30_000,
       },
     ),
   ) as Registered[]
