@@ -25,17 +25,31 @@ Resposta do dono à pergunta 1 do plano: a API do Prettier.
 
 ## Critérios de aceite
 
-- [ ] Com cada uma das três configs que dependem do caminho, gerar sai com 0, o `--check` logo depois sai com 0, e o `prettier --check` da pasta gerada também. O `codegen.spec.ts` prova, e antes o `--check` saía com 1.
-- [ ] Uma falha do Prettier no modo de gerar não muda nenhum arquivo de `src/`, em nenhum alvo da execução. O `codegen.spec.ts` prova com um `.prettierrc` inválido na raiz e só dentro de uma área, com as sentinelas intactas.
-- [ ] Os geradores usam só o Prettier do `node_modules` da própria raiz. Uma árvore sem ele sai com 2, mesmo dentro de uma pasta que tem um.
-- [ ] O `generate:all` reescreve `src/` byte a byte, o `check:all` imprime as 16 linhas "are current", e `npm run check`, o e2e e o gate passam.
-- [ ] A ADR nova registra a decisão e substitui a 0011, e os patterns, o anti-pattern e as ADRs que citam o CLI, o `.codegen-tmp` ou os dois limites dizem o mecanismo novo.
+- [x] Com cada uma das três configs que dependem do caminho, gerar sai com 0, o `--check` logo depois sai com 0, e o `prettier --check` da pasta gerada também. O `codegen.spec.ts` prova, e antes o `--check` saía com 1.
+- [x] Uma falha do Prettier no modo de gerar não muda nenhum arquivo de `src/`, em nenhum alvo da execução. O `codegen.spec.ts` prova com um `.prettierrc` inválido na raiz e só dentro de uma área, com as sentinelas intactas.
+- [x] Os geradores usam só o Prettier do `node_modules` da própria raiz. Uma árvore sem ele sai com 2, mesmo dentro de uma pasta que tem um.
+- [x] O `generate:all` reescreve `src/` byte a byte, o `check:all` imprime as 16 linhas "are current", e `npm run check`, o e2e e o gate passam.
+- [x] A ADR nova registra a decisão e substitui a 0011, e os patterns, o anti-pattern e as ADRs que citam o CLI, o `.codegen-tmp` ou os dois limites dizem o mecanismo novo.
 
 ## Decisões relacionadas
 
 - [0011: Os geradores formatam sem arquivo de ignore e falham quando não formatam](../decisions/0011-generators-format-without-ignore-files.md), que registra os dois limites
+- [0015: Os geradores formatam em memória, com a config do caminho de destino, antes de tocar na saída](../decisions/0015-generators-format-in-memory-at-the-destination-path.md), que a substitui
+
+## Resultados
+
+- **A causa raiz se confirmou.** Com o formatador em memória, o mesmo texto sai do modo de gerar, do `--check` e do `format:check`: com as três configs, os três saem com 0, e antes o `--check` saía com 1.
+- **O formatador**, `scripts/format-generated.mjs`, formata pela API do Prettier com a config do caminho de destino e importa o Prettier da própria raiz pelo caminho. Os geradores formatam a saída de todos os alvos da execução numa chamada só e só depois recusam, apagam, gravam ou comparam (`scripts/marketo_codegen.py:294-416`). Saíram o CLI, a conferência do relatório por arquivo, o `.codegen-tmp` e a linha dele no `.gitignore`.
+- **As falhas não tocam `src/`.** Com um `.prettierrc` inválido, na raiz ou só em `src/user-management/`, os três geradores saem com 2 e nenhum arquivo muda. Antes, o `definitions` e o `resources` deixavam 3 arquivos cada regravados sem formatação.
+- **Mais rápido.** O `generate:all` caiu de 10,4 s para 4,1 s, e o `check:all` de 9,9 s para 3,8 s, com `src/` reescrito byte a byte.
+- **Os testes.** O `codegen.spec.ts` ganhou 17 casos da #29, 14 deles vermelhos antes da correção: as três configs em cada gerador, a falha em cada gerador, a falha só numa área, a área avulsa e o `node_modules` de uma pasta acima. Os 6 do Prettier embrulhado saíram, os 3 de "not executable" viraram "cannot load", e os 2 de "undo the rewrite" viraram "creates nothing" e "leaves src/ untouched". O spec foi de 71 para 80 casos.
+- **Onde se afastou do plano.**
+  - Os geradores importam `Output` e um despachante, `write_or_check_outputs()`, no lugar dos dois nomes de antes. O `FORMATTER` ficou na linha do `TEMP`. Assim nenhuma das citações `arquivo:linha` dos geradores e do módulo comum, até a linha 294, se deslocou (`502aab5`).
+  - A ADR nova é a 0015, porque a PR #62 (#24) já tem a 0013 e a 0014.
+  - A #25 (PR #60) e a #23 (PR #61) entraram antes do corte, sem mudar o escopo.
 
 ## Status
 
 - **Criado**: 2026-09-29 (Fase: Intent), do plano aprovado na issue #29 (#29)
-- **Status**: In Progress
+- **Status**: Resolved
+- **Atualizado**: 2026-09-29 (Fase: Learn), o formatador em memória, as saídas em lote, a ADR 0015 e os testes chegaram à branch, com gerar, o `--check` e o `format:check` concordando (#29)

@@ -4,6 +4,50 @@ Uma entrada por mudança mergeada, da mais nova para a mais antiga, escrita no p
 
 ---
 
+## 2026-09-29: Os geradores formatam em memória, com a config do caminho de destino, antes de tocar na saída (#29)
+
+**Fase**: Learn
+**Tipo**: Bug Fix
+
+### O que foi construído / corrigido
+
+- **O formatador `scripts/format-generated.mjs`.** Ele recebe a lista de `{ path, content }` no stdin e formata cada texto pela API do Prettier, com a config do caminho de destino (`resolveConfig` com `editorconfig: true`) e com o `requirePragma` e o range forçados. Ele importa o Prettier de `<raiz>/node_modules/prettier/index.mjs` pelo caminho.
+- **Os geradores formatam tudo antes de tocar em qualquer pasta.** Cada gerador monta um `Output` por pasta de saída e chama o `write_or_check_outputs()` uma vez. O `format_files()` formata a execução inteira numa chamada, e só então o `write_outputs()` recusa, apaga e grava, ou o `check_outputs()` compara.
+- **Saiu o caminho do CLI:** o `format_with_prettier()`, a conferência do relatório por arquivo, a limpeza das variáveis `PRETTIER_*`, o `.codegen-tmp` e a linha dele no `.gitignore`.
+- **A ADR 0015** substitui a 0011 e mantém dela o que valia: nenhum arquivo de ignore alcança a saída, o `requirePragma` e o range forçados, a saída 2 e a busca do node. As ADRs 0004, 0008, 0009 e 0012, os dois patterns do código gerado e três anti-patterns dizem o mecanismo novo, e as citações do CLI levam o commit `d50fd00`.
+
+### Números medidos
+
+- **Antes**, sobre `d50fd00`:
+  - com um `overrides` para `src/**`, um `src/.prettierrc` ou um `src/.editorconfig`, gerar saía com 0, o `--check` com 1 e o `format:check` com 0;
+  - com um `.prettierrc` inválido, o `definitions` e o `resources` deixavam 3 arquivos cada regravados sem formatação;
+  - com o `.prettierrc` inválido só em `src/user-management/`, os três geradores mudavam 13, 3 e 6 arquivos dessa área.
+- **Depois**: os três saem com 0 nas três configs, e as falhas saem com 2 sem mudar nenhum arquivo de `src/`.
+- **Tempo**: o `generate:all` caiu de 10,4 s para 4,1 s e o `check:all` de 9,9 s para 3,8 s, com `src/` reescrito byte a byte e as 16 linhas "are current".
+- **`npm run check`**: 3.826 testes em 22 arquivos antes deste Learn, e 3.827 com o caso que o `drift.spec.ts` gera para o anti-pattern novo. O `codegen.spec.ts` foi de 71 para 80 casos. Entraram 17 casos da #29, 14 deles vermelhos antes da correção. Saíram os 6 do Prettier embrulhado, e os 3 de "not executable" e os 2 de "undo the rewrite" foram reescritos. O e2e ficou com 39.
+
+### Decisões tomadas
+
+- [0015: Os geradores formatam em memória, com a config do caminho de destino, antes de tocar na saída](../decisions/0015-generators-format-in-memory-at-the-destination-path.md), nova, com a resposta do dono à pergunta 1: a API do Prettier, não o CLI com pasta temporária.
+- [0011: Os geradores formatam sem arquivo de ignore e falham quando não formatam](../decisions/0011-generators-format-without-ignore-files.md), agora `Superseded`.
+
+### Patterns aplicados ou criados
+
+- [Formatar uma cópia noutro caminho que o do destino](../knowledge/anti-patterns/formatting-a-copy-at-another-path.md), anti-pattern novo
+- [Gerar e conferir](../knowledge/patterns/generate-and-check.md) e [A fronteira do código gerado](../knowledge/patterns/generated-code-boundary.md), atualizados; a regra "Não ponha uma config do Prettier que dependa do caminho" saiu
+- [Confiar que a ferramenta processou o arquivo passado pelo nome](../knowledge/anti-patterns/trusting-a-tool-to-process-a-named-file.md), com a API como a saída que a #29 escolheu
+- [Timeouts de testes que disparam processos](../knowledge/patterns/process-test-timeouts.md), aplicado nos casos novos
+
+### Aprendizados / surpresas
+
+- **A alternativa óbvia só mudava o vermelho de lugar.** Formatar os dois modos na mesma pasta temporária fazia gerar concordar com o `--check`, mas não com o `format:check`, que lê a config do destino. Só a medição com as três configs mostrou isso.
+- **A resolução do Node sobe de pasta.** Um `import('prettier')` sem `node_modules` na raiz achou o de uma pasta acima. Num worktree sem `npm ci`, os geradores formatariam com o Prettier do checkout principal.
+- **Tirar uma linha de um módulo muito citado custa caro.** O contexto cita o `marketo_codegen.py` e os três geradores por linha em dezenas de lugares. Pôr o `FORMATTER` na linha do `TEMP` e trocar dois imports por dois manteve essas citações no lugar, como a #19 já tinha feito com o `document_path()`.
+- **O protótipo pagou o plano.** A cópia fora do git mediu a paridade dos 1.088 arquivos e os tempos antes do Approve, e o Build só confirmou.
+- **Com o HEAD destacado, o hook nega o `git checkout` de restauração.** Na medição do plano, a árvore voltou regerando com a config original.
+
+---
+
 ## 2026-09-28: Todo spec que dispara processos espera mais que o processo filho, e um guarda confere (#23)
 
 **Fase**: Learn

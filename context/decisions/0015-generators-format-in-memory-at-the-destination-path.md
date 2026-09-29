@@ -67,6 +67,7 @@
 - [Bug: Os geradores formatam fora do caminho de destino e gravam antes de formatar](../intent/bug-generators-format-by-destination-path.md)
 - [Pattern: Gerar e conferir](../knowledge/patterns/generate-and-check.md)
 - [Anti-pattern: Confiar que a ferramenta processou o arquivo passado pelo nome](../knowledge/anti-patterns/trusting-a-tool-to-process-a-named-file.md)
+- [Anti-pattern: Formatar uma cópia noutro caminho que o do destino](../knowledge/anti-patterns/formatting-a-copy-at-another-path.md)
 
 ## Status
 
