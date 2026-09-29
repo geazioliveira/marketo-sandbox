@@ -4,6 +4,44 @@ Uma entrada por mudança mergeada, da mais nova para a mais antiga, escrita no p
 
 ---
 
+## 2026-09-28: Cada área registra o Swagger que a gerou, com o sha256, e o check:all o confere (#19)
+
+**Fase**: Learn
+**Tipo**: Feature
+
+### O que foi construído / corrigido
+
+- **O registro de cada área.** O gerador de definições emite `src/<área>/<área>-definitions/swagger-source.ts`, com o cabeçalho de gerado, o documento escrito como o cabeçalho o escreve e o sha256 dos bytes dele como estão no commit. O `check:all` o confere como qualquer arquivo gerado, então um Swagger mudado sem regenerar deixa o CI vermelho, mesmo quando nenhum outro arquivo gerado muda.
+- **Os bytes fixados.** O `.gitattributes` novo tira os `docs/marketo-swagger-*.json` de toda conversão de fim de linha, e o sha256 fica o mesmo num checkout `core.autocrlf=true`.
+- **Só no código.** Pela resposta do dono à pergunta 1, o registro fica em `src/` e no `dist/`, e nenhuma rota, header ou resposta muda.
+- **A documentação.** A ADR 0012, a ADR 0004 (a tabela de sha256 virou a origem medida na #6, e a contagem, 1.088 arquivos gerados), a 0008, os patterns [gerar e conferir](../knowledge/patterns/generate-and-check.md) e [a fronteira do código gerado](../knowledge/patterns/generated-code-boundary.md), o README (nas mesmas 118 linhas), o glossário, o `AGENTS.md` e o fluxo. O critério do sha256 do [project intent](../intent/project-intent.md) foi marcado.
+
+### Números medidos
+
+- **Antes**, sobre `e5b013c`: com um `\n` a mais em `docs/marketo-swagger-asset.json`, o `check:all` saía com 0 e 16 linhas "are current". **Depois**: sai com 1, citando `src/asset/asset-definitions/swagger-source.ts`.
+- **A saída**: 5 arquivos novos, 35 linhas, e nenhum outro. Sem eles, o `check:definitions` saía com 1 nas cinco áreas. Um segundo `npm run generate:all` não muda nada, e o `format:check` passa.
+- **O checkout CRLF**: um clone da branch com `core.autocrlf=true` fica com o status limpo, os cinco documentos em `attr/-text` e os cinco sha256 iguais aos registros.
+- **`npm run check`**: 3.765 testes em 21 arquivos, com 16 novos no `codegen.spec.ts`, 15 deles vermelhos antes do Build, e 2 que o `drift.spec.ts` gera para a ADR 0012 e o anti-pattern novo (3.764 na rodada antes do Learn); o e2e com 33, sem mudança. Com a carga média em 20, 4 casos de stack do `gate.spec.ts` estouraram os 120 s na primeira rodada, e o `gate.spec.ts` sozinho passou com os 365.
+
+### Decisões tomadas
+
+- [0012: Cada área registra o Swagger que a gerou, com o sha256 dos bytes commitados](../decisions/0012-swagger-source-record-per-area.md), nova, com as alternativas medidas: o sha256 no cabeçalho de todo arquivo, um manifesto único, normalizar as quebras, `binary`, `text eol=lf` e o registro no `/api-json`.
+- [0004: O Swagger como fonte única, com o código gerado commitado](../decisions/0004-swagger-as-single-source-with-committed-generated-code.md), atualizada.
+
+### Patterns aplicados ou criados
+
+- [Check que só compara a saída derivada](../knowledge/anti-patterns/check-that-only-compares-derived-output.md), anti-pattern novo
+- [Gerar e conferir](../knowledge/patterns/generate-and-check.md) e [A fronteira do código gerado](../knowledge/patterns/generated-code-boundary.md), atualizados
+
+### Aprendizados / surpresas
+
+- **Um check de saída derivada não vê a entrada.** O `check:all` provava o código contra os geradores, mas não o documento contra o registro, e a tabela de sha256 da ADR 0004 podia envelhecer sem ninguém ver. Emitir a identidade da entrada como mais um arquivo de saída fechou o furo sem código novo de conferência.
+- **O `read_text()` também esconde as quebras de linha.** Um checkout CRLF mudava o sha256 dos documentos e não mudava o veredito. O hash dos bytes, com os bytes fixados pelo `.gitattributes`, é o que se reproduz com `shasum`.
+- **As linhas citadas no plano andam.** Entre o plano (27/09) e o Build, a #5 e a #30 moveram os bullets do `workflow.md` que o plano citava; o passo 0 os achou pelo conteúdo.
+- **O harness recusa o que ele não consegue provar dentro do worktree.** Um redirecionamento com `$TMPDIR`, um laço com `$f` e um heredoc que citava `git` foram negados; com os caminhos por extenso, ou pela ferramenta de edição, passaram. Um log escrito com `$PWD/../../..` caiu no checkout principal, e foi apagado sem tocar em mais nada lá.
+
+---
+
 ## 2026-09-28: O npm ci não manda mais o evento de instalação do Scarf (#20)
 
 **Fase**: Learn

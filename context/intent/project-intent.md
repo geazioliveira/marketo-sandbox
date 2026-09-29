@@ -31,7 +31,7 @@ Um critério só é marcado quando um teste ou um check o prova.
 - [x] Por padrão, nenhuma requisição sai da máquina e o servidor escuta em 127.0.0.1. Desde a #9, o `@nestjs/observe` saiu e o servidor escuta em `HOST`, com `127.0.0.1` por padrão. Desde a #20, a instalação também não manda nada: o `package.json` desliga o evento do `@scarf/scarf`. `test/runtime-defaults.spec.ts` prova os três ([ADR 0010](../decisions/0010-loopback-only-by-default.md)).
 - [ ] Um consumidor fixa uma release com tag e a sobe com um comando documentado.
 - [ ] Espaços isolados, autenticação, modelo com estado, log de requisições, falhas roteirizadas e validação estrita, como pede a Track A do lite-campaign (R1–R8).
-- [ ] O mock registra qual cópia do Swagger o gerou (sha256).
+- [x] O mock registra qual cópia do Swagger o gerou (sha256). Desde a #19, cada área tem `src/<área>/<área>-definitions/swagger-source.ts`, com o documento e o sha256 dos bytes commitados, e o `check:all` o confere: um Swagger mudado sem regenerar deixa o CI vermelho. O `.gitattributes` fixa os bytes dos documentos em todo checkout, e o `test/scripts/codegen.spec.ts` prova o registro das cinco áreas, o `\n` a mais e o checkout `core.autocrlf=true` ([ADR 0012](../decisions/0012-swagger-source-record-per-area.md)). O registro fica no código, não no mock em execução.
 - [ ] Toda mudança nasce numa issue, com plano e Approve do dono, e entra por uma PR que fecha essa issue (#1).
 - [x] O CI roda lint, typecheck, testes, build e `check:all` em toda PR (#3 e #7). O `npm run check` termina com o `check:all`, e o `test/scripts/forms-parity.spec.ts` pina a cadeia e o passo do `check.yml` que a roda. A run 36279581085 do `Qualidade / check`, na cabeça `217042d` da PR #27, mostra as 16 linhas "are current".
 
@@ -46,7 +46,7 @@ Um critério só é marcado quando um teste ou um check o prova.
 
 ## Decisões em aberto
 
-- **Qual cópia do Swagger de assets vale.** Aqui é `ced6c339…` (255 definições); o lite-campaign fixa `ff7ec628…` (254). A escolha sai de um diff nas rotas que o consumidor usa.
+- **Qual cópia do Swagger de assets vale.** Aqui é `ced6c339…` (255 definições); o lite-campaign fixa `ff7ec628…` (254). A escolha sai de um diff nas rotas que o consumidor usa, e desde a #19 o registro `swagger-source.ts` de cada área diz qual cópia gerou cada versão.
 - **Onde vive o comportamento com estado:** ao lado do código gerado, nunca dentro dele. A [ADR 0009](../decisions/0009-behaviour-beside-generated-code.md) propõe isso como `Proposed`, e a primeira sub-issue da Track A que construir comportamento a aceita ou a substitui.
 - **Esquema de release e tag** que os consumidores fixam.
 - **Versão do Node:** `.nvmrc` com 24, na #2.
@@ -56,3 +56,4 @@ Um critério só é marcado quando um teste ou um check o prova.
 - **Criado**: 2026-09-24 (Fase: Intent), a partir do código em `fb4a804` e do plano do consumidor lite-campaign (#2)
 - **Status**: In Progress
 - **Atualizado**: 2026-09-26 (Fase: Learn), o critério do CI com o `check:all` foi marcado, com o `check:all` no fim do `npm run check` (#7)
+- **Atualizado**: 2026-09-28 (Fase: Learn), o critério do sha256 foi marcado, com o registro `swagger-source.ts` de cada área conferido pelo `check:all`, e a decisão em aberto da cópia de assets passou a citar o registro (#19)
