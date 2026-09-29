@@ -29,6 +29,7 @@ As regras vivem no Context Mesh. Esta página só aponta para elas.
 - [Middleware do Nest para todas as rotas, que vira uma rota](context/knowledge/anti-patterns/nest-middleware-as-a-catch-all-route.md)
 - [Mover as pastas geradas sem o gerador](context/knowledge/anti-patterns/moving-generated-folders-without-the-generator.md)
 - [Padrão com `??` para uma variável de ambiente](context/knowledge/anti-patterns/nullish-default-for-an-env-var.md)
+- [Regra de formato escrita só na prosa do guia](context/knowledge/anti-patterns/format-rule-only-in-prose.md)
 - [Rota literal declarada depois de uma rota com parâmetro](context/knowledge/anti-patterns/literal-route-after-param-route.md)
 - [Uma porta efêmera nova a cada requisição do supertest](context/knowledge/anti-patterns/a-new-ephemeral-port-per-supertest-request.md)
 - [Uma PR que prende partes independentes](context/knowledge/anti-patterns/one-pr-for-many-independent-parts.md)

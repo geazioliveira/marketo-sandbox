@@ -26,19 +26,51 @@ O plano vigente e o Approve do dono estão na #66. O dono aprovou as três recom
 
 ## Critérios de aceite
 
-- [ ] Nenhum arquivo tipado fora de `context/decisions/` tem mais de uma linha `Atualizado`, e os nove arquivos mantêm a última linha que tinham.
-- [ ] O `check:context` recusa uma segunda linha `Atualizado` num intent, num pattern, num anti-pattern ou num agente, com `arquivo:linha`. O teste falha antes e passa depois.
-- [ ] O `check:context` aceita todas as linhas `Atualizado` de uma decisão, duas do mesmo dia inclusive, e recusa uma linha datada antes da de cima ou do `Criado`. Os testes falham antes e passam depois.
-- [ ] Dentro do bloco Status, uma linha `Atualizado` fora do formato é recusada, e um item numerado, uma citação ou o negrito com `__` contam como linha `Atualizado`. Em código ou em comentário HTML, a linha não conta.
-- [ ] Rodado contra a árvore de antes da limpeza, o guarda lista os nove arquivos, e só eles.
-- [ ] O `npm run check`, o e2e e o gate passam.
-- [ ] O guia, o cabeçalho do `check-context.mjs`, o intent e o changelog registram a regra conferida.
+- [x] Nenhum arquivo tipado fora de `context/decisions/` tem mais de uma linha `Atualizado`, e os nove arquivos mantêm a última linha que tinham.
+- [x] O `check:context` recusa uma segunda linha `Atualizado` num intent, num pattern, num anti-pattern ou num agente, com `arquivo:linha`. O teste falha antes e passa depois.
+- [x] O `check:context` aceita todas as linhas `Atualizado` de uma decisão, duas do mesmo dia inclusive, e recusa uma linha datada antes da de cima ou do `Criado`. Os testes falham antes e passam depois.
+- [x] Dentro do bloco Status, uma linha `Atualizado` fora do formato é recusada, e um item numerado, uma citação ou o negrito com `__` contam como linha `Atualizado`. Em código ou em comentário HTML, a linha não conta.
+- [x] Rodado contra a árvore de antes da limpeza, o guarda lista os nove arquivos, e só eles.
+- [x] O `npm run check`, o e2e e o gate passam.
+- [x] O guia, o cabeçalho do `check-context.mjs`, o intent e o changelog registram a regra conferida.
 
 ## Decisões relacionadas
 
 - [ADR 0001: Context Mesh no repositório e loop issue-first](../decisions/0001-context-mesh-in-the-repository.md)
 
+## Resultados
+
+Os commits seguem os passos do plano: o intent (`9fa71f5`), os testes que falham (`7b837a8`), a limpeza dos nove arquivos (`f5573a5`), o guarda (`c647ed4`) e este Learn.
+
+- **Antes do guarda**, em `7b837a8`, 21 casos novos do `test/scripts/check-context.spec.ts` falharam: os 20 do grupo (b) e o que confere a regra no guia. Os dois casos que só aceitam, a decisão com várias linhas e as linhas em código ou em comentário, já passavam, e continuam passando.
+- **A prova contra a árvore de antes da limpeza.** O guarda novo rodou numa cópia de `22059b6` e numa de `624eafa`, as duas fora do git. Em cada uma, saíram 16 problemas, todos de linha `Atualizado` a mais, só nos nove arquivos: 3 em `generated-code-boundary.md` e em `loop-gate.md`, 2 em `feature-claude-code-hooks.md`, `generate-and-check.md` e `issue-branch-lifecycle.md`, e 1 nos outros quatro. São as 16 linhas que o `f5573a5` tirou. Nenhuma decisão ficou fora de ordem, e nenhuma linha fora do formato.
+- **Depois**, os 137 casos do `check-context.spec.ts` passam, e o `check:context` da branch sai sem problema.
+- **O `npm run check` e o e2e.** Com a média de carga entre 18 e 24, o `npm test` deu 8 falhas em 3.855 casos, todas por prazo, em `session-context`, `build-guard`, `repo` e `guard-bash`, specs dos hooks que esta PR não toca (#59). Rodados de novo, os 705 casos desses quatro arquivos passaram. Passaram o lint, o `format:check`, o typecheck, o `check:context`, o build, o `check:all` e o e2e, com 447 casos em 6 arquivos.
+- **O que entrou.** Em `scripts/loop-sections.mjs`: `statusCreatedLine`, `statusUpdatedLine`, `statusUpdatedDeclaration`, `statusPhases` e o `keepsEveryUpdate` do tipo `ADR`, que o `contextKindOf` devolve. A `statusDeclaration` passou a sair do mesmo construtor da `statusUpdatedDeclaration`, com o mesmo regex, o que foi conferido pelo `source`. No passo (b) do `check:context`, cada linha que declara `Atualizado` no bloco Status precisa estar no formato do guia, com uma data de calendário. Fora das decisões, toda linha depois da primeira é recusada. Nenhuma data vem antes do `Criado` nem da mais nova acima dela.
+- **As mutações**, numa cópia da árvore fora do git. Lá, o único caso que falha sem mutação é o que precisa do git (`check-ignore`). Cada mutação foi pega:
+
+  | Mutação | Falhas a mais |
+  | --- | ---: |
+  | Sem a contagem fora das decisões | 8 |
+  | Sem o formato | 10 |
+  | Sem a ordem | 4 |
+  | Sem o `Criado` como piso | 2 |
+  | Toda data aceita como de calendário | 1 |
+  | Só a linha estrita conta | 9 |
+  | Ler código e comentário como prosa | 1 |
+  | A mesma data passa a citar a última linha | 1 |
+  | A referência desce depois de uma linha fora de ordem | 1 |
+
+- **Onde se afastou do plano.**
+  - A ordem é conferida contra a data mais nova acima, não só contra a linha de cima. Assim, uma linha fora de ordem não baixa a régua para as de baixo. As duas últimas mutações da tabela sobreviviam, e o commit do guarda ganhou o caso `holds every decision Atualizado line to the latest date above it, naming its first line`.
+  - O teste do guia, escrito no `7b837a8`, cortava a seção no `## Status` do exemplo cercado. O commit do guarda o fez cortar no `## Templates`, como o teste vizinho.
+  - A seção Check do [fluxo](../../docs/development/workflow.md#check) lista o que o `check:context` recusa e ganhou a regra nova. O plano não a citava, mas sem ela a lista derivaria.
+  - O `context/README.md` já estava fora do Prettier em `main`, e o `format:check` não cobre `context/`, então o guia ficou sem reformatação.
+  - O worktree precisou de `npm ci`. Sem ele, o typecheck resolvia o `node_modules` do checkout principal, anterior à #24, e acusava os tipos do `multer`.
+- **O Build pediu o dono presente.** No modo automático, o hook negou a edição de `scripts/loop-sections.mjs`. A sessão saiu do modo automático, e cada edição no harness passou pela confirmação do dono.
+
 ## Status
 
 - **Criado**: 2026-09-29 (Fase: Intent), do plano aprovado na issue #66 (#66)
-- **Status**: In Progress
+- **Status**: Resolved
+- **Atualizado**: 2026-09-29 (Fase: Learn), critérios cumpridos na branch `fix/66-linhas-atualizado-a-mais`, com os Resultados, a prova contra a árvore de antes da limpeza e o anti-pattern novo (#66)

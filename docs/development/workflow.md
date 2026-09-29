@@ -315,6 +315,7 @@ npm run check && npm run test:e2e && npm run gate
   - link relativo ou âncora quebrados, a âncora do próprio arquivo (`#…`) inclusive;
   - arquivo fora do layout. As pastas e os nomes de `context/` estão no [Layout do guia](../../context/README.md#layout), e um arquivo fora destas pastas faz o check:context recusar a árvore; uma pasta nova entra antes em `scripts/loop-sections.mjs` e no Layout. Só um arquivo oculto que não é markdown (`.DS_Store`, `.obsidian/`) fica de fora;
   - arquivo de contexto sem o título `# <Tipo>: <assunto>`, ou sem um único bloco Status como última seção (nem um título sublinhado depois dele), com um status válido e nenhum status declarado fora dele (numa lista, numa citação ou em negrito solto);
+  - no bloco Status, desde a #66, uma linha `Atualizado` fora do formato do [guia](../../context/README.md#o-bloco-status) ou datada antes do `Criado` ou da mais nova acima dela, e, fora das decisões, qualquer linha `Atualizado` depois da primeira;
   - decisão fora do [índice de decisões](../../context/decisions/README.md) ou com status diferente do arquivo;
   - título de entrada do changelog fora do formato;
   - caminho absoluto de máquina (`/Users/`, `/Volumes/`, `/home/<x>/`, `/private/tmp/`, `/private/var/`, `/var/folders/`, `/tmp/<x>/`);
