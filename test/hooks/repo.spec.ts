@@ -25,6 +25,7 @@ import {
   type RepoLib,
   setupTimeout,
   processTimeout,
+  spawnTimeout,
 } from '../support/hooks'
 import { exec } from '../support/temp-repo'
 
@@ -214,6 +215,7 @@ describe.concurrent('repoAt', () => {
     const dir = scratch()
     const run = await exec('git', ['init', '-q', '--bare', 'bare.git'], {
       cwd: dir,
+      timeout: spawnTimeout,
     })
     expect(run.status).toBe(0)
     expect(lib.repoAt(path.join(dir, 'bare.git'))).toBeNull()
@@ -702,6 +704,7 @@ process.stdout.write(readFileSync(process.env.FAKE_GH_FIXTURE, 'utf8'))
     const run = await exec('gh', ['api', 'user'], {
       cwd: repo.dir,
       env: repo.env(),
+      timeout: spawnTimeout,
     })
     expect(run.status).toBe(0)
     expect(JSON.parse(run.stdout)).toEqual({ viewer: 'x' })
@@ -710,6 +713,7 @@ process.stdout.write(readFileSync(process.env.FAKE_GH_FIXTURE, 'utf8'))
     const again = await exec('gh', ['api', 'user'], {
       cwd: repo.dir,
       env: repo.env(),
+      timeout: spawnTimeout,
     })
     expect(JSON.parse(again.stdout)).toEqual({ viewer: 'y' })
   })

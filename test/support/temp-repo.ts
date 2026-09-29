@@ -183,7 +183,11 @@ export class TempRepo {
 
   /** git in the repository; rejects with git's stderr when it fails. */
   async git(...args: string[]): Promise<string> {
-    const run = await exec('git', args, { cwd: this.dir, env: this.env() })
+    const run = await exec('git', args, {
+      cwd: this.dir,
+      env: this.env(),
+      timeout: 60_000,
+    })
     if (run.status !== 0)
       throw new Error(`git ${args.join(' ')} falhou: ${run.stderr}`)
     return run.stdout.trim()

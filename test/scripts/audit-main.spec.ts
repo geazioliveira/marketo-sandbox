@@ -194,7 +194,11 @@ class History {
   }
 
   async git(...args: string[]): Promise<string> {
-    const run = await exec('git', args, { cwd: this.dir, env: this.env() })
+    const run = await exec('git', args, {
+      cwd: this.dir,
+      env: this.env(),
+      timeout: 60_000,
+    })
     if (run.status !== 0)
       throw new Error(`git ${args.join(' ')} falhou: ${run.stderr}`)
     return run.stdout.trim()
@@ -239,7 +243,7 @@ class History {
     const run = await exec(
       'sh',
       ['-c', 'git fast-import --quiet < "$1"', 'sh', stream],
-      { cwd: this.dir, env: this.env() },
+      { cwd: this.dir, env: this.env(), timeout: 60_000 },
     )
     if (run.status !== 0) throw new Error(`fast-import falhou: ${run.stderr}`)
     return this.git('rev-parse', 'refs/heads/burst')
@@ -759,6 +763,7 @@ describe.concurrent('scripts/audit-main.mjs', () => {
         const run = await exec(process.execPath, [script, ...args], {
           cwd: history.dir,
           env: history.env({ RUNNER_TEMP: history.temp }),
+          timeout: 60_000,
         })
         expect(run.status).toBe(2)
         expect(run.stderr).toContain(
@@ -3756,7 +3761,9 @@ describe.concurrent('scripts/audit-main.mjs', () => {
       const { baseline } = await preLoop(history)
       const direct = await history.commit('Edição pela web', baseline)
       // A PATH holding git and nothing else, so no gh, fake or real, is found.
-      const which = await exec('sh', ['-c', 'command -v git'])
+      const which = await exec('sh', ['-c', 'command -v git'], {
+        timeout: 60_000,
+      })
       const onlyGit = path.join(history.root, 'only-git')
       mkdirSync(onlyGit)
       symlinkSync(which.stdout.trim(), path.join(onlyGit, 'git'))
