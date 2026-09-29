@@ -1,4 +1,4 @@
-# ADR 0012: Definição de topo sem membros vira alias de tipo, e a factory dela devolve o valor inteiro
+# ADR 0013: Definição de topo sem membros vira alias de tipo, e a factory dela devolve o valor inteiro
 
 ## Contexto
 
@@ -10,7 +10,7 @@
 
 ## Decisão
 
-- **Uma definição de topo sem membros vira `export type X = …`.** Sem membros quer dizer: sem `properties` e sem `allOf`, e com um `type` que não é `object`, ou um objeto só com `additionalProperties` (`is_type_alias()`, `scripts/marketo_codegen.py:200-212`). O lado direito sai do mesmo `type_name()` das propriedades (`render_alias()`, `scripts/generate-marketo-definitions.py:139-151`):
+- **Uma definição de topo sem membros vira `export type X = …`.** Sem membros quer dizer: sem `properties` e sem `allOf`, e com um `type` que não é `object`, ou um objeto só com `additionalProperties` (`is_type_alias()`, `scripts/marketo_codegen.py:200-212`). O lado direito sai do mesmo `type_name()` das propriedades (`render_alias()`, `scripts/generate-marketo-definitions.py:142-154`):
   - `LeadAttribute2SearchableFields` é `Array<string>`;
   - `Person` e `CustomObject` são `Record<string, unknown>`.
 - **A factory de uma definição que não é objeto devolve o valor inteiro**, e o override troca o valor inteiro: `makeX(override?: X): X`, com `return override ?? <valor>` (`render_value()`, `scripts/generate-marketo-factories.py:184-210`). A de `LeadAttribute2SearchableFields` devolve de 1 a 3 palavras do faker.

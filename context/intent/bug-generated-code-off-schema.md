@@ -30,7 +30,7 @@ O plano vigente e o Approve estão na #24. O dono seguiu todas as recomendaçõe
   - Uma resposta 2xx primitiva ganha um valor faker e sai como JSON.
   - Cada header declarado na resposta 2xx é enviado, com o `mockRequestId()` num header string.
   - A saída é regenerada, nunca editada à mão ([gerar e conferir](../knowledge/patterns/generate-and-check.md)).
-- **O multipart, ao lado do gerado.** Um interceptor global em `src/multipart/`, importado no `AppModule` pelo `MultipartModule`, roda o `multer().any()` com memória como storage e põe cada arquivo em `req.body[<nome da parte>]`, sem limite de tamanho ([ADR 0009](../decisions/0009-behaviour-beside-generated-code.md), [ADR 0010](../decisions/0010-loopback-only-by-default.md), [ADR 0013](../decisions/0013-multipart-read-by-a-hand-written-interceptor.md)). O plano dizia middleware, e o dono trocou pelo interceptor no Build (Resultados).
+- **O multipart, ao lado do gerado.** Um interceptor global em `src/multipart/`, importado no `AppModule` pelo `MultipartModule`, roda o `multer().any()` com memória como storage e põe cada arquivo em `req.body[<nome da parte>]`, sem limite de tamanho ([ADR 0009](../decisions/0009-behaviour-beside-generated-code.md), [ADR 0010](../decisions/0010-loopback-only-by-default.md), [ADR 0014](../decisions/0014-multipart-read-by-a-hand-written-interceptor.md)). O plano dizia middleware, e o dono trocou pelo interceptor no Build (Resultados).
 
 ## Critérios de aceite
 
@@ -41,7 +41,7 @@ O plano vigente e o Approve estão na #24. O dono seguiu todas as recomendaçõe
 - [x] `test/multipart.e2e-spec.ts` prova que as partes de cada operação `multipart/form-data` chegam ao service, inclusive o `file` de `POST /bulk/v1/leads.json` como arquivo com o conteúdo enviado, e que os POSTs urlencoded e JSON continuam recebendo o corpo. Ele falha antes da correção e passa depois.
 - [x] A saída regenerada vem num commit só dela, e um segundo `npm run generate:all` não muda nenhum arquivo.
 - [x] `npm run check`, o e2e e o gate passam.
-- [x] O intent, as ADRs 0012 e 0013, as ADRs 0006 e 0007 e o changelog registram a regra e a medição.
+- [x] O intent, as ADRs 0013 e 0014, as ADRs 0006 e 0007 e o changelog registram a regra e a medição.
 
 ## Decisões relacionadas
 
@@ -49,8 +49,8 @@ O plano vigente e o Approve estão na #24. O dono seguiu todas as recomendaçõe
 - [ADR 0006: DTOs como interfaces TypeScript](../decisions/0006-dtos-as-typescript-interfaces.md)
 - [ADR 0007: Factories faker com overrides e seed](../decisions/0007-faker-factories-with-overrides-and-seed.md)
 - [ADR 0009: Comportamento ao lado do código gerado, nunca dentro](../decisions/0009-behaviour-beside-generated-code.md)
-- [ADR 0012: Definição de topo sem membros vira alias de tipo, e a factory dela devolve o valor inteiro](../decisions/0012-top-level-definitions-without-members-as-type-aliases.md)
-- [ADR 0013: O corpo multipart lido num interceptor escrito à mão](../decisions/0013-multipart-read-by-a-hand-written-interceptor.md)
+- [ADR 0013: Definição de topo sem membros vira alias de tipo, e a factory dela devolve o valor inteiro](../decisions/0013-top-level-definitions-without-members-as-type-aliases.md)
+- [ADR 0014: O corpo multipart lido num interceptor escrito à mão](../decisions/0014-multipart-read-by-a-hand-written-interceptor.md)
 
 ## Resultados
 
@@ -59,12 +59,12 @@ Os commits seguem os passos do plano: o intent (`34e3bbb`), os testes que falham
 - **A causa raiz se confirmou nos quatro casos.** Na cabeça dos testes (`9a37fc7`), antes da correção, o `test/response-schema.e2e-spec.ts` falhou em 10 das 390 linhas: as 2 de `searchableFields`, a de `invite.json` e as 7 de Data Ingestion. O `test/multipart.e2e-spec.ts` falhou em 10 das 15: as 9 operações com partes e o teste do CSV. Os controles urlencoded e JSON e as 2 operações sem parte já passavam.
 - **As 10 exceções do documento se confirmaram**, pelo nome da definição e da propriedade: as 9 operações que respondem `ObjectMetaData` e `landingPage/{id}/fullContent.json`. O teste exige as 10, e nenhuma outra.
 - **Os geradores.**
-  - `is_type_alias()` decide quem vira alias (`scripts/marketo_codegen.py:200-212`), e `render_alias()` o emite (`scripts/generate-marketo-definitions.py:139-151`);
+  - `is_type_alias()` decide quem vira alias (`scripts/marketo_codegen.py:200-212`), e `render_alias()` o emite (`scripts/generate-marketo-definitions.py:142-154`);
   - `render_value()` gera a factory que devolve o valor inteiro (`scripts/generate-marketo-factories.py:184-210`);
   - `PRIMITIVE_VALUES` dá o valor de uma resposta primitiva (`scripts/generate-marketo-resources.py:49-54`), e o controller a manda como JSON (`:307-308,317-325`);
   - `success_headers()` e `header_value()` (`:145-158`) dão os headers ao controller (`:291-303`).
 - **A saída.** `npm run generate:all` mudou 11 arquivos gerados: as 3 definições (`LeadAttribute2SearchableFields`, `Person` e `CustomObject`), a factory de `LeadAttribute2SearchableFields`, o controller e o service de `user-management` e 5 controllers de Data Ingestion, com os 7 POSTs. Um segundo `generate:all` não mudou nada, e o `check:all` passa.
-- **O multipart saiu num interceptor, não num middleware.** O middleware do plano, registrado com `forRoutes('{*splat}')`, virou uma rota do Express que casa com toda requisição, e os e2e da #6 e da #8 falharam. O dono escolheu no Build o interceptor global, `APP_INTERCEPTOR`, com o mesmo `multer().any()` e o mesmo resultado em `req.body` ([ADR 0013](../decisions/0013-multipart-read-by-a-hand-written-interceptor.md), [anti-pattern](../knowledge/anti-patterns/nest-middleware-as-a-catch-all-route.md)). Um corpo multipart malformado responde 400, com um teste.
+- **O multipart saiu num interceptor, não num middleware.** O middleware do plano, registrado com `forRoutes('{*splat}')`, virou uma rota do Express que casa com toda requisição, e os e2e da #6 e da #8 falharam. O dono escolheu no Build o interceptor global, `APP_INTERCEPTOR`, com o mesmo `multer().any()` e o mesmo resultado em `req.body` ([ADR 0014](../decisions/0014-multipart-read-by-a-hand-written-interceptor.md), [anti-pattern](../knowledge/anti-patterns/nest-middleware-as-a-catch-all-route.md)). Um corpo multipart malformado responde 400, com um teste.
 - **As dependências.** O `multer` entrou em `dependencies` com `^2.2.0`, e o lockfile continua na 2.2.0. Um `npm install multer` sem versão teria puxado a 2.4.0 e duplicado o pacote. O `@types/multer` 2.3.0 entrou em `devDependencies`, porque o multer 2.2 não traz tipos. O plano não o citava.
 - **O teste de conformidade falhou de forma intermitente até escutar uma vez só.** Com o supertest abrindo uma porta efêmera por requisição, 2 de 5 execuções tiveram uma operação a mais com `403 text/plain`, vinda de outro processo local ([anti-pattern](../knowledge/anti-patterns/a-new-ephemeral-port-per-supertest-request.md)). Com o app escutando em `127.0.0.1` numa porta só, as execuções seguintes deram sempre as mesmas 10 falhas antes da correção.
 - **As citações.** Os geradores, o `AppModule`, o `package.json` e o lockfile mudaram de tamanho. Um remapeamento pelo diff desde `e5b013c` moveu 103 citações de `context/` cujas linhas não mudaram. As 6 que caíam em trechos mudados foram refeitas à mão, e amostras das movidas foram conferidas contra o código. O changelog e os intents ficaram como estavam, e as citações deste intent levam `e5b013c:`.

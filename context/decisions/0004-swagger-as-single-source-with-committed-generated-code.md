@@ -41,12 +41,14 @@
   | `marketo-swagger-mapi.json` | `swagger-mapi.json`, `3443bb3` | `de325567504f39c4e7474384dc261033fd3f536096e88da378ed30231404dd47` |
   | `marketo-swagger-user.json` | `swagger-user.json`, `9834ad0` | `ce79d278e9bfa0029d0087a70701aee232c205d81c1f839262a75e77586d46e3` |
 
+  Esta tabela é a origem medida na #6. Desde a #19, o sha256 vigente de cada documento está no registro da área dele, `src/<área>/<área>-definitions/swagger-source.ts`, que o `check:all` confere ([ADR 0012](0012-swagger-source-record-per-area.md)).
+
   O `swagger-asset.json` de lá tem 508.267 bytes e sha256 `a0f334687b3d99ae421a45cdda028e8de3ed6ade59db1fb8fd75f6822edf7fd0`. Os bytes diferem só em espaços no fim de duas linhas, e o JSON é o mesmo, inclusive na ordem das chaves: a cópia daqui fica, e nenhum código gerado muda por ela.
 - **Três geradores e um módulo comum.**
 
   | Gerador | Lê, por alvo | Emite, por área |
   | --- | --- | --- |
-  | [`generate-marketo-definitions.py`](../../scripts/generate-marketo-definitions.py) | `Target.schemas()`: `definitions` no Swagger 2.0, `components.schemas` no OpenAPI 3 (`scripts/marketo_codegen.py:57-60`) | Uma interface por schema em `src/<área>/<área>-definitions/` ([ADR 0006](0006-dtos-as-typescript-interfaces.md)) |
+  | [`generate-marketo-definitions.py`](../../scripts/generate-marketo-definitions.py) | `Target.schemas()`: `definitions` no Swagger 2.0, `components.schemas` no OpenAPI 3 (`scripts/marketo_codegen.py:57-60`) | Uma interface por schema em `src/<área>/<área>-definitions/` ([ADR 0006](0006-dtos-as-typescript-interfaces.md)) e, na raiz dela, o registro `swagger-source.ts` ([ADR 0012](0012-swagger-source-record-per-area.md)) |
   | [`generate-marketo-resources.py`](../../scripts/generate-marketo-resources.py) | `operations()`, agrupadas pela primeira tag (`scripts/generate-marketo-resources.py:448-465`) | Um módulo por tag em `src/<área>/resources/` e o `<Área>ResourcesModule` ([ADR 0005](0005-nestjs-express-one-module-per-tag.md)) |
   | [`generate-marketo-factories.py`](../../scripts/generate-marketo-factories.py) | `Target.schemas()` | Uma factory por schema em `src/<área>/<área>-mocks/`, e o `seed.ts` e o `request-id.ts` comuns em `src/mocks/` ([ADR 0007](0007-faker-factories-with-overrides-and-seed.md)) |
 
@@ -58,15 +60,15 @@
 - **Todo gerador tem `--check`.** `check_output` (`scripts/marketo_codegen.py:394-423`) gera em `.codegen-tmp`, com o cabeçalho, formata, compara arquivo a arquivo com os arquivos da árvore e aponta todo `*.ts` a mais na pasta. Qualquer diferença sai com 1. O Prettier dos geradores não lê arquivo de ignore nenhum, e o gerador sai com 2 quando não consegue formatar ([ADR 0011](0011-generators-format-without-ignore-files.md)): o Prettier 3 lê o `.gitignore`, onde `/.codegen-tmp/` está (`.gitignore:41`), e pularia a cópia que o `--check` compara. A #6 o fazia ler só o `.prettierignore` (`3ddceb4:scripts/marketo_codegen.py:229-233`).
 - **Todo arquivo gerado se declara gerado.** Ele abre com duas linhas `//` que dizem o gerador, o documento de origem e o comando de regenerar, que numa área avulsa leva as flags `--swagger` e `--area`; os 3 arquivos de `src/mocks`, comuns às áreas, citam só o gerador (`generated_header()`, `scripts/marketo_codegen.py:235-268`), e o `--check` confere o cabeçalho como o resto do arquivo (#7).
 - **Os scripts npm.** `generate:{definitions,resources,factories,all}` e `check:{definitions,resources,factories,all}` (`package.json:11-18`), todos com todos os alvos por padrão. `check:all` encadeia os três `--check` (`package.json:18`).
-- **O código gerado é commitado**: 1.083 arquivos.
+- **O código gerado é commitado**: 1.088 arquivos, contados os 5 registros `swagger-source.ts` da #19.
 
   | Área | Definições | Resources | Mocks |
   | --- | ---: | ---: | ---: |
-  | `src/asset` | 255 | 70 | 257 |
-  | `src/data-ingestion` | 15 | 16 | 17 |
-  | `src/identity` | 2 | 4 | 4 |
-  | `src/lead-database` | 175 | 58 | 177 |
-  | `src/user-management` | 12 | 4 | 14 |
+  | `src/asset` | 256 | 70 | 257 |
+  | `src/data-ingestion` | 16 | 16 | 17 |
+  | `src/identity` | 3 | 4 | 4 |
+  | `src/lead-database` | 176 | 58 | 177 |
+  | `src/user-management` | 13 | 4 | 14 |
   | `src/mocks` | | | 3 |
 
 - **Ninguém edita a saída à mão.** O [README](../../README.md#mock-marketo-api) diz que as pastas geradas de cada área nunca se editam à mão: regenera-se (`README.md:61-62`). Ele indica `npm run check:all` para o CI (`README.md:80-81`) e diz como registrar um documento novo (`README.md:91-93`).
@@ -101,10 +103,10 @@ O histórico não registra alternativas para a decisão de `0c8e760`. As linhas 
   - uma mudança num Swagger vira um `npm run generate:all` e um diff revisável, só na área dele;
   - o `check:all` diz, num comando, se o código commitado ainda é o que os cinco documentos geram. Medido na #6: ele sai com 0 num clone limpo, e o `generate:all` não muda nenhum arquivo;
   - um documento novo entra com uma linha em `TARGETS`, um módulo escrito à mão e uma linha no `AppModule`;
-  - o sha256 de cada documento, registrado aqui, diz qual cópia gerou o código de `main`.
+  - o registro `swagger-source.ts` de cada área diz qual cópia do documento gerou o código de `main`, e o `check:all` o confere desde a #19 ([ADR 0012](0012-swagger-source-record-per-area.md)).
 - **Mais difícil**:
   - **O `npm run check` pede python3 e o `npm ci`.** Desde a #7, ele termina com o `check:all`, e o CI com ele. Sem o Prettier ou sem node, os geradores saem com 2 e dizem o que falta ([ADR 0008](0008-toolchain.md), [ADR 0011](0011-generators-format-without-ignore-files.md)).
-  - Nenhum arquivo gerado diz de qual sha256 veio: o cabeçalho cita o documento, não a cópia, e o critério do project intent "O mock registra qual cópia do Swagger o gerou (sha256)" continua aberto (#19).
+  - O cabeçalho de gerado cita o documento, não a cópia: o sha256 fica só no registro da área, e uma mudança num Swagger pede regenerar para o `check:all` passar, até a de um espaço ([ADR 0012](0012-swagger-source-record-per-area.md)).
   - **O código gerado se afasta do schema em três formas (#24).** Um schema de topo sem `properties` vira interface vazia: `Person` e `CustomObject`, do Data Ingestion, que só têm `additionalProperties`, e `LeadAttribute2SearchableFields`, de Lead Database, que é um array de strings. Por isso o `describe2.json` responde `searchableFields: [{}, {}, {}]` ([ADR 0006](0006-dtos-as-typescript-interfaces.md)). Uma resposta 2xx que não é `$ref` nem array de `$ref` sai sem corpo, como a string do `invite.json` de User Management. E nenhum gerador emite os headers de resposta, como o `X-Request-Id` dos 202 do Data Ingestion. A verificação adversarial da #6 mediu as três.
   - **O suporte a OpenAPI 3 cobre o que o documento de Data Ingestion usa.** Medido pela verificação adversarial da #6, com um documento de teste:
     - um parâmetro por `$ref`, ou com `in: cookie`, derruba o gerador de resources;
@@ -114,7 +116,7 @@ O histórico não registra alternativas para a decisão de `0c8e760`. As linhas 
     Nenhum dos cinco documentos usa essas formas.
   - **O Data Ingestion muda de host.** Na Adobe ele fica em `https://mkto-ingestion-api.adobe.io` (o `servers` do documento); no mock, no mesmo servidor das outras áreas, sob `/subscriptions/{munchkinId}/...`.
   - **Nada confere que uma área registrada tem pasta, nem o contrário.** Um alvo tirado de `TARGETS` deixa a pasta dele para trás sem que o `check:all` acuse, e uma área gerada com `--swagger` e `--area` fica fora do `check:all`. O e2e da #6 pega uma área registrada que não responde (`test/marketo-api.e2e-spec.ts`).
-- **Qual cópia de assets vale é decisão em aberto** do [project intent](../intent/project-intent.md#decisões-em-aberto): `ced6c339…` aqui, `ff7ec628…` no lite-campaign. A escolha sai de um diff nas rotas que o consumidor usa. Até lá, esta ADR registra a cópia que gerou o código de `main`, sem dizer que ela é a certa.
+- **Qual cópia de assets vale é decisão em aberto** do [project intent](../intent/project-intent.md#decisões-em-aberto): `ced6c339…` aqui, `ff7ec628…` no lite-campaign. A escolha sai de um diff nas rotas que o consumidor usa. Até lá, o registro de cada área diz a cópia que gerou o código de `main`, sem dizer que ela é a certa.
 
 ## Relacionados
 
@@ -138,4 +140,5 @@ O histórico não registra alternativas para a decisão de `0c8e760`. As linhas 
 - **Atualizado**: 2026-09-26 (Fase: Learn), a fonte passou a ser um documento por área, com os cinco alvos de `TARGETS`, a origem e o sha256 de cada documento, o suporte a OpenAPI 3 e o `check:all` passando (#6)
 - **Atualizado**: 2026-09-26 (Fase: Learn), a citação do gerador de resources seguiu as linhas novas depois que a #8 acrescentou a ordem das rotas (#8)
 - **Atualizado**: 2026-09-26 (Fase: Build), todo arquivo gerado abre com o cabeçalho de gerado, o gerador sai com 2 quando não consegue formatar e o `check:all` roda no `npm run check`; o Prettier dos geradores deixou de ler o `.prettierignore`, pela [ADR 0011](0011-generators-format-without-ignore-files.md), e as citações do `marketo_codegen.py` e dos arquivos gerados seguiram as linhas novas (#7)
+- **Atualizado**: 2026-09-28 (Fase: Build), o sha256 vigente de cada documento passou para o registro `swagger-source.ts` da área, que o `check:all` confere, a tabela de origem ficou como a medida na #6 e a contagem de arquivos gerados foi a 1.088 ([ADR 0012](0012-swagger-source-record-per-area.md)) (#19)
 - **Atualizado**: 2026-09-28 (Fase: Build), as citações dos geradores, do `AppModule`, do `package.json` e do lockfile seguiram as linhas novas (#24)

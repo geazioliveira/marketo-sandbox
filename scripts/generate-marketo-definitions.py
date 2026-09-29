@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import sys
 from pathlib import Path
@@ -17,10 +18,12 @@ from marketo_codegen import (  # noqa: E402
     check_output,
     definition_category as category,
     definition_file as file_name,
+    document_path,
     generated_header,
     is_type_alias,
     pascal_case,
     property_key as property_name,
+    quote,
     reference_name,
     resolve_targets,
     write_output,
@@ -157,12 +160,26 @@ class TypeScriptGenerator:
         return f'./{target_file}' if source_category == target_category else f'../{target_category}/{target_file}'
 
 
+def swagger_source(target: Target) -> str:
+    """The document the area is generated from, written as the header writes it, and the sha256 of
+    its bytes as committed (#19).
+
+    The bytes are hashed as they are, never with their line endings normalised: .gitattributes keeps
+    docs/marketo-swagger-*.json out of every conversion, so every checkout hashes the same bytes.
+    """
+    document = document_path(target.source) or target.source.name
+    digest = hashlib.sha256(target.source.read_bytes()).hexdigest()
+    return f"export const swaggerSource = {{ document: {quote(document)}, sha256: {quote(digest)} }} as const;\n"
+
+
 def generated_files(target: Target, definitions: dict[str, dict[str, Any]]) -> dict[Path, str]:
     generator = TypeScriptGenerator(definitions)
-    return {
+    files = {
         target.definitions / category(name) / f"{file_name(name)}.ts": generator.render(name, schema)
         for name, schema in definitions.items()
     }
+    files[target.definitions / "swagger-source.ts"] = swagger_source(target)
+    return files
 
 
 def main() -> int:

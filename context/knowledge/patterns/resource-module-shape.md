@@ -44,7 +44,7 @@ Cada tag de um Swagger vira, na área dele, uma pasta com um module, um controll
 - **Os parâmetros vêm do `in` do Swagger** (`scripts/generate-marketo-resources.py:38-44,127-131`):
   - `path` vira `@Param('<nome>')`;
   - `query` vira `@Query('<nome>')`;
-  - `body`, e o `requestBody` do OpenAPI 3, viram `@Body()` (`scripts/marketo_codegen.py:130-143`), e `formData` vira `@Body('<nome>')`. Num corpo `multipart/form-data`, o `MultipartInterceptor`, escrito à mão, põe cada parte em `req.body` antes de o Nest ler os parâmetros, e uma parte de arquivo chega como o arquivo que o multer leu ([ADR 0013](../../decisions/0013-multipart-read-by-a-hand-written-interceptor.md), #24);
+  - `body`, e o `requestBody` do OpenAPI 3, viram `@Body()` (`scripts/marketo_codegen.py:130-143`), e `formData` vira `@Body('<nome>')`. Num corpo `multipart/form-data`, o `MultipartInterceptor`, escrito à mão, põe cada parte em `req.body` antes de o Nest ler os parâmetros, e uma parte de arquivo chega como o arquivo que o multer leu ([ADR 0014](../../decisions/0014-multipart-read-by-a-hand-written-interceptor.md), #24);
   - `header` vira `@Headers('<nome>')`.
 
   Os obrigatórios vêm antes dos opcionais (`scripts/generate-marketo-resources.py:272-277`).

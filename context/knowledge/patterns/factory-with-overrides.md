@@ -36,7 +36,7 @@ Toda definição de um Swagger tem uma factory `makeX(overrides)` que devolve um
   ```
 
 - **Todo campo é preenchido**, obrigatório ou não (`scripts/generate-marketo-factories.py:231-239`). Só fica de fora um `$ref` que voltaria à própria definição (abaixo).
-- **Um schema de topo sem `properties` não tem campo a preencher.** `Person` e `CustomObject`, do Data Ingestion, só têm `additionalProperties`: o tipo é `Record<string, unknown>`, e a factory devolve só os overrides, `{}` por padrão (`src/data-ingestion/data-ingestion-mocks/factories/person.ts`). `LeadAttribute2SearchableFields`, de Lead Database, é um array de strings: a factory devolve o override inteiro ou de 1 a 3 palavras do faker, `makeLeadAttribute2SearchableFields(override?)` (`src/lead-database/lead-database-mocks/factories/lead-attribute2-searchable-fields.ts`, [ADR 0012](../../decisions/0012-top-level-definitions-without-members-as-type-aliases.md), #24).
+- **Um schema de topo sem `properties` não tem campo a preencher.** `Person` e `CustomObject`, do Data Ingestion, só têm `additionalProperties`: o tipo é `Record<string, unknown>`, e a factory devolve só os overrides, `{}` por padrão (`src/data-ingestion/data-ingestion-mocks/factories/person.ts`). `LeadAttribute2SearchableFields`, de Lead Database, é um array de strings: a factory devolve o override inteiro ou de 1 a 3 palavras do faker, `makeLeadAttribute2SearchableFields(override?)` (`src/lead-database/lead-database-mocks/factories/lead-attribute2-searchable-fields.ts`, [ADR 0013](../../decisions/0013-top-level-definitions-without-members-as-type-aliases.md), #24).
 
 ### Como os campos são preenchidos
 
@@ -101,7 +101,7 @@ Toda definição de um Swagger tem uma factory `makeX(overrides)` que devolve um
 - [0004: O Swagger como fonte única, com o código gerado commitado](../../decisions/0004-swagger-as-single-source-with-committed-generated-code.md)
 - [0006: DTOs como interfaces TypeScript](../../decisions/0006-dtos-as-typescript-interfaces.md)
 - [0009: Comportamento ao lado do código gerado, nunca dentro](../../decisions/0009-behaviour-beside-generated-code.md)
-- [0012: Definição de topo sem membros vira alias de tipo, e a factory dela devolve o valor inteiro](../../decisions/0012-top-level-definitions-without-members-as-type-aliases.md)
+- [0013: Definição de topo sem membros vira alias de tipo, e a factory dela devolve o valor inteiro](../../decisions/0013-top-level-definitions-without-members-as-type-aliases.md)
 
 ## Status
 
