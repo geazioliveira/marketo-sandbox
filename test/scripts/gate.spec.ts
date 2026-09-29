@@ -509,9 +509,12 @@ async function pathWithFailingGit(
   name: string,
   failWhen: string,
 ): Promise<string> {
-  const realGit = (
-    await exec('sh', ['-c', 'command -v git'], { timeout: 60_000 })
-  ).stdout.trim()
+  const which = await exec('sh', ['-c', 'command -v git'], {
+    timeout: 60_000,
+  })
+  if (which.status !== 0)
+    throw new Error(`command -v git falhou: ${which.stderr}`)
+  const realGit = which.stdout.trim()
   const dir = path.join(repo.bin, '..', name)
   mkdirSync(dir, { recursive: true })
   writeFileSync(
@@ -860,6 +863,8 @@ describe.concurrent('scripts/gate.mjs', () => {
       const which = await exec('sh', ['-c', 'command -v git'], {
         timeout: 60_000,
       })
+      if (which.status !== 0)
+        throw new Error(`command -v git falhou: ${which.stderr}`)
       const onlyGit = path.join(repo.root, 'only-git')
       mkdirSync(onlyGit)
       symlinkSync(which.stdout.trim(), path.join(onlyGit, 'git'))

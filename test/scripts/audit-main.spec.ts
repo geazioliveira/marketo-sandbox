@@ -3764,6 +3764,8 @@ describe.concurrent('scripts/audit-main.mjs', () => {
       const which = await exec('sh', ['-c', 'command -v git'], {
         timeout: 60_000,
       })
+      if (which.status !== 0)
+        throw new Error(`command -v git falhou: ${which.stderr}`)
       const onlyGit = path.join(history.root, 'only-git')
       mkdirSync(onlyGit)
       symlinkSync(which.stdout.trim(), path.join(onlyGit, 'git'))

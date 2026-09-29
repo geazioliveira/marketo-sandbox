@@ -715,6 +715,7 @@ process.stdout.write(readFileSync(process.env.FAKE_GH_FIXTURE, 'utf8'))
       env: repo.env(),
       timeout: spawnTimeout,
     })
+    expect(again.status, again.stderr).toBe(0)
     expect(JSON.parse(again.stdout)).toEqual({ viewer: 'y' })
   })
 
