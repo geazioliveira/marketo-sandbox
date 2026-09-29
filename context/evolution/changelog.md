@@ -38,6 +38,7 @@ Uma entrada por mudança mergeada, da mais nova para a mais antiga, escrita no p
   - o `require` do topo de um helper é lido;
   - num spec, o timeout tirado de um parâmetro não é lido;
   - o spec vira disparador pelo uso como valor, e não pelo import.
+- **Da décima primeira revisão, cada processo é comparado com o caso ou hook em que roda.** Isso inclui o timeout próprio de um `it`/`test`, o de um hook e o `hookTimeout`, que no vitest é de 10 s. Só o próprio timeout de quem chama conta como repasse.
 - **A regra virou pattern:** [Timeouts de testes que disparam processos](../knowledge/patterns/process-test-timeouts.md).
 
 ### Números medidos
