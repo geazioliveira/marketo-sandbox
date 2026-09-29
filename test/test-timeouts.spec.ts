@@ -178,12 +178,6 @@ function namedTimeouts(file: ts.SourceFile): Map<string, number> {
   return names
 }
 
-/** What a file imports: each local name with its module, and the namespaces. */
-interface Imports {
-  named: Map<string, { module: string; imported: string }>
-  namespaces: Map<string, string>
-}
-
 /** The module a `import(…)` or `require(…)` call loads, if it is one. */
 function loadedModule(expression: ts.Expression): string | undefined {
   const call = unwrap(expression)
@@ -197,50 +191,6 @@ function loadedModule(expression: ts.Expression): string | undefined {
     call.expression.kind === ts.SyntaxKind.ImportKeyword ||
     (ts.isIdentifier(call.expression) && call.expression.text === 'require')
   return loads ? call.arguments[0].text : undefined
-}
-
-/**
- * What `file` imports, by static import, `await import(…)` or `require(…)`
- * into a name. A type-only import or name starts nothing and is left out;
- * `a as b` is read under `b`; every import of a module counts.
- */
-function importsOf(file: ts.SourceFile): Imports {
-  const imports: Imports = { named: new Map(), namespaces: new Map() }
-  for (const node of walk(file)) {
-    if (
-      ts.isImportDeclaration(node) &&
-      ts.isStringLiteral(node.moduleSpecifier) &&
-      node.importClause !== undefined &&
-      !node.importClause.isTypeOnly
-    ) {
-      const module = node.moduleSpecifier.text
-      const { name, namedBindings } = node.importClause
-      if (name !== undefined) imports.namespaces.set(name.text, module)
-      if (namedBindings !== undefined && ts.isNamespaceImport(namedBindings))
-        imports.namespaces.set(namedBindings.name.text, module)
-      if (namedBindings !== undefined && ts.isNamedImports(namedBindings))
-        for (const element of namedBindings.elements)
-          if (!element.isTypeOnly)
-            imports.named.set(element.name.text, {
-              module,
-              imported: (element.propertyName ?? element.name).text,
-            })
-    }
-    if (ts.isVariableDeclaration(node) && node.initializer !== undefined) {
-      const module = loadedModule(node.initializer)
-      if (module === undefined) continue
-      if (ts.isIdentifier(node.name))
-        imports.namespaces.set(node.name.text, module)
-      else if (ts.isObjectBindingPattern(node.name))
-        for (const element of node.name.elements)
-          if (ts.isIdentifier(element.name))
-            imports.named.set(element.name.text, {
-              module,
-              imported: (element.propertyName ?? element.name).getText(),
-            })
-    }
-  }
-  return imports
 }
 
 /** How a file's names resolve. */
@@ -362,14 +312,16 @@ function bindingOf(id: ts.Identifier, scope: Scope): Binding | undefined {
     (ts.getCombinedNodeFlags(declaration) & ts.NodeFlags.Const) !== 0
       ? declaration.initializer
       : undefined
-  const topLevel =
-    scope.module === undefined ? undefined : topLevelDeclaration(declaration)
-  if (topLevel !== undefined)
-    return { kind: 'toplevel', name: topLevel, initializer: constant }
+  // A loaded module is a namespace wherever it is declared, the top of a
+  // test/support/ module included.
   if (ts.isVariableDeclaration(declaration) && declaration.initializer) {
     const module = loadedModule(declaration.initializer)
     if (module !== undefined) return { kind: 'namespace', module }
   }
+  const topLevel =
+    scope.module === undefined ? undefined : topLevelDeclaration(declaration)
+  if (topLevel !== undefined)
+    return { kind: 'toplevel', name: topLevel, initializer: constant }
   return constant === undefined
     ? undefined
     : { kind: 'const', initializer: constant }
@@ -485,7 +437,12 @@ function valueOf(
     initializer === undefined || seen.has(initializer)
       ? undefined
       : valueOf(initializer, scope, new Set([...seen, initializer]))
-  if (binding?.kind === 'parameter') return next(binding.initializer)
+  // A parameter's default is the timeout only when no caller gives another.
+  // In test/support/, a caller's timeout is read at its call of the helper;
+  // a spec's own functions are not followed that way, so there a timeout
+  // taken from a parameter is not read.
+  if (binding?.kind === 'parameter')
+    return scope.module === undefined ? undefined : next(binding.initializer)
   if (binding?.kind === 'const' || binding?.kind === 'toplevel')
     return next(binding.initializer)
   if (binding?.kind === 'import' && scope.supportOf(binding.module) === 'hooks')
@@ -657,10 +614,11 @@ const unread = (call: ts.CallExpression, text: string): string =>
 
 /** A name in a type, which starts nothing: `repo: HookRepo`, `typeof runHook`. */
 const inType = (node: ts.Node): boolean =>
-  ts.isTypeReferenceNode(node.parent) ||
-  ts.isTypeQueryNode(node.parent) ||
-  ts.isQualifiedName(node.parent) ||
-  ts.isExpressionWithTypeArguments(node.parent)
+  node.parent !== undefined &&
+  (ts.isTypeReferenceNode(node.parent) ||
+    ts.isTypeQueryNode(node.parent) ||
+    ts.isQualifiedName(node.parent) ||
+    ts.isExpressionWithTypeArguments(node.parent))
 
 /**
  * Every place `root` uses a process function (a child_process one, or a
@@ -1152,14 +1110,15 @@ function auditSpec(
       : undefined
   const required = (target: Target | undefined): boolean =>
     target?.kind === 'api' || helperOf(target)?.needsTimeout === true
-  const imports = importsOf(file)
-  /** The spawning helpers the spec names, and whether it names child_process. */
+  /**
+   * The spawning helpers the spec uses, and whether it uses child_process:
+   * as values, outside types. An import never used, or used only in a type
+   * (`typeof runHook`), starts nothing.
+   */
   const used = new Map<string, Helper>()
-  let startsProcesses = [
-    ...[...imports.named.values()].map(({ module }) => module),
-    ...imports.namespaces.values(),
-  ].some(isChildProcess)
+  let startsProcesses = false
   for (const node of walk(file)) {
+    if (inType(node)) continue
     const target = targetOf(node, scope)
     const helper = helperOf(target)
     if (target?.kind === 'api') startsProcesses = true
@@ -1318,38 +1277,6 @@ const unreadAt = (at: string, callee: string, text: string): string =>
 
 const indirectAt = (at: string, what: string): string =>
   `${at}: ${what} fora de uma chamada direta: o guarda não segue o processo; chame a função pelo nome`
-
-describe('importsOf', () => {
-  it('reads aliases, merges repeated imports and leaves type-only names out', () => {
-    const imports = importsOf(
-      ts.createSourceFile(
-        'x.ts',
-        lines(
-          `import { exec as run, type HookRepo } from '../support/temp-repo'`,
-          `import type { TempRepo } from '../support/temp-repo'`,
-          `import {\n  projectRoot,\n} from '../support/temp-repo'`,
-          `import * as cp from 'node:child_process'`,
-          `const { spawnSync: sync } = await import('node:child_process')`,
-          `const repo = require('../support/temp-repo')`,
-        ),
-        ts.ScriptTarget.Latest,
-        true,
-      ),
-    )
-    expect([...imports.named]).toEqual([
-      ['run', { module: '../support/temp-repo', imported: 'exec' }],
-      [
-        'projectRoot',
-        { module: '../support/temp-repo', imported: 'projectRoot' },
-      ],
-      ['sync', { module: 'node:child_process', imported: 'spawnSync' }],
-    ])
-    expect([...imports.namespaces]).toEqual([
-      ['cp', 'node:child_process'],
-      ['repo', '../support/temp-repo'],
-    ])
-  })
-})
 
 const tempRepoSource = lines(
   `import { spawn } from 'node:child_process'`,
@@ -1567,6 +1494,18 @@ describe('analyzeSupport', () => {
     ).toEqual([unreadAt('temp-repo.ts:3', 'spawnSync', 'limit')])
   })
 
+  it('reads child_process loaded at the top of a helper', () => {
+    expect(
+      analyze([
+        'temp-repo',
+        lines(
+          `const cp = require('node:child_process')`,
+          `export const run = () => cp.spawnSync('git')`,
+        ),
+      ]).problems,
+    ).toEqual([untimedAt('temp-repo.ts:2', 'cp.spawnSync')])
+  })
+
   it('reads a private function of the module like an export', () => {
     const { helpers, problems } = analyze([
       'temp-repo',
@@ -1728,8 +1667,16 @@ describe('auditSpec', () => {
     expect(audit(`import { projectRoot } from '../support/temp-repo'`)).toEqual(
       [],
     )
-    // Importing a helper that spawns, and never using it, starts nothing.
+    // Importing a process function, and never using it or using it only
+    // in a type, starts nothing.
     expect(audit(`import { TempRepo } from '../support/temp-repo'`)).toEqual([])
+    expect(audit(`import { spawnSync } from 'node:child_process'`)).toEqual([])
+    expect(
+      audit(
+        `import { runHook } from '../support/hooks'`,
+        `type Runner = typeof runHook`,
+      ),
+    ).toEqual([])
     // A child_process call inside a string is a script for a child, not a
     // process this spec starts; a type-only import starts nothing either.
     expect(audit("const script = `require('node:child_process')`")).toEqual([])
@@ -1739,9 +1686,12 @@ describe('auditSpec', () => {
   })
 
   it('asks a spec that spawns for a case timeout, and only a real one', () => {
-    expect(audit(`import { spawnSync } from 'node:child_process'`)).toEqual([
-      noCase('node:child_process'),
-    ])
+    expect(
+      audit(
+        `import { spawnSync } from 'node:child_process'`,
+        `spawnSync('git', [], { timeout: 1_000 })`,
+      ),
+    ).toEqual([noCase('node:child_process')])
     expect(
       audit(
         `import {\n  exec as run,\n  projectRoot,\n} from '../support/temp-repo'`,
@@ -2009,6 +1959,18 @@ describe('auditSpec', () => {
         `await exec('git')`,
       ),
     ).toEqual([untimedAt('x.spec.ts:4', 'exec')])
+  })
+
+  it('does not read a timeout from a parameter of a function of the spec', () => {
+    // A caller can give run() any timeout: the default is not the one.
+    expect(
+      audit(
+        `import { spawn } from 'node:child_process'`,
+        `function run({ timeout = 90_000 } = {}) { return spawn('git', [], { timeout }) }`,
+        `run({ timeout: 180_000 })`,
+        `vi.setConfig({ testTimeout: 120_000 })`,
+      ),
+    ).toEqual([unreadAt('x.spec.ts:2', 'spawn', 'timeout')])
   })
 
   it('accepts a case timeout above every process timeout, by number or by name', () => {
