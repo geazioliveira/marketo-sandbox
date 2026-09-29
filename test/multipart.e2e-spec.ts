@@ -208,6 +208,24 @@ describe('multipart requests (e2e)', () => {
     expect(spy).not.toHaveBeenCalled()
   })
 
+  it.each([
+    ['with a boundary', 'multipart/form-data; boundary=empty'],
+    ['without a boundary', 'multipart/form-data'],
+  ])(
+    'an empty multipart body %s still reaches the handler',
+    async (_case, contentType) => {
+      const [spy] = spyOnHandler(app, 'activateSmartCampaignUsingPOST')
+
+      await request(origin)
+        .post('/rest/asset/v1/smartCampaign/1/activate.json')
+        .set('Content-Type', contentType)
+        .set('Content-Length', '0')
+        .expect(200)
+
+      expect(spy).toHaveBeenCalledTimes(1)
+    },
+  )
+
   it('a urlencoded formData request still reaches its handler', async () => {
     const [spy] = spyOnHandler(app, 'addSmartListRuleUsingPOST')
 

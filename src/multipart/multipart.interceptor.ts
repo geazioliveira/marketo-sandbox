@@ -39,6 +39,12 @@ export class MultipartInterceptor implements NestInterceptor {
   ): Promise<Observable<unknown>> {
     const http = context.switchToHttp()
     const request = http.getRequest<Request>()
+    // A multipart header with an empty body, as a client sends when it posts
+    // the documented `consumes` with nothing to upload, has no parts to read.
+    // multer would fail on it with "Unexpected end of form".
+    if (request.headers['content-length'] === '0') {
+      return next.handle()
+    }
     await new Promise<void>((resolve, reject) =>
       readParts(request, http.getResponse<Response>(), (error: unknown) =>
         error
