@@ -42,6 +42,39 @@ Uma entrada por mudança mergeada, da mais nova para a mais antiga, escrita no p
 
 ---
 
+## 2026-09-28: O npm ci não manda mais o evento de instalação do Scarf (#20)
+
+**Fase**: Learn
+**Tipo**: Feature
+
+### O que foi construído / corrigido
+
+- **O `package.json` desliga o Scarf.** `"scarfSettings": {"enabled": false}`, no fim do arquivo, faz o `postinstall` do `@scarf/scarf`, que chega por `@nestjs/swagger` → `swagger-ui-dist`, desistir do `POST /package-event/install` para `scarf.sh`. Vale no CI, no dono e nos agentes, sem variável de ambiente.
+- **Um caso novo em `test/runtime-defaults.spec.ts`** exige o valor `false`, e falha sem a chave ou com a string `"false"`.
+- **A ADR 0010 passou a decidir a instalação,** com três alternativas rejeitadas: a variável no `check.yml`, o `--ignore-scripts` e a guarda dos scripts de instalação no lockfile. O project intent cita a #20 no critério da rede.
+
+### Números medidos
+
+- Numa cópia do `package.json` e do `package-lock.json` num caminho sem espaço, com `SCARF_LOCAL_PORT` apontado para um listener local: o `npm ci` com o `package.json` de `e5b013c` mandou 1 `POST /package-event/install` (623 bytes); com o da branch, 0.
+- `npm install --package-lock-only` não mudou o lockfile.
+- **`npm run check`**: 3.748 testes em 21 arquivos, com 1 caso novo em `test/runtime-defaults.spec.ts`; o e2e com 33. Na máquina do dono, com a média de carga entre 18 e 25, três rodadas deixaram de 9 a 17 testes vermelhos, sempre em `test/hooks/` e em `test/scripts/` (`gate.spec.ts`, `audit-main.spec.ts`), em arquivos e casos diferentes a cada rodada, por `git` estourando o prazo dentro dos hooks. O `runtime-defaults` passou nas três, e o lint, o `format:check`, o typecheck, o `check:context`, o build e o `check:all` também. A prova da cadeia inteira é o `Qualidade / check` da PR.
+
+### Decisões tomadas
+
+- [0010: O mock só fala com a própria máquina por padrão](../decisions/0010-loopback-only-by-default.md): a instalação entrou na decisão, com uma linha `Atualizado`.
+- As respostas do Approve da #20: registrar na ADR 0010, sem ADR nova; nenhuma variável no `check.yml`; e sem a guarda dos scripts de instalação no lockfile, que o dono achou controle demais.
+
+### Patterns aplicados ou criados
+
+- [Revisão classificada por risco](../knowledge/patterns/risk-classified-review.md): NORMAL, porque a PR só toca o `package.json`, um teste fora de `test/scripts/` e `context/`
+
+### Aprendizados / surpresas
+
+- **Num caminho com espaço, o Scarf desiste em silêncio.** O `report.js` roda `cd <caminho> && npm ls` sem aspas, e num caminho como o do checkout do dono, que tem um espaço, o `cd` quebra. O checkout do dono não mandava o evento; o CI mandava. Uma medição de rede no checkout do dono engana, e por isso a medição foi feita numa cópia fora dele.
+- **Uma chave nova no topo do `package.json` desloca as citações `package.json:N`.** No topo, o `scarfSettings` teria deslocado umas 20 citações das ADRs, do glossário e de um pattern. No fim do arquivo, nenhuma mudou.
+
+---
+
 ## 2026-09-28: O issue-link só relata a revisão do Copilot e as threads, e o veredito fresco é só o gate (#30)
 
 **Fase**: Learn
