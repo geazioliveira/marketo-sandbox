@@ -20,7 +20,6 @@ DOCS = ROOT / "docs"
 SRC = ROOT / "src"
 #: Seeding and request-id helpers are area-agnostic, so every target shares one copy.
 SHARED_MOCKS = SRC / "mocks"
-TEMP = ROOT / ".codegen-tmp"
 
 
 @dataclass(frozen=True)
@@ -212,9 +211,9 @@ def quote(value: Any) -> str:
     return json.dumps(value)
 
 
-PRETTIER = ROOT / "node_modules" / ".bin" / "prettier"
-#: What `prettier --write` prints for each file it processed; a file it skipped prints nothing.
-_PROCESSED = re.compile(r"^(?P<path>.+) \d+ms(?: \(unchanged\))?(?: \(cached\))?$")
+#: The Prettier the formatter imports: this repository's own, never one found above it (#29).
+PRETTIER = ROOT / "node_modules" / "prettier" / "index.mjs"
+FORMATTER = ROOT / "scripts" / "format-generated.mjs"
 
 
 def document_path(source: Path) -> str | None:
@@ -267,8 +266,8 @@ def _is_node(folder: Path) -> bool:
 
 def _node_environment() -> dict[str, str]:
     """NODE_BIN when set, else the node already in PATH, else the ~/.nvm one whose folder name sorts
-    last, else a system one. The chosen folder goes first in PATH as an absolute path, because Prettier
-    runs with cwd=ROOT and a relative entry would find another node, or none (#7)."""
+    last, else a system one. The chosen folder goes first in PATH as an absolute path, because the
+    formatter runs with cwd=ROOT and a relative entry would find another node, or none (#7)."""
     environment = os.environ.copy()
     in_path = shutil.which("node", path=environment.get("PATH"))
     if environment.get("NODE_BIN"):
@@ -292,22 +291,13 @@ def _node_environment() -> dict[str, str]:
 
 
 def prettier_environment() -> dict[str, str]:
-    """Stop the run unless Prettier and a Node.js to run it are available."""
-    if not PRETTIER.exists():
+    """Stop the run unless Prettier and a Node.js to run the formatter are available."""
+    if not PRETTIER.is_file():
         raise _cannot_format(
-            f"Prettier not found at {PRETTIER.relative_to(ROOT)}: run `npm ci` first. "
-            "The generators never write or compare unformatted code."
-        )
-    if not os.access(PRETTIER, os.X_OK):
-        raise _cannot_format(
-            f"Prettier at {PRETTIER.relative_to(ROOT)} is not executable: run `npm ci` again. "
+            f"Prettier not found at {PRETTIER.parent.relative_to(ROOT)}: run `npm ci` first. "
             "The generators never write or compare unformatted code."
         )
     environment = _node_environment()
-    # Prettier's own variables change what its CLI prints: PRETTIER_EXPERIMENTAL_CLI formats without
-    # the per-file report the check below reads, and PRETTIER_PERF_REPEAT neither writes nor reports.
-    for key in [key for key in environment if key.startswith("PRETTIER_")]:
-        del environment[key]
     if shutil.which("node", path=environment.get("PATH")) is None:
         raise _cannot_format(
             "Node.js not found in NODE_BIN, PATH, ~/.nvm, /usr/local/bin or /opt/homebrew/bin: Prettier needs it. "
@@ -316,102 +306,114 @@ def prettier_environment() -> dict[str, str]:
     return environment
 
 
-def format_with_prettier(paths: list[Path], output: Path | None = None) -> None:
-    """Format `paths` in place, or stop the run if Prettier did not process every one of them.
+def format_files(files: dict[Path, str]) -> dict[Path, str]:
+    """Every file formatted in memory by scripts/format-generated.mjs, with the Prettier config of its
+    destination path: the one `npm run format:check` reads there (#29).
 
-    Prettier 3 reads .gitignore and .prettierignore by default and skips an ignored file without a
-    word and with exit 0, even one named on the command line. `--ignore-path=` turns both off, so no
-    ignore rule reaches generated code, and the per-file report proves nothing else skipped a path.
-    `--no-color` keeps that report parseable under CI=true. `--no-require-pragma` and the whole-file
-    range beat a config that would process a file without formatting it (#7). `output` names the
-    folder write_output() already rewrote, so a failure says how to restore it.
+    Nothing is written here. write_outputs() and check_outputs() call this before they delete, write
+    or compare anything, so a Prettier that fails leaves the output as it was, and generate and
+    --check format the same text for the same path.
     """
-    if not paths:
-        return
-    restore = ""
-    if output:
-        folder = output.relative_to(ROOT).as_posix()
-        undo = (
-            f"restore it with `git checkout -- {folder} && git clean -fd -- {folder}`"
-            if output in _registered_outputs()
-            else "delete it"
-        )
-        restore = f" {folder} was rewritten unformatted: run the generator again once Prettier works, or {undo}."
-    relative = [path.relative_to(ROOT).as_posix() for path in paths]
-    command = [str(PRETTIER), "--write", "--no-color", "--no-require-pragma", "--range-start=0", "--range-end=Infinity"]
+    if not files:
+        return {}
+    environment = prettier_environment()
+    node = shutil.which("node", path=environment.get("PATH"))
+    ordered = sorted(files)
+    payload = json.dumps([{"path": path.relative_to(ROOT).as_posix(), "content": files[path]} for path in ordered])
     try:
         result = subprocess.run(
-            [*command, "--ignore-path=", *relative],
+            [str(node), str(FORMATTER)],
+            input=payload,
             cwd=ROOT,
-            env=prettier_environment(),
+            env=environment,
             capture_output=True,
             text=True,
         )
     except OSError as error:
-        raise _cannot_format(f"Prettier could not run: {error}.{restore}") from None
+        raise _cannot_format(f"Prettier could not run: {error}.") from None
     sys.stderr.write(result.stderr)
     if result.returncode != 0:
-        raise _cannot_format(f"Prettier failed with exit code {result.returncode}.{restore}")
-    reported = {match["path"] for line in result.stdout.splitlines() if (match := _PROCESSED.match(line))}
-    skipped = [path for path in relative if path not in reported]
-    if skipped:
         raise _cannot_format(
-            f"Prettier did not process {len(skipped)} of {len(paths)} files, e.g. {skipped[0]}: they are "
-            "missing from the per-file report of `prettier --write`, so an ignore rule, a Prettier config "
-            f"or a Prettier CLI that reports differently is skipping them.{restore}"
+            f"Prettier failed with exit code {result.returncode}. "
+            "The generators never write or compare unformatted code, so nothing was touched."
         )
+    try:
+        formatted = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        formatted = None
+    if not isinstance(formatted, list) or len(formatted) != len(ordered) or not all(
+        isinstance(text, str) for text in formatted
+    ):
+        raise _cannot_format(
+            f"{FORMATTER.relative_to(ROOT)} did not return one formatted text for each of the "
+            f"{len(ordered)} files, so nothing was touched."
+        )
+    return dict(zip(ordered, formatted))
 
 
-def write_output(output: Path, files: dict[Path, str], label: str, header: str) -> int:
-    """Write generated files, each opening with `header`, then normalise them with prettier."""
-    prettier_environment()  # fail before deleting anything
-    if output.exists():
-        refuse_foreign_files(output, files)
-        shutil.rmtree(output)
-    for path, content in files.items():
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(header + content)
-    format_with_prettier(sorted(files), output)
-    print(f"Generated {len(files)} {label}.")
+@dataclass(frozen=True)
+class Output:
+    """One output folder of a generator run: the files it holds, what to call them, and their header."""
+
+    folder: Path
+    files: dict[Path, str]
+    label: str
+    header: str
+
+
+def _formatted(outputs: list[Output]) -> dict[Path, str]:
+    """Every file of the run, `header` included, formatted in one call to the formatter."""
+    return format_files(
+        {path: output.header + content for output in outputs for path, content in output.files.items()}
+    )
+
+
+def write_outputs(outputs: list[Output]) -> int:
+    """Replace each output folder with its generated files, formatted.
+
+    Every file of the run is formatted first, and every folder is cleared for writing next: a Prettier
+    that fails, or a folder that holds a file no generator writes, stops the run before any folder of
+    it is deleted (#29).
+    """
+    formatted = _formatted(outputs)
+    for output in outputs:
+        if output.folder.exists():
+            refuse_foreign_files(output.folder, output.files)
+    for output in outputs:
+        if output.folder.exists():
+            shutil.rmtree(output.folder)
+        for path in output.files:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(formatted[path])
+        print(f"Generated {len(output.files)} {output.label}.")
     return 0
 
 
-def check_output(output: Path, files: dict[Path, str], label: str, header: str) -> int:
-    """Compare committed files against freshly generated, prettier-formatted output, `header` included."""
-    prettier_environment()  # fail before comparing anything
-    if TEMP.exists():
-        shutil.rmtree(TEMP)
-    try:
-        staged: dict[Path, Path] = {}
-        for path, content in files.items():
-            temporary = TEMP / path.relative_to(ROOT)
-            temporary.parent.mkdir(parents=True, exist_ok=True)
-            temporary.write_text(header + content)
-            staged[path] = temporary
-        format_with_prettier(sorted(staged.values()))
-
-        stale = [
-            path
-            for path, temporary in staged.items()
-            if not path.is_file() or path.read_text() != temporary.read_text()
-        ]
-        unexpected = [path for path in output.rglob("*.ts") if path not in files] if output.exists() else []
+def check_outputs(outputs: list[Output]) -> int:
+    """Compare each output folder with the text write_outputs() would write there, `header` included."""
+    formatted = _formatted(outputs)
+    status = 0
+    for output in outputs:
+        stale = [path for path in output.files if not path.is_file() or path.read_text() != formatted[path]]
+        unexpected = (
+            [path for path in output.folder.rglob("*.ts") if path not in output.files]
+            if output.folder.exists()
+            else []
+        )
         if stale or unexpected:
             for path in (stale + unexpected)[:10]:
                 print(f"  stale or unexpected: {path.relative_to(ROOT)}")
-            print(f"{label} are stale: {len(stale)} missing or changed, {len(unexpected)} unexpected.")
-            return 1
-        print(f"All {len(files)} {label} are current.")
-        return 0
-    finally:
-        if TEMP.exists():
-            shutil.rmtree(TEMP)
+            print(f"{output.label} are stale: {len(stale)} missing or changed, {len(unexpected)} unexpected.")
+            status = 1
+        else:
+            print(f"All {len(output.files)} {output.label} are current.")
+    return status
 
 
 def custom_target(swagger: Path, area: str) -> Target:
     """A target for an unregistered document, confined to its own folder directly under `src/`.
 
-    write_output() deletes an area's output folders before writing, so `--area` may never name
+    write_outputs() deletes an area's output folders before writing, so `--area` may never name
     a registered area, the shared mocks, a path that leaves `src/`, or a folder holding anything
     but the three generator folders. Those three stay allowed, so the generators can fill the
     area one after another, regenerate it and check it.

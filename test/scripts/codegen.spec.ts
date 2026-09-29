@@ -25,10 +25,11 @@ import { exec, projectRoot } from '../support/temp-repo'
  * that one target needs: the identity document (6 KB), its committed output,
  * the shared mocks, the Prettier config and the .gitignore (#7).
  *
- * The scripts are copied, never linked: ROOT is the resolved parent of
- * scripts/, so a link would point the generator back at this repository and
- * `generate` would rewrite it. node_modules is linked, and only when the case
- * wants Prettier present. An empty .git marks the tree as a project root, so
+ * The scripts, with the formatter they call (scripts/format-generated.mjs,
+ * #29), are copied, never linked: ROOT is the resolved parent of scripts/, so
+ * a link would point the generator back at this repository and `generate`
+ * would rewrite it. node_modules is linked, and only when the case wants
+ * Prettier present. An empty .git marks the tree as a project root, so
  * Prettier never climbs out of it looking for an .editorconfig.
  */
 
@@ -54,14 +55,11 @@ interface Tree {
   remove: () => void
 }
 
-function tree({
-  prettier = true,
-  wrapped = false,
-}: { prettier?: boolean; wrapped?: boolean } = {}): Tree {
+function tree({ prettier = true }: { prettier?: boolean } = {}): Tree {
   const root = realpathSync(mkdtempSync(path.join(tmpdir(), 'codegen-spec-')))
   const remove = () => rmSync(root, { recursive: true, force: true })
   try {
-    fill(root, { prettier, wrapped })
+    fill(root, { prettier })
   } catch (error) {
     remove()
     throw error
@@ -69,10 +67,7 @@ function tree({
   return { root, dir: path.join(root, 'repo'), remove }
 }
 
-function fill(
-  root: string,
-  { prettier, wrapped }: { prettier: boolean; wrapped: boolean },
-): void {
+function fill(root: string, { prettier }: { prettier: boolean }): void {
   const dir = path.join(root, 'repo')
   mkdirSync(path.join(dir, 'scripts'), { recursive: true })
   mkdirSync(path.join(dir, '.git'))
@@ -88,31 +83,7 @@ function fill(
       recursive: true,
     })
   }
-  if (wrapped) {
-    // The regression the guard exists for: Prettier run without --ignore-path.
-    const bin = path.join(dir, 'node_modules', '.bin')
-    mkdirSync(bin, { recursive: true })
-    const cli = path.join(
-      projectRoot,
-      'node_modules',
-      'prettier',
-      'bin',
-      'prettier.cjs',
-    )
-    writeFileSync(
-      path.join(bin, 'prettier'),
-      `#!/usr/bin/env node
-const args = process.argv.slice(2)
-const at = args.indexOf('--ignore-path')
-if (at >= 0) args.splice(at, 2)
-const eq = args.findIndex((arg) => arg.startsWith('--ignore-path='))
-if (eq >= 0) args.splice(eq, 1)
-const run = require('node:child_process').spawnSync(process.execPath, [${JSON.stringify(cli)}, ...args], { stdio: 'inherit' })
-process.exit(run.status ?? 1)
-`,
-      { mode: 0o755 },
-    )
-  } else if (prettier)
+  if (prettier)
     symlinkSync(
       path.join(projectRoot, 'node_modules'),
       path.join(dir, 'node_modules'),
@@ -201,7 +172,7 @@ function plantSentinels(at: Tree): void {
 }
 
 async function withTree(
-  options: { prettier?: boolean; wrapped?: boolean },
+  options: { prettier?: boolean },
   body: (at: Tree) => Promise<void>,
 ): Promise<void> {
   const at = tree(options)
@@ -258,9 +229,7 @@ describe.concurrent('the generators, on the identity target (#7)', () => {
     (generator) =>
       withTree({ prettier: false }, async (at) => {
         const run = await generate(at, generator, '--check')
-        expect(run.out).toMatch(
-          /Prettier not found at node_modules\/\.bin\/prettier/,
-        )
+        expect(run.out).toMatch(/Prettier not found at node_modules\/prettier/)
         expect(run.out).toMatch(/npm ci/)
         expect(run.out).not.toMatch(/stale|current/)
         expect(run.status, run.out).toBe(2)
@@ -268,20 +237,21 @@ describe.concurrent('the generators, on the identity target (#7)', () => {
   )
 
   it.each(generators)(
-    '%s: a Prettier that is not executable fails on Prettier, never as stale',
+    '%s: a Prettier that cannot load fails on Prettier, never as stale',
     (generator) =>
       withTree({ prettier: false }, async (at) => {
-        const bin = path.join(at.dir, 'node_modules', '.bin')
-        mkdirSync(bin, { recursive: true })
-        writeFileSync(path.join(bin, 'prettier'), '#!/usr/bin/env node\n', {
-          mode: 0o644,
-        })
+        const prettier = path.join(at.dir, 'node_modules', 'prettier')
+        mkdirSync(prettier, { recursive: true })
+        writeFileSync(
+          path.join(prettier, 'index.mjs'),
+          "throw new Error('a broken install')\n",
+        )
         plantSentinels(at)
         const before = snapshot(at)
         for (const args of [['--check'], []]) {
           const run = await generate(at, generator, ...args)
           expect(run.out).toMatch(
-            /Prettier at node_modules\/\.bin\/prettier is not executable/,
+            /Prettier at node_modules\/prettier could not load: a broken install/,
           )
           expect(run.out).not.toMatch(/Traceback|stale|current/)
           expect(run.status, run.out).toBe(2)
@@ -304,19 +274,18 @@ describe.concurrent('the generators, on the identity target (#7)', () => {
       }),
   )
 
-  // Prettier 3 reads .gitignore and .prettierignore by default and skips, in
-  // silence, any path they match, even one passed on the command line. The
-  // checker stages its copy inside the tree, so an ignore rule over that copy
-  // left it unformatted and every file looked stale: #6 took .gitignore out of
-  // the way, and .prettierignore still could. `/*` then `!/src/` matches every
-  // top-level path but src/, wherever the checker stages its copy.
+  // The Prettier CLI reads .gitignore and .prettierignore by default and skips,
+  // in silence, any path they match, even one passed on the command line: #6
+  // and #7 fought that on the copy the check staged inside the tree. The
+  // formatter uses the API, which reads no ignore file (#29). `/*` then
+  // `!/src/` matches every top-level path but src/.
   it.each(
     generators.flatMap((generator) =>
       ['.gitignore', '.prettierignore'].map(
         (file) => [generator, file] as const,
       ),
     ),
-  )('%s: --check formats its copy even when %s matches it', (generator, file) =>
+  )('%s: --check formats even when %s matches it', (generator, file) =>
     withTree({}, async (at) => {
       appendFileSync(path.join(at.dir, file), '\n/*\n!/src/\n')
       const run = await generate(at, generator, '--check')
@@ -346,38 +315,6 @@ describe.concurrent('the generators, on the identity target (#7)', () => {
       expect(run.status).toBe(1)
     }))
 
-  // The wrapped Prettier drops --ignore-path=, so the default ignore files are
-  // back: the copied .gitignore (its /.codegen-tmp/ line), or a .prettierignore
-  // once that line is gone.
-  it.each(
-    generators.flatMap((generator) =>
-      ['.gitignore', '.prettierignore'].map(
-        (file) => [generator, file] as const,
-      ),
-    ),
-  )(
-    '%s: a Prettier run that skips files through %s fails loud, never as stale',
-    (generator, file) =>
-      withTree({ wrapped: true }, async (at) => {
-        const gitignore = path.join(at.dir, '.gitignore')
-        if (file === '.gitignore') appendFileSync(gitignore, '\n/*\n!/src/\n')
-        else {
-          writeFileSync(
-            gitignore,
-            readFileSync(gitignore, 'utf8').replace(/^\/\.codegen-tmp\/$/m, ''),
-          )
-          writeFileSync(
-            path.join(at.dir, '.prettierignore'),
-            '/.codegen-tmp/\n',
-          )
-        }
-        const run = await generate(at, generator, '--check')
-        expect(run.out).toMatch(/Prettier did not process \d+ of \d+ files/)
-        expect(run.out).not.toMatch(/stale|current/)
-        expect(run.status, run.out).toBe(2)
-      }),
-  )
-
   it.each(generators)(
     '%s: generate formats src/ even when .prettierignore matches it',
     (generator) =>
@@ -391,7 +328,7 @@ describe.concurrent('the generators, on the identity target (#7)', () => {
   )
 
   // A config that makes Prettier process a file without formatting it: the
-  // command line beats it (--no-require-pragma, the whole-file range).
+  // formatter forces requirePragma off and the whole-file range over it.
   it.each(generators)(
     '%s: a config with requirePragma and a range still formats the output',
     (generator) =>
@@ -415,7 +352,9 @@ describe.concurrent('the generators, on the identity target (#7)', () => {
       }),
   )
 
-  // The experimental CLI formats without the per-file report the guard reads.
+  // Prettier's own variables change what its CLI does (the experimental CLI
+  // formats without the per-file report the CLI guard read until #29); the
+  // formatter goes through the API, and they change nothing.
   it.each(generators)(
     '%s: a PRETTIER_EXPERIMENTAL_CLI in the environment changes nothing',
     (generator) =>

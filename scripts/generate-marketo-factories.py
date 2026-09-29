@@ -12,11 +12,12 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from marketo_codegen import (  # noqa: E402
+    Output,
     SHARED_MOCKS,
     Target,
     add_target_arguments,
     camel_case,
-    check_output,
+    check_outputs,
     definition_category,
     definition_file,
     generated_header,
@@ -25,7 +26,7 @@ from marketo_codegen import (  # noqa: E402
     reference_name,
     relative_import,
     resolve_targets,
-    write_output,
+    write_outputs,
 )
 
 
@@ -311,24 +312,17 @@ def main() -> int:
     add_target_arguments(parser)
     arguments = parser.parse_args()
 
-    shared = shared_files()
-    header = generated_header(Path(__file__).name)
-    status = (
-        check_output(SHARED_MOCKS, shared, "shared mock helpers", header)
-        if arguments.check
-        else write_output(SHARED_MOCKS, shared, "shared mock helpers", header)
-    )
-
-    for target in resolve_targets(arguments):
-        files = generated_files(target)
-        label = f"{target.key} mock factories"
-        header = generated_header(Path(__file__).name, target)
-        status |= (
-            check_output(target.mocks, files, label, header)
-            if arguments.check
-            else write_output(target.mocks, files, label, header)
+    outputs = [Output(SHARED_MOCKS, shared_files(), "shared mock helpers", generated_header(Path(__file__).name))]
+    outputs += [
+        Output(
+            target.mocks,
+            generated_files(target),
+            f"{target.key} mock factories",
+            generated_header(Path(__file__).name, target),
         )
-    return status
+        for target in resolve_targets(arguments)
+    ]
+    return check_outputs(outputs) if arguments.check else write_outputs(outputs)
 
 
 if __name__ == "__main__":

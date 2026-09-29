@@ -13,9 +13,10 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from marketo_codegen import (  # noqa: E402
+    Output,
     Target,
     add_target_arguments,
-    check_output,
+    check_outputs,
     definition_category as category,
     definition_file as file_name,
     document_path,
@@ -25,7 +26,7 @@ from marketo_codegen import (  # noqa: E402
     quote,
     reference_name,
     resolve_targets,
-    write_output,
+    write_outputs,
 )
 
 
@@ -170,17 +171,16 @@ def main() -> int:
     add_target_arguments(parser)
     arguments = parser.parse_args()
 
-    status = 0
-    for target in resolve_targets(arguments):
-        files = generated_files(target, target.schemas())
-        label = f"{target.key} TypeScript definitions"
-        header = generated_header(Path(__file__).name, target)
-        status |= (
-            check_output(target.definitions, files, label, header)
-            if arguments.check
-            else write_output(target.definitions, files, label, header)
+    outputs = [
+        Output(
+            target.definitions,
+            generated_files(target, target.schemas()),
+            f"{target.key} TypeScript definitions",
+            generated_header(Path(__file__).name, target),
         )
-    return status
+        for target in resolve_targets(arguments)
+    ]
+    return check_outputs(outputs) if arguments.check else write_outputs(outputs)
 
 
 if __name__ == "__main__":
