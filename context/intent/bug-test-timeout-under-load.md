@@ -92,7 +92,11 @@ A branch `fix/23-test-timeout-child-process` nasce de `origin/main` em `e5b013c`
     - o vitest passou a ser reconhecido também por namespace;
     - um namespace re-exportado por um helper passou a ser recusado;
     - o `realGit` passou a conferir o `status` do `command -v git`;
-    - o pattern deixou de listar como limite o timeout dado a `it`, que o guarda lê.
+    - o pattern deixou de listar como limite o timeout dado a `it`, que o guarda lê;
+  - `e65c63c`, do achado que a décima quarta revisão deu só no resumo:
+    - a fixture em tupla `[fn, { timeout }]` passou a ser lida com o timeout dela;
+    - uma função passou a ser seguida até o caso também por alias e por método de objeto literal;
+    - o método de classe ficou registrado como limite no pattern.
 - **O guarda foi conferido por mutação e pela contagem.** As 19 chamadas sem timeout que ele acusou em `09974a8` são as mesmas que um script à parte contou. Ele reconhece como disparadores 15 specs: os de `test/hooks/`, menos `budget`, `settings` e `shell`, que carregam as libs no mesmo processo, e os de `test/scripts/`, menos `drift` e `forms-parity`. Com o `testTimeout` do `check-context.spec.ts` baixado para 30 s, ele recusa o arquivo citando `:183` e `:216`.
 - **A causa raiz se confirmou, e era a menor parte do problema.** O descompasso existia, mas a medição mostrou que a carga derruba a suíte por outras causas.
 - **Medido** em `37864d8`, numa worktree destacada com `npm ci` feito: uma rodada sozinha e cinco rodadas de duas `npx vitest run` ao mesmo tempo, com load average entre 16 e 26 no início de cada uma:
@@ -125,4 +129,4 @@ A branch `fix/23-test-timeout-child-process` nasce de `origin/main` em `e5b013c`
 
 - **Criado**: 2026-09-28 (Fase: Intent), do plano vigente na issue #23 (#23)
 - **Status**: Resolved
-- **Atualizado**: 2026-09-29 (Fase: Build), das treze revisões do Copilot na PR #61: o guarda confere o timeout de cada chamada de processo, lendo o código com o parser do TypeScript, e as 19 chamadas sem timeout ganharam um (#23)
+- **Atualizado**: 2026-09-29 (Fase: Build), das catorze revisões do Copilot na PR #61: o guarda confere o timeout de cada chamada de processo, lendo o código com o parser do TypeScript, e as 19 chamadas sem timeout ganharam um (#23)

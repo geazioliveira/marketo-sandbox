@@ -47,6 +47,7 @@ Uma entrada por mudança mergeada, da mais nova para a mais antiga, escrita no p
   - o vitest é reconhecido por namespace;
   - um namespace re-exportado é recusado;
   - o `realGit` confere o `status`.
+- **Da décima quarta revisão, a fixture em tupla é lida,** e uma função é seguida por alias e por método de objeto.
 - **A regra virou pattern:** [Timeouts de testes que disparam processos](../knowledge/patterns/process-test-timeouts.md).
 
 ### Números medidos
