@@ -56,7 +56,14 @@ A branch `fix/23-test-timeout-child-process` nasce de `origin/main` em `e5b013c`
     - vale o último `vi.setConfig`;
     - os módulos JavaScript de `test/support/` passaram a ser lidos;
     - a suíte inteira passou com 3.792 de 3.792, com load average perto de 12;
-  - `6ef5ccb`, do achado que a quinta revisão do Copilot só deu no resumo: o guarda resolvia os nomes pela grafia no arquivo inteiro, e um `const spawnTimeout = 1_000` numa função vizinha mudava o `spawnTimeout` importado. Os nomes passaram a ser resolvidos pelo binder do TypeScript (um `Program` em memória, sem lib e sem resolver módulos), no escopo léxico de cada uso. Uma quinta mutação, o `testTimeout` do `gate.spec.ts` baixado para 60 s, também fica vermelha.
+  - `6ef5ccb`, do achado que a quinta revisão do Copilot só deu no resumo: o guarda resolvia os nomes pela grafia no arquivo inteiro, e um `const spawnTimeout = 1_000` numa função vizinha mudava o `spawnTimeout` importado. Os nomes passaram a ser resolvidos pelo binder do TypeScript (um `Program` em memória, sem lib e sem resolver módulos), no escopo léxico de cada uso. Uma quinta mutação, o `testTimeout` do `gate.spec.ts` baixado para 60 s, também fica vermelha;
+  - `b0171fe`, da sexta revisão do Copilot:
+    - as funções privadas dos helpers e as chamadas soltas no topo de um módulo de `test/support/` passaram a ser analisadas;
+    - o alias de toda função que dispara processo passou a ser recusado, inclusive o das que têm timeout padrão;
+    - um spec de `src/` que importa `../../test/support/…` passou a ser lido;
+    - só o `vi` do vitest conta.
+
+    O pattern registra o limite que sobra: um timeout passado a um método de classe de `test/support/`.
 - **O guarda foi conferido por mutação e pela contagem.** As 19 chamadas sem timeout que ele acusou em `09974a8` são as mesmas que um script à parte contou. Ele reconhece como disparadores 15 specs: os de `test/hooks/`, menos `budget`, `settings` e `shell`, que carregam as libs no mesmo processo, e os de `test/scripts/`, menos `drift` e `forms-parity`. Com o `testTimeout` do `check-context.spec.ts` baixado para 30 s, ele recusa o arquivo citando `:183` e `:216`.
 - **A causa raiz se confirmou, e era a menor parte do problema.** O descompasso existia, mas a medição mostrou que a carga derruba a suíte por outras causas.
 - **Medido** em `37864d8`, numa worktree destacada com `npm ci` feito: uma rodada sozinha e cinco rodadas de duas `npx vitest run` ao mesmo tempo, com load average entre 16 e 26 no início de cada uma:
@@ -89,4 +96,4 @@ A branch `fix/23-test-timeout-child-process` nasce de `origin/main` em `e5b013c`
 
 - **Criado**: 2026-09-28 (Fase: Intent), do plano vigente na issue #23 (#23)
 - **Status**: Resolved
-- **Atualizado**: 2026-09-29 (Fase: Build), das cinco revisões do Copilot na PR #61: o guarda confere o timeout de cada chamada de processo, lendo o código com o parser do TypeScript, e as 19 chamadas sem timeout ganharam um (#23)
+- **Atualizado**: 2026-09-29 (Fase: Build), das seis revisões do Copilot na PR #61: o guarda confere o timeout de cada chamada de processo, lendo o código com o parser do TypeScript, e as 19 chamadas sem timeout ganharam um (#23)
