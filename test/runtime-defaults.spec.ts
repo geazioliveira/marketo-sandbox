@@ -4,7 +4,8 @@ import { defaultHost, defaultPort, listenAddress } from '../src/listen-address'
 
 // By default nothing leaves the machine and the server listens on loopback
 // (#9). The listen address is tested through listenAddress; the telemetry
-// guard is static: it reads package.json and every file under src/.
+// guard is static: it reads package.json and every file under src/. The
+// install is covered too: package.json opts out of @scarf/scarf (#20).
 
 const root = path.resolve(__dirname, '..')
 const read = (file: string): string =>
@@ -68,6 +69,15 @@ describe('no telemetry by default', () => {
       expect(Object.keys(manifest[field] ?? {}), field).not.toContain(
         telemetryPackage,
       )
+  })
+
+  it('@scarf/scarf is opted out of its install event', () => {
+    // swagger-ui-dist pulls in @scarf/scarf, whose postinstall POSTs to
+    // scarf.sh on every npm ci unless the root package.json opts out (#20).
+    const manifest = JSON.parse(read('package.json')) as {
+      scarfSettings?: { enabled?: unknown }
+    }
+    expect(manifest.scarfSettings?.enabled).toBe(false)
   })
 
   it(`no file under src/ imports ${telemetryPackage}`, () => {
