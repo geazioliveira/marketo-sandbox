@@ -43,10 +43,12 @@
 //   number GitHub confirms is an issue, not a pull request;
 // - had every requiredChecks entry green on its head commit when it merged:
 //   the latest run of that job, in a suite of that workflow, that started
-//   before the merge, finished with success before it. The issue-link check
-//   counts only from a suite of issueLinkWorkflowPath run on issueLinkEvent,
-//   which takes the YAML from main; the quality check runs the PR's own
-//   check.yml by design, so its names are all there is to match;
+//   before the merge, finished with success before it. A latest run that had
+//   not concluded at the merge keeps it out of the loop too, under a reason
+//   of its own that gives the last conclusion before the merge (#48). The
+//   issue-link check counts only from a suite of issueLinkWorkflowPath run on
+//   issueLinkEvent, which takes the YAML from main; the quality check runs
+//   the PR's own check.yml by design, so its names are all there is to match;
 // - when it merged at or after reviewRuleSince (#13): had a Copilot review
 //   (copilotReviewOn: the bot by type and database id, a counting state, the
 //   commit the PR's head, a body that is no failure: copilotFailedReview)
@@ -517,12 +519,18 @@ function fromOrigin(suite, { workflow, job }) {
 }
 
 /**
- * Whether `check` was green on the PR's head when it merged: the latest run of
- * that job, in a suite of that workflow from its origin, that started before
- * the merge, and every run that started with it, finished with success before
- * the merge.
+ * How `check` stood on the PR's head when it merged. Of the runs of that job,
+ * in a suite of that workflow from its origin, that started before the merge,
+ * the latest ones decide: green when every one finished with success before
+ * the merge; not green when one finished otherwise before it, or when none
+ * started; in flight when none of them failed before the merge but one had
+ * not concluded at it (#48). `lastConcluded` is the conclusion of the run
+ * that concluded last before the merge, or 'nenhuma': the evidence the
+ * owner needs to triage a run in flight.
+ *
+ * @returns {{ green: boolean, inFlight: boolean, lastConcluded: string }}
  */
-function greenAtMerge(suites, check, mergedAt) {
+function checkAtMerge(suites, check, mergedAt) {
   const { job } = check
   const runs = suites
     .filter((suite) => fromOrigin(suite, check))
@@ -536,11 +544,25 @@ function greenAtMerge(suites, check, mergedAt) {
       completed: Date.parse(run.completedAt ?? ''),
     }))
     .filter((run) => run.started <= mergedAt)
-  if (runs.length === 0) return false
+  const concluded = (run) => run.completed <= mergedAt
+  const done = runs.filter(concluded)
+  const lastAt = Math.max(...done.map((run) => run.completed))
+  const last = done.filter((run) => run.completed === lastAt)
+  const lastConcluded =
+    last.length === 0
+      ? 'nenhuma'
+      : String(
+          last.find((run) => run.conclusion !== 'SUCCESS')?.conclusion ??
+            'SUCCESS',
+        )
+  if (runs.length === 0) return { green: false, inFlight: false, lastConcluded }
   const latest = Math.max(...runs.map((run) => run.started))
-  return runs
-    .filter((run) => run.started === latest)
-    .every((run) => run.conclusion === 'SUCCESS' && run.completed <= mergedAt)
+  const decisive = runs.filter((run) => run.started === latest)
+  const failed = decisive.some(
+    (run) => concluded(run) && run.conclusion !== 'SUCCESS',
+  )
+  const inFlight = !failed && decisive.some((run) => !concluded(run))
+  return { green: !failed && !inFlight, inFlight, lastConcluded }
 }
 
 /** A connection's nodes, and whether GitHub's count says more were left unread. */
@@ -699,11 +721,15 @@ function judgePull(input, sha, pr) {
       `PR #${number}: mais de ${auditChecksPage} check runs numa check suite da head ${short(head)}, não lidos todos`,
     )
   if (!suitesUnread && !runsUnread)
-    for (const check of requiredChecks)
-      if (!greenAtMerge(suiteNodes, check, mergedAt))
-        reasons.push(
-          `PR #${number} mergeada sem ${check.workflow} / ${check.job} verde`,
-        )
+    for (const check of requiredChecks) {
+      const state = checkAtMerge(suiteNodes, check, mergedAt)
+      if (state.green) continue
+      reasons.push(
+        state.inFlight
+          ? `PR #${number} mergeada com ${check.workflow} / ${check.job} em andamento; a última run concluída antes do merge: ${state.lastConcluded}`
+          : `PR #${number} mergeada sem ${check.workflow} / ${check.job} verde`,
+      )
+    }
   // The review rule (#13) holds from reviewRuleSince on, by the merge time
   // GitHub gives with the reviews.
   const reviewMergedAt = Date.parse(String(node.mergedAt ?? ''))
