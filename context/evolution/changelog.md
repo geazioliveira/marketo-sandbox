@@ -36,7 +36,7 @@ Uma entrada por mudança mergeada, da mais nova para a mais antiga, escrita no p
 ### Aprendizados / surpresas
 
 - **Um 200 não prova que o corpo foi lido.** O primeiro teste do form mandava 101 KiB para `snippet/:id/content.json`, que lê `content` e `type` como query, como o Swagger declara, e ignora o corpo. Ele passava com `extended: false`. Só um `vi.spyOn` num service que recebe o `@Body()` mostrou que o corpo chega inteiro. Dos 103 POSTs de assets com form, 45 não leem o corpo.
-- **O `useBodyParser` só vale antes do `init()`.** O Nest registra os parsers padrão no `init()`, e o body-parser pula uma requisição já lida (`node_modules/body-parser/lib/read.js:40-44`). Chamado antes, o parser do limite roda primeiro.
+- **O `useBodyParser` só vale antes do `init()`.** No `init()`, o Nest só registra os parsers padrão que ainda não acha montados pelo nome, `jsonParser` e `urlencodedParser` (`node_modules/@nestjs/platform-express/adapters/express-adapter.js:239-241` e `:391-397`). Chamado antes, o parser do limite substitui o padrão, e a pilha do app tem um parser de cada tipo. Chamado depois, ele entraria atrás do padrão de 100 KiB. A primeira versão do Learn dizia que o padrão entrava e passava adiante uma requisição já lida; a revisão do Copilot na PR #60 apontou o erro, e a pilha medida o confirmou.
 
 ---
 

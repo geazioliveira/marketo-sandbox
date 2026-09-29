@@ -11,8 +11,10 @@ export const bodyLimit = '1mb'
 /**
  * Raises the JSON and urlencoded parsers from the Express default of 100 KiB
  * to bodyLimit, so a 300-lead sync fits (#25). Call it before app.init() or
- * app.listen(): these parsers then run before the defaults Nest registers on
- * init, which see the body already read and pass it on. `extended: true`
+ * app.listen(): on init, Nest mounts its default parsers only when no
+ * middleware named jsonParser or urlencodedParser is mounted yet, so these
+ * replace the defaults. Called after init, it would mount them behind the
+ * 100 KiB defaults, which would still answer 413 first. `extended: true`
  * keeps the urlencoded parsing Nest's default uses.
  */
 export function useBodyLimit(app: NestExpressApplication): void {
