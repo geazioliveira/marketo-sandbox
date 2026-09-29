@@ -2,7 +2,7 @@
 
 ## Contexto
 
-Desde a #29, esta decisão está substituída pela [ADR 0015](0015-generators-format-in-memory-at-the-destination-path.md): os geradores formatam em memória, pela API do Prettier, com a config do caminho de destino. As citações de código abaixo levam o commit `d50fd00`, o último com o CLI.
+Desde a #29, esta decisão está substituída pela [ADR 0015](0015-generators-format-in-memory-at-the-destination-path.md): os geradores formatam em memória, pela API do Prettier, com a config do caminho de destino. As citações de código abaixo levam o commit `d50fd00`, em que a #29 foi medida, ainda com o CLI.
 
 - **A saída passa pelo Prettier.** Os três geradores formatam o que escrevem com o Prettier de `node_modules`, e o `--check` compara a cópia formatada com a saída commitada ([ADR 0004](0004-swagger-as-single-source-with-committed-generated-code.md), [ADR 0008](0008-toolchain.md)). Se um dos dois lados não for formatado, a comparação mente.
 - **O Prettier 3 pula em silêncio um arquivo ignorado, mesmo passado pelo nome.** Ele lê o `.gitignore` e o `.prettierignore` por padrão. No `--write` e no `-l`, sai com 0 sem mensagem; no `--check`, sai com 0 dizendo "All matched files use Prettier code style!" (Prettier 3.9.6, travado no lock; medido na #7).
@@ -64,4 +64,5 @@ Desde a #29, esta decisão está substituída pela [ADR 0015](0015-generators-fo
 - **Criado**: 2026-09-26 (Fase: Build), da pergunta 1 do plano vigente da #7, aceita no Approve do dono (#7)
 - **Status**: Superseded
 - **Substituída por**: [0015: Os geradores formatam em memória, com a config do caminho de destino, antes de tocar na saída](0015-generators-format-in-memory-at-the-destination-path.md)
+- **Atualizado**: 2026-09-28 (Fase: Build), as citações dos geradores, do `AppModule`, do `package.json` e do lockfile seguiram as linhas novas (#24)
 - **Atualizado**: 2026-09-29 (Fase: Build), substituída pela ADR 0015, que resolve os dois limites das Consequências; as citações de código passaram a levar o commit `d50fd00` (#29)

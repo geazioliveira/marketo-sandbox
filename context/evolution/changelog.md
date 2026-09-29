@@ -48,6 +48,53 @@ Uma entrada por mudança mergeada, da mais nova para a mais antiga, escrita no p
 
 ---
 
+## 2026-09-28: O código gerado segue o schema documentado, e um upload multipart chega ao handler (#24)
+
+**Fase**: Learn
+**Tipo**: Bug Fix
+
+### O que foi construído / corrigido
+
+- **Array de topo.** Uma definição de topo sem membros vira alias de tipo: `LeadAttribute2SearchableFields` é `Array<string>`, e `Person` e `CustomObject` são `Record<string, unknown>`. A factory do array devolve o valor inteiro, e `describe2.json` e `programs/members/describe.json` respondem `searchableFields` como array de arrays de string.
+- **Resposta string.** Uma resposta 2xx primitiva ganha um valor do faker e sai como JSON, e `invite.json` responde 200 com uma string JSON.
+- **Headers.** O controller envia os headers que a resposta 2xx declara, e os 7 POSTs de Data Ingestion respondem 202 com um `X-Request-Id` do `mockRequestId()`.
+- **Multipart.** O `MultipartInterceptor`, escrito à mão em `src/multipart/`, lê o corpo com o `multer().any()` e põe cada parte em `req.body`. As 11 operações `multipart/form-data` recebem as partes pelo `@Body()` gerado, sem mudar o gerador, e um corpo malformado responde 400.
+- **Três testes novos.** O `test/response-schema.e2e-spec.ts` confere as 388 operações contra o 2xx documentado: o status, o corpo contra o schema, com toda propriedade declarada, e os headers. As 10 contradições do próprio documento ficam numa lista nomeada. O `test/multipart.e2e-spec.ts` acha as operações multipart pelo documento e confere que cada parte chega ao service. O `test/type-aliases.spec.ts` guarda os aliases com `@ts-expect-error`.
+
+### Números medidos
+
+- **Antes**, na cabeça dos testes (`9a37fc7`): 10 de 390 linhas da conformidade e 10 de 15 do multipart falharam.
+- **A saída**: 11 arquivos gerados mudaram, e um segundo `npm run generate:all` não mudou nenhum.
+- **Depois**: o e2e passa com 441 testes em 5 arquivos. Dos 3.751 testes unitários, 11 falharam por tempo na primeira rodada, com média de carga entre 22 e 25, e passaram quando os 3 arquivos (1.033 testes) rodaram de novo. `check:context`, `build` e `check:all` passam.
+- **As citações**: 103 citações de `context/` seguiram as linhas novas por um remapeamento pelo diff, e 6 foram refeitas à mão.
+- **A verificação adversarial**: 388 operações em 6 variantes, contra a base e a cabeça. Ela achou 3 pontos a corrigir e 6 nits, e todos os 3 entraram na PR.
+
+### Decisões tomadas
+
+- [0013: Definição de topo sem membros vira alias de tipo, e a factory dela devolve o valor inteiro](../decisions/0013-top-level-definitions-without-members-as-type-aliases.md): emenda as ADRs 0006 e 0007.
+- [0014: O corpo multipart lido num interceptor escrito à mão](../decisions/0014-multipart-read-by-a-hand-written-interceptor.md): aplica a ADR 0009 ao transporte, que continua `Proposed`.
+- As cinco respostas do Approve da #24, todas com a recomendação: o parser escrito à mão, o `mockRequestId()` no header, nenhum limite de upload, `Person` e `CustomObject` incluídos e uma PR só. No Build, o dono trocou o middleware do plano pelo interceptor.
+
+### Patterns aplicados ou criados
+
+- [Middleware do Nest para todas as rotas, que vira uma rota](../knowledge/anti-patterns/nest-middleware-as-a-catch-all-route.md), anti-pattern novo
+- [Uma porta efêmera nova a cada requisição do supertest](../knowledge/anti-patterns/a-new-ephemeral-port-per-supertest-request.md), anti-pattern novo
+- [A forma de um módulo de recurso](../knowledge/patterns/resource-module-shape.md) e [Factory com overrides](../knowledge/patterns/factory-with-overrides.md), atualizados
+- [Gerar e conferir](../knowledge/patterns/generate-and-check.md): a saída regenerada num commit só dela
+
+### Aprendizados / surpresas
+
+- **Conferir a forma da resposta achou o que conferir a rota não achava.** O e2e da #6 via uma rota para cada operação, e o da #8, cada requisição no próprio handler. Só ler o corpo contra o schema mostrou o array vazio, a string sem corpo e o header ausente.
+- **Um middleware do Nest para todas as rotas é uma rota do Express.** Os e2e do roteador da #6 e da #8 o pegaram na hora. Rodando o app, nada mudava.
+- **Uma falha intermitente num teste de muitas requisições pode vir de outro processo.** O `403 text/plain`, que o app não sabe dar, apontou para o supertest, não para o seed: ele escuta no curinga e conecta em `127.0.0.1`, onde, no macOS, outro processo na mesma porta responde no lugar do app. O mecanismo foi provado, e a origem daquele `403`, inferida.
+- **O plano publicado no mesmo comando que outra consulta não tirou o marcador do `plan-to-issue`.** O hook só aceita um `gh issue comment` sozinho na linha. Publicar de novo cancelaria o Approve, e o dono apagou o marcador à mão.
+- **Um `npm install <pacote>` sem versão sobe a versão do lockfile.** Para usar direto uma dependência transitiva, declare a versão que o lockfile já tem.
+- **Um e2e que só confere a resposta não guarda um tipo.** Com o gerador de aliases revertido, os dois testes novos e o `check:all` passavam, porque `string[]` cabe em `{}`. Um `@ts-expect-error` num teste é o que faz o `tsc` notar.
+- **Um envelope sem `required` aceita `{}`.** Conferir só as propriedades obrigatórias deixava passar uma factory vazia em 236 das 379 respostas com corpo.
+- **Os testes dos hooks e do gate falham por tempo com a máquina carregada**, como a #30 já registrou. Com a carga acima de 20, 11 falharam, e a nova rodada dos mesmos arquivos passou.
+
+---
+
 ## 2026-09-28: Todo spec que dispara processos espera mais que o processo filho, e um guarda confere (#23)
 
 **Fase**: Learn

@@ -7,11 +7,11 @@
   - Os 220 métodos de serviço ignoram os argumentos (`..._arguments: unknown[]`) e devolvem uma factory sem override (`src/asset/resources/snippets/snippets.service.ts:17-21`).
   - O controller passa os argumentos ao serviço (`src/asset/resources/snippets/snippets.controller.ts:33`), sem pipe: `@Param('id') id: number` não tem `ParseIntPipe` (`:30`).
   - Nenhuma biblioteca de validação é usada ([ADR 0006](0006-dtos-as-typescript-interfaces.md)).
-- **Regenerar apaga a pasta de saída.** O `write_outputs()` roda `shutil.rmtree` em cada pasta de saída antes de escrever (`scripts/marketo_codegen.py:383-385`), e o `check_outputs()` acusa como inesperado todo `*.ts` da pasta de saída que o gerador não emitiu (`:399-403`). Um arquivo escrito à mão em `src/asset/resources/` some no próximo `npm run generate:resources` e reprova o `check:resources`.
+- **Regenerar apaga a pasta de saída.** O `write_outputs()` roda `shutil.rmtree` em cada pasta de saída antes de escrever (`scripts/marketo_codegen.py:398-400`), e o `check_outputs()` acusa como inesperado todo `*.ts` da pasta de saída que o gerador não emitiu (`:414-418`). Um arquivo escrito à mão em `src/asset/resources/` some no próximo `npm run generate:resources` e reprova o `check:resources`.
 - **O histórico já mostra o custo de misturar.** O `5cc5e09` mudou a saída gerada sem o gerador: nesse commit o gerador de resources nem rodava, porque o `marketo_codegen.py` que ele importa só chegou no `0ef242d`, e ele emitiu `../../../`, onde os arquivos commitados têm `../../`, até a #6 (`610e101:scripts/generate-marketo-resources.py:59`, `:63`). O `e7a0bb6` moveu as definições para `src/asset/` sem mudar o gerador, e o `b91681a` commitou as factories fora da pasta que o gerador delas escreve. Por isso o `npm run check:all` não passava antes da #6 (#7).
 - **Os pontos de encaixe que já existem.**
   - `src/asset/asset.module.ts` fica fora de toda pasta que um gerador escreve e importa o `AssetResourcesModule` (`src/asset/asset.module.ts:1-7`). Ele veio no `0c8e760`, e nenhum gerador o emite.
-  - Cada módulo gerado exporta o próprio serviço, como `exports: [SnippetsService]` (`src/asset/resources/snippets/snippets.module.ts:11`). O gerador faz isso desde o `a967f26` (`scripts/generate-marketo-resources.py:353`).
+  - Cada módulo gerado exporta o próprio serviço, como `exports: [SnippetsService]` (`src/asset/resources/snippets/snippets.module.ts:11`). O gerador faz isso desde o `a967f26` (`scripts/generate-marketo-resources.py:421`).
   - As factories aceitam overrides ([ADR 0007](0007-faker-factories-with-overrides-and-seed.md)).
 - **O layout mudou na #6.** A reescrita multi-API trouxe as áreas `src/{data-ingestion,identity,lead-database,user-management}/` e o `src/mocks/` comum, cada área com as próprias pastas geradas ([ADR 0004](0004-swagger-as-single-source-with-committed-generated-code.md)). O R3 da Track A depende de `identity/oauth/token`, e o R4 do `userservice`, que desde a #6 têm rota.
 
@@ -46,7 +46,7 @@
 
 | Opção | Por que não |
 | --- | --- |
-| Editar os serviços gerados à mão | O próximo `generate:resources` apaga a edição (`scripts/marketo_codegen.py:383-385`), e o `check:resources` acusa a diferença. É o que o `5cc5e09` fez ([anti-pattern](../knowledge/anti-patterns/hand-editing-generated-code.md)) |
+| Editar os serviços gerados à mão | O próximo `generate:resources` apaga a edição (`scripts/marketo_codegen.py:398-400`), e o `check:resources` acusa a diferença. É o que o `5cc5e09` fez ([anti-pattern](../knowledge/anti-patterns/hand-editing-generated-code.md)) |
 | O gerador emitir o comportamento | O comportamento não está no Swagger, e cada mudança nele viraria uma regeneração de dezenas de arquivos gerados (inferido; confirmar) |
 | Um processo à parte, um proxy na frente do mock | Seriam dois processos para o consumidor subir, e o project intent pede subir o mock com um comando documentado (inferido; confirmar) |
 | O comportamento no consumidor | O project intent pede a correção aqui, nunca um contorno no consumidor. O simulador escrito à mão do lite-campaign foi a origem de brunohab/lite-campaign#47, #54, #60 e #61 |
@@ -86,4 +86,5 @@
 - **Atualizado**: 2026-09-26 (Fase: Learn), o layout das cinco áreas chegou com a #6, e o `generate:all` e o `check:all` passaram a funcionar para a prova; as citações seguiram as linhas novas, e a do prefixo de import antigo passou a levar o commit `610e101` (#6)
 - **Atualizado**: 2026-09-26 (Fase: Learn), as rotas sombreadas deixaram de atrapalhar o comportamento: o gerador as ordena, e o `test/route-order.e2e-spec.ts` confere o app montado; a citação do gerador seguiu a linha nova (#8)
 - **Atualizado**: 2026-09-26 (Fase: Build), as citações dos arquivos gerados e dos geradores seguiram as linhas novas, depois do cabeçalho de gerado (#7)
+- **Atualizado**: 2026-09-28 (Fase: Build), as citações dos geradores, do `AppModule`, do `package.json` e do lockfile seguiram as linhas novas (#24)
 - **Atualizado**: 2026-09-29 (Fase: Build), as citações do `write_outputs()` e do `check_outputs()` seguiram as linhas novas (#29)

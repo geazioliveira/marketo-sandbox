@@ -34,4 +34,5 @@ subprocess.run([prettier, "--write", "--log-level", "warn", *paths], check=True)
 
 - **Criado**: 2026-09-26 (Fase: Learn), das medições da #6 e da #7 (#7)
 - **Status**: Active
+- **Atualizado**: 2026-09-28 (Fase: Build), as citações dos geradores, do `AppModule`, do `package.json` e do lockfile seguiram as linhas novas (#24)
 - **Atualizado**: 2026-09-29 (Fase: Build), os geradores passaram a formatar pela API do Prettier ([ADR 0015](../../decisions/0015-generators-format-in-memory-at-the-destination-path.md)), e as citações do CLI levam o commit `d50fd00` (#29)

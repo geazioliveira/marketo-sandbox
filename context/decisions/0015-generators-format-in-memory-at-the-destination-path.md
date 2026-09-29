@@ -14,20 +14,20 @@
 ## Decisão
 
 - **O formatador é `scripts/format-generated.mjs`.** Ele lê do stdin uma lista JSON de `{ path, content }` e devolve no stdout os textos formatados, na mesma ordem. Cada texto sai de `prettier.format()` com as opções de `prettier.resolveConfig(<caminho de destino>, { editorconfig: true })`, o `filepath` de destino, `requirePragma: false` e o range do arquivo inteiro (`scripts/format-generated.mjs:55-73`). Ele importa o Prettier de `<raiz>/node_modules/prettier/index.mjs` pelo caminho (`:27-43`).
-- **O gerador formata tudo antes de tocar em qualquer pasta.** Cada gerador monta um `Output` por pasta de saída, com a pasta, os arquivos, o rótulo e o cabeçalho, e chama o `write_or_check_outputs()` uma vez (`scripts/marketo_codegen.py:355-416`). O `format_files()` chama o formatador uma vez para a execução inteira e confere que voltou um texto por arquivo (`:310-352`). Só então:
+- **O gerador formata tudo antes de tocar em qualquer pasta.** Cada gerador monta um `Output` por pasta de saída, com a pasta, os arquivos, o rótulo e o cabeçalho, e chama o `write_or_check_outputs()` uma vez (`scripts/marketo_codegen.py:370-431`). O `format_files()` chama o formatador uma vez para a execução inteira e confere que voltou um texto por arquivo (`:325-367`). Só então:
   - o `write_outputs()` recusa as pastas avulsas com arquivos alheios, apaga as pastas e grava o texto formatado (`:372-390`);
   - o `check_outputs()` compara cada arquivo commitado com esse mesmo texto (`:393-411`).
 - **O que fica da ADR 0011:**
   - nenhum arquivo de ignore alcança a saída: a API do Prettier nunca lê o `.gitignore` nem o `.prettierignore`;
   - o `requirePragma` e o range são forçados, então nenhuma config faz o Prettier devolver um texto sem formatar;
   - a saída 2 quer dizer "não consegui formatar", e a 1, defasado;
-  - o node vem do `NODE_BIN`, do `PATH`, de `~/.nvm`, de `/usr/local/bin` ou de `/opt/homebrew/bin` (`_node_environment()`, `scripts/marketo_codegen.py:268-291`).
+  - o node vem do `NODE_BIN`, do `PATH`, de `~/.nvm`, de `/usr/local/bin` ou de `/opt/homebrew/bin` (`_node_environment()`, `scripts/marketo_codegen.py:283-306`).
 - **O que sai:**
   - o CLI do Prettier e as flags dele;
   - a conferência do relatório por arquivo, porque a API devolve um texto por arquivo ou falha;
   - a limpeza das variáveis `PRETTIER_*`, que só mudam o CLI;
   - o `.codegen-tmp` e a linha dele no `.gitignore`.
-- **O `prettier_environment()` confere o que o formatador importa**: `node_modules/prettier/index.mjs` e um node (`scripts/marketo_codegen.py:294-307`). Sem eles, o gerador sai com 2 antes de chamar o formatador.
+- **O `prettier_environment()` confere o que o formatador importa**: `node_modules/prettier/index.mjs` e um node (`scripts/marketo_codegen.py:309-322`). Sem eles, o gerador sai com 2 antes de chamar o formatador.
 
 ## Racional
 

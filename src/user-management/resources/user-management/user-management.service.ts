@@ -28,7 +28,7 @@ export class UserManagementService {
   }
 
   async inviteUserUsingPOST(..._arguments: unknown[]): Promise<string> {
-    return undefined as never
+    return faker.lorem.word()
   }
 
   async getRolesUsingGET(

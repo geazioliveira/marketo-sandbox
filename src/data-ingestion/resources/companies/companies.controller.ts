@@ -8,7 +8,10 @@ import {
   HttpCode,
   Param,
   Post,
+  Res,
 } from '@nestjs/common'
+import type { Response } from 'express'
+import { mockRequestId } from '../../../mocks/request-id'
 import { CompaniesService } from './companies.service'
 
 import type { SyncCompaniesRequest } from '../../data-ingestion-definitions/requests/sync-companies-request'
@@ -20,12 +23,14 @@ export class CompaniesController {
   @Post('subscriptions/:munchkinId/companies')
   @HttpCode(202)
   async syncCompanies(
+    @Res({ passthrough: true }) reply: Response,
     @Param('munchkinId') munchkinId: string,
     @Headers('X-Mkto-User-Token') xMktoUserToken: string,
     @Body() body: SyncCompaniesRequest,
     @Headers('X-Correlation-Id') xCorrelationId?: string,
     @Headers('X-Request-Source') xRequestSource?: string,
   ): Promise<void> {
+    reply.setHeader('X-Request-Id', mockRequestId())
     return this.companiesService.syncCompanies(
       munchkinId,
       xMktoUserToken,

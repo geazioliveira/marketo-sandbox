@@ -18,10 +18,10 @@ Cada tag de um Swagger vira, na área dele, uma pasta com um module, um controll
 
 ### Os arquivos
 
-- **Uma pasta por tag**, `src/<área>/resources/<slug>/`. A primeira tag da operação decide o módulo (`scripts/generate-marketo-resources.py:380-383`). O slug é a tag em kebab-case, sem os parênteses: `Emails (New)` vira `emails-new` (`scripts/marketo_codegen.py:161-165`).
-- **Três arquivos por pasta**: `<slug>.module.ts`, `<slug>.controller.ts` e `<slug>.service.ts` (`scripts/generate-marketo-resources.py:387-393`).
-- **Os nomes vêm da tag em PascalCase**: `SnippetsModule`, `SnippetsController` e `SnippetsService`, e a propriedade `snippetsService` no controller (`scripts/generate-marketo-resources.py:216-218,341-358`).
-- **A ligação.** O `<Área>ResourcesModule` importa os módulos da área em ordem alfabética do slug (`scripts/generate-marketo-resources.py:360-378,394-396`). O `<Área>Module`, escrito à mão, importa o `<Área>ResourcesModule` (`src/asset/asset.module.ts:1-7`), e o `AppModule` importa os cinco `<Área>Module`, nesta ordem: assets, Data Ingestion, Identity, Lead Database e User Management (`src/app.module.ts:10-14`).
+- **Uma pasta por tag**, `src/<área>/resources/<slug>/`. A primeira tag da operação decide o módulo (`scripts/generate-marketo-resources.py:448-451`). O slug é a tag em kebab-case, sem os parênteses: `Emails (New)` vira `emails-new` (`scripts/marketo_codegen.py:161-165`).
+- **Três arquivos por pasta**: `<slug>.module.ts`, `<slug>.controller.ts` e `<slug>.service.ts` (`scripts/generate-marketo-resources.py:455-461`).
+- **Os nomes vêm da tag em PascalCase**: `SnippetsModule`, `SnippetsController` e `SnippetsService`, e a propriedade `snippetsService` no controller (`scripts/generate-marketo-resources.py:254-256,409-426`).
+- **A ligação.** O `<Área>ResourcesModule` importa os módulos da área em ordem alfabética do slug (`scripts/generate-marketo-resources.py:428-446,462-464`). O `<Área>Module`, escrito à mão, importa o `<Área>ResourcesModule` (`src/asset/asset.module.ts:1-7`), e o `AppModule` importa os cinco `<Área>Module`, nesta ordem: assets, Data Ingestion, Identity, Lead Database e User Management, com o `MultipartModule`, escrito à mão, entre os dois últimos (`src/app.module.ts:10-17`, #24).
 
 | Área | Tags | Operações | `@Get` | `@Post` | `@Delete` |
 | --- | ---: | ---: | ---: | ---: | ---: |
@@ -33,40 +33,42 @@ Cada tag de um Swagger vira, na área dele, uma pasta com um module, um controll
 
 ### O module
 
-- `controllers` e `providers` com o controller e o service da tag, e `exports` com o service (`scripts/generate-marketo-resources.py:350-355`). Todo módulo exporta o service.
+- `controllers` e `providers` com o controller e o service da tag, e `exports` com o service (`scripts/generate-marketo-resources.py:418-423`). Todo módulo exporta o service.
 
 ### O controller
 
 - **Sem prefixo.** `@Controller()` não recebe caminho (`src/asset/resources/snippets/snippets.controller.ts:24`).
-- **O caminho inteiro em cada rota**, sem a barra inicial, com `{param}` trocado por `:param` (`scripts/generate-marketo-resources.py:68-69`).
-- **Um método por operação**, `async`, com o nome do `operationId` do Swagger, que devolve `Promise<T>` com o tipo das respostas 2xx (`scripts/generate-marketo-resources.py:164-192,252-267`).
-- **O status 2xx documentado.** Quando o menor 2xx declarado difere do padrão do Nest (201 num POST, 200 no resto), o método ganha `@HttpCode(<status>)` (`scripts/generate-marketo-resources.py:125-133,255-259`). Hoje isso dá `@HttpCode(200)` nos 139 POSTs de assets, nos 65 de `lead-database`, nos 6 de `user-management` e no de Identity, e `@HttpCode(202)` nos 7 de Data Ingestion.
-- **Os parâmetros vêm do `in` do Swagger** (`scripts/generate-marketo-resources.py:37-43,118-122`):
+- **O caminho inteiro em cada rota**, sem a barra inicial, com `{param}` trocado por `:param` (`scripts/generate-marketo-resources.py:77-78`).
+- **Um método por operação**, `async`, com o nome do `operationId` do Swagger, que devolve `Promise<T>` com o tipo das respostas 2xx (`scripts/generate-marketo-resources.py:192-230,309-329`).
+- **O status 2xx documentado.** Quando o menor 2xx declarado difere do padrão do Nest (201 num POST, 200 no resto), o método ganha `@HttpCode(<status>)` (`scripts/generate-marketo-resources.py:134-142,312-316`). Hoje isso dá `@HttpCode(200)` nos 139 POSTs de assets, nos 65 de `lead-database`, nos 6 de `user-management` e no de Identity, e `@HttpCode(202)` nos 7 de Data Ingestion.
+- **Os parâmetros vêm do `in` do Swagger** (`scripts/generate-marketo-resources.py:38-44,127-131`):
   - `path` vira `@Param('<nome>')`;
   - `query` vira `@Query('<nome>')`;
-  - `body`, e o `requestBody` do OpenAPI 3, viram `@Body()` (`scripts/marketo_codegen.py:130-143`), e `formData` vira `@Body('<nome>')`;
+  - `body`, e o `requestBody` do OpenAPI 3, viram `@Body()` (`scripts/marketo_codegen.py:130-143`), e `formData` vira `@Body('<nome>')`. Num corpo `multipart/form-data`, o `MultipartInterceptor`, escrito à mão, põe cada parte em `req.body` antes de o Nest ler os parâmetros, e uma parte de arquivo chega como o arquivo que o multer leu ([ADR 0014](../../decisions/0014-multipart-read-by-a-hand-written-interceptor.md), #24);
   - `header` vira `@Headers('<nome>')`.
 
-  Os obrigatórios vêm antes dos opcionais (`scripts/generate-marketo-resources.py:233-238`).
+  Os obrigatórios vêm antes dos opcionais (`scripts/generate-marketo-resources.py:272-277`).
 - **Sem pipe nem validação.** `@Param('id') id: number` não passa por `ParseIntPipe` (`src/asset/resources/snippets/snippets.controller.ts:30`), e nada valida o corpo ([ADR 0006](../../decisions/0006-dtos-as-typescript-interfaces.md)). O tipo só vale para o TypeScript.
-- **O método só delega** ao service, com o mesmo nome e os mesmos argumentos (`scripts/generate-marketo-resources.py:262-263`).
-- **A ordem das rotas é a ordem dos caminhos no Swagger, com uma exceção** (`scripts/generate-marketo-resources.py:382-383`). Uma rota que uma rota anterior do mesmo método capturaria sobe para logo antes da primeira rota que a captura, e a geração falha quando duas rotas se capturam uma à outra (`order_routes()`, `:88-108`, chamada em `:388`). Sem isso, a rota literal nunca é alcançada ([rota literal declarada depois de uma rota com parâmetro](../anti-patterns/literal-route-after-param-route.md)). O service segue a mesma ordem, e o `test/route-order.e2e-spec.ts` confere o app montado (#8).
+- **O método só delega** ao service, com o mesmo nome e os mesmos argumentos (`scripts/generate-marketo-resources.py:304-306,321-325`). Duas exceções vêm do Swagger (#24):
+  - **uma resposta 2xx primitiva**, como a string de `inviteUserUsingPOST`, sai como JSON: o método ganha `@Header('Content-Type', 'application/json')` e devolve `JSON.stringify(...)` do service, porque o Nest mandaria uma string como `text/html` (`:307-308,317-325`);
+  - **os headers da resposta 2xx** são enviados: o método recebe `@Res({ passthrough: true }) reply: Response`, primeiro na lista, e chama `reply.setHeader()` para cada header declarado, com o `mockRequestId()` num request id (`success_headers()` e `header_value()`, `:145-159`, usados em `:291-303`). Hoje isso dá o `X-Request-Id` nos 7 POSTs de Data Ingestion.
+- **A ordem das rotas é a ordem dos caminhos no Swagger, com uma exceção** (`scripts/generate-marketo-resources.py:450-451`). Uma rota que uma rota anterior do mesmo método capturaria sobe para logo antes da primeira rota que a captura, e a geração falha quando duas rotas se capturam uma à outra (`order_routes()`, `:97-117`, chamada em `:456`). Sem isso, a rota literal nunca é alcançada ([rota literal declarada depois de uma rota com parâmetro](../anti-patterns/literal-route-after-param-route.md)). O service segue a mesma ordem, e o `test/route-order.e2e-spec.ts` confere o app montado (#8).
 
 ### O service
 
-- **`@Injectable()`, um método por operação**, com o nome do método do controller e a assinatura `(..._arguments: unknown[])`. Os argumentos são ignorados (`scripts/generate-marketo-resources.py:292-339`).
-- **O corpo sai da primeira resposta 2xx** (`scripts/generate-marketo-resources.py:164-192,307-315`):
+- **`@Injectable()`, um método por operação**, com o nome do método do controller e a assinatura `(..._arguments: unknown[])`. Os argumentos são ignorados (`scripts/generate-marketo-resources.py:359-407`).
+- **O corpo sai da primeira resposta 2xx** (`scripts/generate-marketo-resources.py:192-230,374-383`):
   - com `$ref`, devolve a factory da definição;
   - com um array de `$ref`, devolve de 1 a 3 itens da factory;
   - sem schema nenhum, como o 202 do Data Ingestion, o método não devolve nada, e a rota responde sem corpo;
-  - com outro schema, devolve `undefined as never`, e a rota também responde sem corpo. Só `inviteUserUsingPOST`, de `user-management`, cai aqui: o Swagger dele declara uma string (#24).
-- **Os headers de resposta não são gerados.** Os 202 do Data Ingestion documentam um `X-Request-Id`, e a rota não o envia (#24).
+  - com um primitivo, como a string de `inviteUserUsingPOST`, devolve um valor do faker (`PRIMITIVE_VALUES`, `:49-54`), que o controller manda como JSON (#24);
+  - com outro schema, devolve `undefined as never`, e a rota responde sem corpo. Desde a #24, nenhuma operação dos cinco documentos cai aqui.
 - **O envelope é o caso comum.** Em assets, 186 dos 220 métodos devolvem uma factory `makeResponseOf*` com o envelope `{errors, requestId, result, success, warnings}`, e em `lead-database`, 135 dos 147, com `moreResult` e `nextPageToken` em alguns. Identity devolve o token (`ResponseOfIdentity`), e `user-management` devolve os tipos do documento dele, sem envelope.
 
 ### Os imports
 
 - Os tipos entram com `import type` de `…/<área>-definitions/…`, e as factories, de `…/<área>-mocks/factories/…` (`src/asset/resources/snippets/snippets.service.ts:4-13`).
-- O caminho sai de `relative_import()`, a partir de um arquivo em `resources/<slug>/` (`scripts/generate-marketo-resources.py:198-213`, `scripts/marketo_codegen.py:155-158`). O gerador e a saída commitada batem: o `check:resources` passa desde a #6.
+- O caminho sai de `relative_import()`, a partir de um arquivo em `resources/<slug>/` (`scripts/generate-marketo-resources.py:236-251`, `scripts/marketo_codegen.py:155-158`). O gerador e a saída commitada batem: o `check:resources` passa desde a #6.
 
 ### Exemplo
 
@@ -141,4 +143,4 @@ export class SnippetsService {
 
 - **Criado**: 2026-09-25 (Fase: Build), registro retroativo de `0c8e760`..`fb4a804` (#4)
 - **Status**: Active
-- **Atualizado**: 2026-09-26 (Fase: Build), as citações dos arquivos gerados e dos geradores seguiram as linhas novas, depois do cabeçalho de gerado (#7)
+- **Atualizado**: 2026-09-28 (Fase: Build), a resposta 2xx primitiva sai como JSON, os headers declarados são enviados, o corpo multipart chega ao `@Body()` pelo interceptor escrito à mão, e as citações do gerador seguiram as linhas novas (#24)

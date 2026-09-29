@@ -9,7 +9,7 @@
 
 ## Decisão
 
-- **Um registro por área.** O gerador de definições emite `src/<área>/<área>-definitions/swagger-source.ts`, com o cabeçalho de gerado e `export const swaggerSource = { document, sha256 } as const` (`swagger_source()`, `scripts/generate-marketo-definitions.py:145-154`). O `document` é escrito como o cabeçalho o escreve, pelo `document_path()` (`scripts/marketo_codegen.py:220-231`); fora do repositório, só o nome do arquivo.
+- **Um registro por área.** O gerador de definições emite `src/<área>/<área>-definitions/swagger-source.ts`, com o cabeçalho de gerado e `export const swaggerSource = { document, sha256 } as const` (`swagger_source()`, `scripts/generate-marketo-definitions.py:163-172`). O `document` é escrito como o cabeçalho o escreve, pelo `document_path()` (`scripts/marketo_codegen.py:235-246`); fora do repositório, só o nome do arquivo.
 - **O sha256 dos bytes como estão.** O hash sai de `target.source.read_bytes()`, sem normalizar as quebras: o sha256 registrado é o mesmo do `shasum -a 256` do arquivo commitado.
 - **Os bytes fixados em todo checkout.** O `.gitattributes` tem `docs/marketo-swagger-*.json -text`: nenhum documento Swagger passa por conversão de fim de linha, com ou sem `core.autocrlf`.
 - **O `check:all` confere o registro** como qualquer arquivo gerado. Um documento mudado sem regenerar deixa o registro da área defasado, e o `check:definitions` sai com 1 citando `swagger-source.ts`.

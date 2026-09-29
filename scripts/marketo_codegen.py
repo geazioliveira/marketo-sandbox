@@ -197,6 +197,21 @@ def reference_name(reference: str) -> str:
     return reference.rsplit("/", maxsplit=1)[-1]
 
 
+def is_type_alias(schema: dict[str, Any]) -> bool:
+    """Whether a top-level definition has no members to render as an interface (#24).
+
+    An array or a primitive, or an object that only declares `additionalProperties`,
+    becomes `export type X = …`. A schema with `properties` or `allOf` stays an
+    interface, and so does one that declares nothing at all, such as `Empty`.
+    """
+    if "properties" in schema or "allOf" in schema:
+        return False
+    schema_type = schema.get("type")
+    if schema_type is not None and schema_type != "object":
+        return True
+    return "additionalProperties" in schema
+
+
 _IDENTIFIER = re.compile(r"^[A-Za-z_$][A-Za-z0-9_$]*$")
 
 
