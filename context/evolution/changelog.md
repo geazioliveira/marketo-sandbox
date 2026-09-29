@@ -21,7 +21,7 @@ Uma entrada por mudança mergeada, da mais nova para a mais antiga, escrita no p
 - **Antes**, sobre `e5b013c`: com um `\n` a mais em `docs/marketo-swagger-asset.json`, o `check:all` saía com 0 e 16 linhas "are current". **Depois**: sai com 1, citando `src/asset/asset-definitions/swagger-source.ts`.
 - **A saída**: 5 arquivos novos, 35 linhas, e nenhum outro. Sem eles, o `check:definitions` saía com 1 nas cinco áreas. Um segundo `npm run generate:all` não muda nada, e o `format:check` passa.
 - **O checkout CRLF**: um clone da branch com `core.autocrlf=true` fica com o status limpo, os cinco documentos em `attr/-text` e os cinco sha256 iguais aos registros.
-- **`npm run check`**: 3.764 testes em 21 arquivos, com 16 novos no `codegen.spec.ts`, 15 deles vermelhos antes do Build; o e2e com 33, sem mudança. Com a carga média em 20, 4 casos de stack do `gate.spec.ts` estouraram os 120 s na primeira rodada, e o `gate.spec.ts` sozinho passou com os 365.
+- **`npm run check`**: 3.765 testes em 21 arquivos, com 16 novos no `codegen.spec.ts`, 15 deles vermelhos antes do Build, e 2 que o `drift.spec.ts` gera para a ADR 0012 e o anti-pattern novo (3.764 na rodada antes do Learn); o e2e com 33, sem mudança. Com a carga média em 20, 4 casos de stack do `gate.spec.ts` estouraram os 120 s na primeira rodada, e o `gate.spec.ts` sozinho passou com os 365.
 
 ### Decisões tomadas
 
