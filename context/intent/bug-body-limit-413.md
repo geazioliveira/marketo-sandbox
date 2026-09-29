@@ -28,19 +28,31 @@ O plano vigente e o Approve do dono estão na #25. A branch é `fix/25-limite-do
 
 ## Critérios de aceite
 
-- [ ] Um e2e manda um lote de 300 leads com mais de 100 KiB em `POST /rest/v1/leads.json` e recebe 200. Ele falha antes da correção e passa depois.
-- [ ] O mesmo lote em `POST /subscriptions/{munchkinId}/persons` recebe 202. Falha antes e passa depois.
-- [ ] Um corpo urlencoded com mais de 100 KiB num POST de assets recebe 200. Falha antes e passa depois.
-- [ ] Um corpo JSON e um urlencoded com mais de 1 MiB recebem 413.
-- [ ] O `src/main.ts` e o e2e aplicam o limite pela mesma função, e um teste falha se o `main.ts` deixar de chamá-la.
-- [ ] O intent do bug, a ADR 0005, o pattern da fronteira do código gerado, o README e o changelog registram a correção. `npm run check`, o e2e e o gate passam.
+- [x] Um e2e manda um lote de 300 leads com mais de 100 KiB em `POST /rest/v1/leads.json` e recebe 200. Ele falha antes da correção e passa depois.
+- [x] O mesmo lote em `POST /subscriptions/{munchkinId}/persons` recebe 202. Falha antes e passa depois.
+- [x] Um corpo urlencoded com mais de 100 KiB num POST de assets recebe 200. Falha antes e passa depois.
+- [x] Um corpo JSON e um urlencoded com mais de 1 MiB recebem 413.
+- [x] O `src/main.ts` e o e2e aplicam o limite pela mesma função, e um teste falha se o `main.ts` deixar de chamá-la.
+- [x] O intent do bug, a ADR 0005, o pattern da fronteira do código gerado, o README e o changelog registram a correção. `npm run check`, o e2e e o gate passam.
 
 ## Decisões relacionadas
 
 - [ADR 0005: NestJS sobre Express, com um módulo por tag](../decisions/0005-nestjs-express-one-module-per-tag.md)
 - [ADR 0010: O mock só fala com a própria máquina por padrão](../decisions/0010-loopback-only-by-default.md)
 
+## Resultados
+
+Os commits seguem os passos do plano: o intent (`9373605`), os testes que falham (`09d1a27`), a correção (`317c642`) e este Learn.
+
+- **Antes da correção**, o `test/body-limit.e2e-spec.ts` de `09d1a27` teve 3 falhas e 3 passes: os 300 leads, os 300 persons e o form de 101 KiB receberam `413 "Payload Too Large"`; o conferir dos tamanhos e os dois 413 acima de 1 MiB passaram. Depois, os 6 passam, e o `test/runtime-defaults.spec.ts` ganhou 2 casos.
+- **Medido na branch**, com `node dist/main` e os mesmos corpos do plano: 300 leads (175,7 KiB) dão 200 em `leads.json` e 202 em `persons`; o JSON e o form de 101 KiB e de 1023 KiB dão 200; os de 1025 KiB dão 413. O app segue escutando só em `127.0.0.1`.
+- **As mutações**, cada uma pega por um teste: tirar o parser urlencoded do `useBodyLimit` (1 falha no e2e), trocar `'1mb'` por `'10mb'` (2 falhas no e2e e 1 no `runtime-defaults`), trocar `extended: true` por `false` (1 falha no e2e) e tirar o `useBodyLimit(app)` do `src/main.ts` (1 falha no `runtime-defaults`).
+- **Onde se afastou do plano.**
+  - O plano mandava o form de 101 KiB para `snippet/:id/content.json`. Essa rota lê `content` e `type` como query, porque o Swagger os declara assim, e ignora o corpo: com ela, trocar `extended: true` por `false` não quebrava nenhum teste. O teste passou a usar `POST /rest/asset/v1/email/:id/content.json`, que recebe o form pelo `@Body()`, e confere com um `vi.spyOn` no `EmailsService` que o corpo chega inteiro e que `nested[key]=value` chega como objeto. Dos 103 POSTs de assets com form, 58 leem o corpo (50 inteiro, pelo `@Body()`, e 8 por campo, como `@Body('type')`), e os outros 45 só o caminho ou a query.
+  - O commit dos testes foi refeito antes do push, para já levar essa versão sem o `useBodyLimit`.
+
 ## Status
 
 - **Criado**: 2026-09-28 (Fase: Intent), do plano aprovado na issue #25 (#25)
-- **Status**: In Progress
+- **Status**: Resolved
+- **Atualizado**: 2026-09-28 (Fase: Learn), critérios cumpridos na branch `fix/25-limite-do-corpo`, com os Resultados e a ADR 0005 atualizada (#25)

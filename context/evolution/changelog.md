@@ -4,6 +4,42 @@ Uma entrada por mudança mergeada, da mais nova para a mais antiga, escrita no p
 
 ---
 
+## 2026-09-28: O mock aceita corpos até 1 MB, como o Marketo, e um lote de 300 leads cabe (#25)
+
+**Fase**: Learn
+**Tipo**: Bug Fix
+
+### O que foi construído / corrigido
+
+- **`src/body-limit.ts`**, escrito à mão, exporta `bodyLimit = '1mb'` e `useBodyLimit(app)`, que registra o parser JSON e o urlencoded com esse limite pelo `app.useBodyParser`. O urlencoded leva `extended: true`, como o padrão do Nest.
+- **O `src/main.ts`** cria o app como `NestExpressApplication` e chama `useBodyLimit(app)` antes do Swagger e do `listen`. O e2e novo chama a mesma função antes do `init()`.
+- **`test/body-limit.e2e-spec.ts`**, com 6 casos: os tamanhos dos corpos, 300 leads em `leads.json` (200), os mesmos 300 em `persons` (202), um form de 101 KiB em `email/:id/content.json` lido inteiro e com `nested[key]` como objeto, e o 413 acima de 1 MiB no JSON e no form. `test/runtime-defaults.spec.ts` ganhou 2 casos: o valor `'1mb'` e o `src/main.ts` chamando a função antes do `listen`.
+- **A ADR 0005** passou a decidir o limite, com três alternativas rejeitadas. O pattern da fronteira do código gerado inclui o `src/body-limit.ts`, e o README diz o limite.
+
+### Números medidos
+
+- **Antes**, em `a74ca0c`: 300 leads (175,7 KiB) davam 413 em `POST /rest/v1/leads.json` e em `POST /subscriptions/123-ABC-456/persons`; o JSON e o form davam 413 a partir de 101 KiB.
+- **Depois**, com `node dist/main` na branch: os 300 leads dão 200 e 202; o JSON e o form de 101 KiB e de 1023 KiB dão 200; os de 1025 KiB dão 413.
+- **O e2e novo** falhou em 3 dos 6 casos antes da correção e passa nos 6 depois. Quatro mutações da correção foram pegas pelos testes.
+- **`npm run check`**: 3.768 testes em 21 arquivos, com 2 casos novos em `test/runtime-defaults.spec.ts`; o e2e com 39, dos quais 6 novos. Na máquina do dono, com a média de carga entre 19 e 23, 7 testes ficaram vermelhos em `test/hooks/build-guard.spec.ts`, `test/hooks/guard-bash.spec.ts` e `test/scripts/gate.spec.ts`, por `git` estourando o prazo (`spawnSync git ETIMEDOUT`, 5 testes com 120 s), como já tinha acontecido na #20. O lint, o `format:check`, o typecheck, o `check:context`, o build e o `check:all` passaram. A prova da cadeia inteira é o `Qualidade / check` da PR.
+
+### Decisões tomadas
+
+- [0005: NestJS sobre Express, com um módulo por tag](../decisions/0005-nestjs-express-one-module-per-tag.md): o corpo até 1 MB, o limite que o Marketo documenta, nos dois parsers.
+- As respostas do Approve da #25: seguir o Marketo no valor e nos dois parsers, nenhum helper comum para os e2e, e a decisão na ADR 0005.
+
+### Patterns aplicados ou criados
+
+- [A fronteira do código gerado](../knowledge/patterns/generated-code-boundary.md), atualizado com o arquivo novo escrito à mão
+- [Revisão classificada por risco](../knowledge/patterns/risk-classified-review.md): HIGH, porque muda um status HTTP que o lite-campaign vê
+
+### Aprendizados / surpresas
+
+- **Um 200 não prova que o corpo foi lido.** O primeiro teste do form mandava 101 KiB para `snippet/:id/content.json`, que lê `content` e `type` como query, como o Swagger declara, e ignora o corpo. Ele passava com `extended: false`. Só um `vi.spyOn` num service que recebe o `@Body()` mostrou que o corpo chega inteiro. Dos 103 POSTs de assets com form, 45 não leem o corpo.
+- **O `useBodyParser` só vale antes do `init()`.** O Nest registra os parsers padrão no `init()`, e o body-parser pula uma requisição já lida (`node_modules/body-parser/lib/read.js:40-44`). Chamado antes, o parser do limite roda primeiro.
+
+---
+
 ## 2026-09-28: Cada área registra o Swagger que a gerou, com o sha256, e o check:all o confere (#19)
 
 **Fase**: Learn

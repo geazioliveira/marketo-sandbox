@@ -40,7 +40,7 @@ As cinco áreas, com os arquivos medidos na #6 e o registro da #19 nas definiç�
 
 - Os arquivos de cada pasta são os que o gerador lista em `generated_files` ou em `files()` (`scripts/generate-marketo-definitions.py:145-164`, `scripts/generate-marketo-resources.py:380-397`, `scripts/generate-marketo-factories.py:287-305`).
 - `seed.ts` e `request-id.ts` também são gerados (`scripts/generate-marketo-factories.py:235-292`). Mudar o seed é mudar o gerador.
-- O resto de `src/` é escrito à mão: `src/main.ts`, `src/listen-address.ts`, `src/app.module.ts` e os cinco `src/<área>/<área>.module.ts`, que só importam o `<Área>ResourcesModule` (`src/identity/identity.module.ts:1-7`). Nenhum gerador os emite.
+- O resto de `src/` é escrito à mão: `src/main.ts`, `src/listen-address.ts`, `src/body-limit.ts`, `src/app.module.ts` e os cinco `src/<área>/<área>.module.ts`, que só importam o `<Área>ResourcesModule` (`src/identity/identity.module.ts:1-7`). Nenhum gerador os emite.
 
 ### A regra
 
@@ -85,3 +85,4 @@ As cinco áreas, com os arquivos medidos na #6 e o registro da #19 nas definiç�
 - **Status**: Active
 - **Atualizado**: 2026-09-26 (Fase: Build), todo arquivo gerado passou a abrir com o cabeçalho de gerado, e as citações seguiram as linhas novas (#7)
 - **Atualizado**: 2026-09-28 (Fase: Build), a pasta de definições ganhou o registro `swagger-source.ts` de cada área, com as contagens e a citação do gerador seguindo as linhas novas ([ADR 0012](../../decisions/0012-swagger-source-record-per-area.md)) (#19)
+- **Atualizado**: 2026-09-28 (Fase: Learn), `src/body-limit.ts` entrou entre os arquivos escritos à mão (#25)
