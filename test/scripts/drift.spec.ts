@@ -924,6 +924,24 @@ describe('docs against the review gate’s contract values (#13)', () => {
     },
   )
 
+  it.each([workflowGuide, adr0002])(
+    '%s quotes the audit’s check reasons as the audit writes them (#48)',
+    (file) => {
+      const audit = read('scripts/audit-main.mjs')
+      expect(audit).toContain(
+        '`PR #${number} mergeada sem ${check.workflow} / ${check.job} verde`',
+      )
+      expect(audit).toContain(
+        '`PR #${number} mergeada com ${check.workflow} / ${check.job} em andamento; a última run concluída antes do merge: ${state.lastConcluded}`',
+      )
+      const text = read(file)
+      expect(text).toContain('`PR #P mergeada sem <workflow / job> verde`')
+      expect(text).toContain(
+        '`PR #P mergeada com <workflow / job> em andamento; a última run concluída antes do merge: <conclusão | nenhuma>`',
+      )
+    },
+  )
+
   it('the decision index attributes to #4 only decisions that exist', () => {
     // Before #4 the index promised its retroactive decisions numbers no file
     // held yet; #4 wrote them, so every number it names now has its file.
