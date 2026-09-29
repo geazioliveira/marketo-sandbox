@@ -22,18 +22,40 @@ O plano vigente e o Approve do dono estão na #48. O dono aprovou as três recom
 
 ## Critérios de aceite
 
-- [ ] Uma PR cuja última run de um check exigido começou antes do merge e ainda não tinha concluído nele fica fora do loop com o motivo `PR #P mergeada com <workflow / job> em andamento; a última run concluída antes do merge: <conclusão | nenhuma>`. Um teste com o caso da #43 falha antes da correção e passa depois.
-- [ ] Uma run vermelha concluída antes do merge, uma verde só depois dele e a falta de run continuam com `PR #P mergeada sem <workflow / job> verde`. Uma run que começa depois do merge continua sem contar.
-- [ ] O fluxo pede, para todo merge, que nenhuma run do `issue-link` nem do `Qualidade / check` esteja na fila ou em andamento na cabeça, e diz como triar o motivo novo.
-- [ ] O fluxo e a ADR 0002 citam o motivo novo como a auditoria o escreve, e o `drift.spec.ts` confere isso.
-- [ ] O intent do bug, a ADR 0002, o anti-pattern novo, o `CODING_STANDARDS.md` e o changelog registram a correção. `npm run check`, o e2e e o gate passam.
+- [x] Uma PR cuja última run de um check exigido começou antes do merge e ainda não tinha concluído nele fica fora do loop com o motivo `PR #P mergeada com <workflow / job> em andamento; a última run concluída antes do merge: <conclusão | nenhuma>`. Um teste com o caso da #43 falha antes da correção e passa depois.
+- [x] Uma run vermelha concluída antes do merge, uma verde só depois dele e a falta de run continuam com `PR #P mergeada sem <workflow / job> verde`. Uma run que começa depois do merge continua sem contar.
+- [x] O fluxo pede, para todo merge, que nenhuma run do `issue-link` nem do `Qualidade / check` esteja na fila ou em andamento na cabeça, e diz como triar o motivo novo.
+- [x] O fluxo e a ADR 0002 citam o motivo novo como a auditoria o escreve, e o `drift.spec.ts` confere isso.
+- [x] O intent do bug, a ADR 0002, o anti-pattern novo, o `CODING_STANDARDS.md` e o changelog registram a correção. `npm run check`, o e2e e o gate passam.
 
 ## Decisões relacionadas
 
 - [ADR 0002: Enforcement soft do loop no GitHub Free](../decisions/0002-soft-enforcement-on-github-free.md)
 - [ADR 0003: Revisão do Copilot na cabeça e nenhuma thread aberta antes do merge](../decisions/0003-copilot-review-and-no-open-threads-before-merge.md)
 
+## Resultados
+
+Os commits seguem os passos do plano: o intent (`6cf8c6c`), os testes que falham (`e199897`), a correção (`b8b9c0b`), as docs (`b4afda7`) e este Learn.
+
+- **Antes da correção**, em `e199897`, os 5 casos novos de `test/scripts/audit-main.spec.ts` falharam: a auditoria escrevia `- PR #11 mergeada sem Vínculo com issue / issue-link verde.` onde o teste esperava o motivo do check em andamento. Os 2 casos novos do `drift.spec.ts` falharam até as docs. O caso do run enfileirado, sem `startedAt`, já passava e continua passando: ele não conta, e o hook de merge o recusa.
+- **Depois**, os 25 testes de `required checks` passam, os 188 do `audit-main.spec.ts` também, e os 206 do `drift.spec.ts`.
+- **O que entrou.** O `greenAtMerge` virou `checkAtMerge`, que devolve `green`, `inFlight` e `lastConcluded`, e o `judgePull` escreve o motivo do check em andamento. O caso antigo `issue-link still running when the PR merged` foi para a tabela nova, com o motivo novo. Na tabela do `sem verde` entrou um caso com duas runs começadas juntas antes do merge, uma vermelha concluída e outra em andamento: o vermelho concluído vence.
+- **As mutações**, numa cópia da árvore fora do git, cada uma pega pelos testes de `required checks`:
+
+  | Mutação | Falhas |
+  | --- | ---: |
+  | `inFlight` sempre falso | 5 |
+  | A última conclusão sempre `nenhuma` | 4 |
+  | "Em andamento" na frente de um vermelho concluído | 1 |
+  | Contar uma run que começou depois do merge | 2 |
+
+- **Onde se afastou do plano.**
+  - A seção do merge no fluxo ganhou o comando que confere o que o hook confere: `gh pr checks <n>` sem nenhum `pending`.
+  - O `workflow.md` não passa no Prettier, mas isso já acontecia em `main`, e `docs/` fica fora do `format:check`.
+- **O Build pediu o dono presente.** No modo automático, o hook negou a edição de `scripts/audit-main.mjs`. A sessão saiu do modo automático, e cada edição no harness passou pela confirmação do dono.
+
 ## Status
 
 - **Criado**: 2026-09-29 (Fase: Intent), do plano aprovado na issue #48 (#48)
-- **Status**: In Progress
+- **Status**: Resolved
+- **Atualizado**: 2026-09-29 (Fase: Learn), critérios cumpridos na branch `fix/48-auditoria-check-em-andamento`, com os Resultados, a ADR 0002 e o anti-pattern novo (#48)
