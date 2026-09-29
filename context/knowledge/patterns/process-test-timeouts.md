@@ -15,13 +15,13 @@ Todo processo que um teste dispara tem o próprio timeout, o caso que o espera t
 
 - **Todo processo tem timeout, e o caso espera mais.** O processo filho recebe um `timeout:`. O spec declara, logo depois dos imports, um `vi.setConfig({ testTimeout })` maior que o timeout de todo processo que os casos dele esperam, inclusive o dos helpers de `test/support/`. Um comentário ao lado diz qual processo ele cobre.
 - **Os valores com nome ficam em `test/support/hooks.ts`:** `processTimeout` para o caso, `spawnTimeout` para um processo, abaixo dele, e `setupTimeout` para `beforeAll` e `beforeEach`.
-- **Um helper que repassa as opções deixa o timeout para quem o chama.** O `exec` de `test/support/temp-repo.ts` recebe um `timeout` e o passa ao processo: cada chamada dele, num spec ou noutro helper, dá o timeout. O `spawnWith` e o `runHook` têm o `spawnTimeout` como padrão, e uma chamada deles pode omiti-lo.
-- **O guarda confere.** O `test/test-timeouts.spec.ts` lê como texto cada `*.spec.ts` de `test/` e `src/` e cada módulo de `test/support/`:
-  - lê os imports por alias (`exec as run`), soma os imports repetidos do mesmo módulo e deixa de fora os de tipo (`import type`, `type HookRepo`);
-  - acha cada chamada de uma função de `node:child_process`, importada por nome, por namespace ou com `import()`, e de um helper que repassa o timeout, fora de strings e comentários;
-  - exige que cada uma dessas chamadas dê `timeout` nos próprios argumentos. Num spec, o valor precisa ser um número ou um nome de `test/support/hooks.ts`, para o guarda comparar;
+- **Um helper que repassa as opções deixa o timeout para quem o chama.** O `exec` de `test/support/temp-repo.ts` espalha no processo as `options` que recebe, com um tipo que tem `timeout`: cada chamada dele, num spec ou noutro helper, dá o timeout. Um parâmetro com `timeout` no tipo que não chega ao processo não conta como repasse. O `spawnWith` e o `runHook` têm o `spawnTimeout` como padrão, e uma chamada deles pode omiti-lo.
+- **O guarda confere.** O `test/test-timeouts.spec.ts` lê cada `*.spec.ts` de `test/` e `src/` e cada módulo de `test/support/` com o parser do TypeScript, então comentários, strings e o `${…}` de um template literal contam como contam na execução:
+  - lê os imports por alias (`exec as run`), por namespace (`import * as repo`), com `import()` e com `require()`, soma os imports repetidos do mesmo módulo e deixa de fora os de tipo (`import type`, `type HookRepo`);
+  - acha cada chamada de uma função de `node:child_process` e de um helper que repassa o timeout;
+  - exige que cada uma dessas chamadas dê um `timeout` positivo nos próprios argumentos, como um número, um nome de `test/support/hooks.ts` ou o padrão de um parâmetro desestruturado. A exceção é a chamada cujas opções vêm de quem chama a função em volta dela. Um timeout que o guarda não lê é recusado, num spec e num helper;
   - trata como disparador o spec que importa `node:child_process` ou um export de `test/support/` que dispara processos, direto ou por outro export;
-  - exige desse spec um `vi.setConfig({ testTimeout })` maior que o timeout de cada chamada dele e de cada helper que ele usa.
+  - exige desse spec uma chamada real de `vi.setConfig({ testTimeout })`, fora de comentários e strings, maior que o timeout de cada chamada dele e de cada helper que ele usa.
 
   Cada recusa cita `arquivo:linha` da chamada, ou do caso e do processo com os dois valores.
 - **Os testes puros ficam nos 5 s.** Um laço infinito num teste sem processo falha rápido.
@@ -45,4 +45,4 @@ Todo processo que um teste dispara tem o próprio timeout, o caso que o espera t
 
 - **Criado**: 2026-09-28 (Fase: Learn), da correção da #23 (#23)
 - **Status**: Active
-- **Atualizado**: 2026-09-29 (Fase: Build), da revisão do Copilot na PR #61: o guarda confere o timeout de cada chamada de processo, nos specs e em `test/support/`, e o timeout do caso deixou de ser tratado como o que encerra um processo sem timeout (#23)
+- **Atualizado**: 2026-09-29 (Fase: Build), da revisão do Copilot na PR #61: o guarda confere o timeout de cada chamada de processo, nos specs e em `test/support/`, e o timeout do caso deixou de ser tratado como o que encerra um processo sem timeout; na segunda revisão, o guarda passou a ler o código com o parser do TypeScript e a conferir o repasse do timeout por chamada (#23)
