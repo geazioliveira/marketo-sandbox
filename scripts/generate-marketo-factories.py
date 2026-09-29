@@ -17,7 +17,6 @@ from marketo_codegen import (  # noqa: E402
     Target,
     add_target_arguments,
     camel_case,
-    check_outputs,
     definition_category,
     definition_file,
     generated_header,
@@ -26,7 +25,7 @@ from marketo_codegen import (  # noqa: E402
     reference_name,
     relative_import,
     resolve_targets,
-    write_outputs,
+    write_or_check_outputs,
 )
 
 
@@ -322,7 +321,7 @@ def main() -> int:
         )
         for target in resolve_targets(arguments)
     ]
-    return check_outputs(outputs) if arguments.check else write_outputs(outputs)
+    return write_or_check_outputs(outputs, arguments.check)
 
 
 if __name__ == "__main__":

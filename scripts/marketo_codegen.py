@@ -20,6 +20,7 @@ DOCS = ROOT / "docs"
 SRC = ROOT / "src"
 #: Seeding and request-id helpers are area-agnostic, so every target shares one copy.
 SHARED_MOCKS = SRC / "mocks"
+FORMATTER = ROOT / "scripts" / "format-generated.mjs"
 
 
 @dataclass(frozen=True)
@@ -211,9 +212,9 @@ def quote(value: Any) -> str:
     return json.dumps(value)
 
 
-#: The Prettier the formatter imports: this repository's own, never one found above it (#29).
+#: The Prettier the formatter imports: this repository's own, never one found above it. A bare
+#: `import('prettier')` climbs to any node_modules above ROOT, such as the main checkout's (#29).
 PRETTIER = ROOT / "node_modules" / "prettier" / "index.mjs"
-FORMATTER = ROOT / "scripts" / "format-generated.mjs"
 
 
 def document_path(source: Path) -> str | None:
@@ -408,6 +409,11 @@ def check_outputs(outputs: list[Output]) -> int:
         else:
             print(f"All {len(output.files)} {output.label} are current.")
     return status
+
+
+def write_or_check_outputs(outputs: list[Output], check: bool) -> int:
+    """The last step of every generator: with --check, compare the outputs; without it, write them."""
+    return check_outputs(outputs) if check else write_outputs(outputs)
 
 
 def custom_target(swagger: Path, area: str) -> Target:
