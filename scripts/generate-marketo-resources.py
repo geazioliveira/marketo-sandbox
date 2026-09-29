@@ -44,6 +44,14 @@ DECORATORS = {
 
 RESERVED_IDENTIFIERS = {"default", "new", "delete", "function", "class", "return"}
 
+#: The faker value for a 2xx response that is a bare primitive, such as `{type: string}` (#24).
+PRIMITIVE_VALUES = {
+    "string": "faker.lorem.word()",
+    "integer": "faker.number.int({ min: 1, max: 1000 })",
+    "number": "faker.number.float({ min: 0, max: 1000, fractionDigits: 2 })",
+    "boolean": "faker.datatype.boolean()",
+}
+
 
 def schema_type(schema: dict[str, Any]) -> str:
     if "$ref" in schema:
@@ -159,6 +167,8 @@ class ResponseContract:
     factory: str | None
     expression: str | None
     needs_faker: bool
+    # A bare primitive: Nest would send a string as `text/html`, so the controller sends JSON.
+    primitive: bool = False
 
 
 def operation_response(operation: dict[str, Any]) -> ResponseContract:
@@ -169,6 +179,7 @@ def operation_response(operation: dict[str, Any]) -> ResponseContract:
     factory: str | None = None
     expression: str | None = None
     needs_faker = False
+    primitive = False
     # Only the first 2xx schema is mocked; a union of shapes has no single obvious payload.
     if schemas:
         primary = schemas[0]
@@ -182,6 +193,14 @@ def operation_response(operation: dict[str, Any]) -> ResponseContract:
                 "{ count: { min: 1, max: 3 } })"
             )
             needs_faker = True
+        elif (value := PRIMITIVE_VALUES.get(primary.get("type"))) is not None:
+            expression = (
+                f"faker.helpers.arrayElement([{', '.join(quote(item) for item in enum)}] as const)"
+                if (enum := primary.get("enum"))
+                else value
+            )
+            needs_faker = True
+            primitive = True
 
     return ResponseContract(
         type_name=" | ".join(types) or "void",
@@ -189,6 +208,7 @@ def operation_response(operation: dict[str, Any]) -> ResponseContract:
         factory=factory,
         expression=expression,
         needs_faker=needs_faker,
+        primitive=primitive,
     )
 
 
@@ -249,6 +269,11 @@ class ResourceGenerator:
                 arguments.append(f"{decorator_for(parameter)} {identifier}{optional}: {type_name}")
                 argument_names.append(identifier)
 
+            service_call = (
+                f"this.{service_property}.{operation['operationId']}({', '.join(argument_names)})"
+            )
+            if response.primitive:
+                imports.add("Header")
             methods.extend(
                 [
                     f"  @{method.capitalize()}('{nest_route(path)}')",
@@ -257,10 +282,14 @@ class ResourceGenerator:
                         if (status := success_status(operation, method)) is not None
                         else []
                     ),
+                    *(["  @Header('Content-Type', 'application/json')"] if response.primitive else []),
                     f"  async {operation['operationId']}({', '.join(arguments)}): "
-                    f"Promise<{response.type_name}> {{",
-                    f"    return this.{service_property}.{operation['operationId']}"
-                    f"({', '.join(argument_names)})",
+                    f"Promise<{'string' if response.primitive else response.type_name}> {{",
+                    (
+                        f"    return JSON.stringify(await {service_call})"
+                        if response.primitive
+                        else f"    return {service_call}"
+                    ),
                     "  }",
                     "",
                 ],
@@ -305,7 +334,8 @@ class ResourceGenerator:
                 f"Promise<{response.type_name}> {{"
             )
             if response.expression:
-                factory_imports.add(response.factory)
+                if response.factory:
+                    factory_imports.add(response.factory)
                 needs_faker = needs_faker or response.needs_faker
                 methods.extend([signature, f"    return {response.expression}", "  }", ""])
             elif response.type_name == "void":
