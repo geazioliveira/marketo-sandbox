@@ -1,3 +1,5 @@
+import { execFileSync } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import {
   appendFileSync,
   cpSync,
@@ -681,5 +683,213 @@ describe.concurrent('the generators, on the identity target (#7)', () => {
         expect(run.status, run.out).toBe(2)
         expect(snapshot(at)).toEqual(before)
       }),
+  )
+})
+
+/** The document and the sha256 a `swagger-source.ts` records (#19). */
+function recorded(file: string): { document?: string; sha256?: string } {
+  const text = readFileSync(file, 'utf8')
+  return {
+    document: /document: '([^']+)'/.exec(text)?.[1],
+    sha256: /sha256: '([0-9a-f]{64})'/.exec(text)?.[1],
+  }
+}
+
+function sha256(file: string): string {
+  return createHash('sha256').update(readFileSync(file)).digest('hex')
+}
+
+const identityDocument = 'docs/marketo-swagger-identity.json'
+const identitySource = 'src/identity/identity-definitions/swagger-source.ts'
+
+/**
+ * The tree as a real git repository, committed with or without the
+ * project's .gitattributes, then cloned with `core.autocrlf=true`: the
+ * checkout a Windows machine makes by default.
+ */
+async function crlfClone(at: Tree, withRule: boolean): Promise<Tree> {
+  const env = cleanEnv(at.root)
+  const git = async (cwd: string, ...args: string[]) => {
+    const run = await exec('git', args, { cwd, env, timeout: 30_000 })
+    expect(run.status, `git ${args.join(' ')}: ${run.stderr}`).toBe(0)
+  }
+  rmSync(path.join(at.dir, '.git'), { recursive: true, force: true })
+  if (withRule)
+    cpSync(
+      path.join(projectRoot, '.gitattributes'),
+      path.join(at.dir, '.gitattributes'),
+    )
+  await git(at.dir, 'init', '--quiet')
+  await git(at.dir, 'add', '--all')
+  await git(
+    at.dir,
+    '-c',
+    'user.name=spec',
+    '-c',
+    'user.email=spec@example.com',
+    'commit',
+    '--quiet',
+    '--message',
+    'tree',
+  )
+  const clone = path.join(at.root, 'clone')
+  await git(
+    at.root,
+    'clone',
+    '--quiet',
+    '-c',
+    'core.autocrlf=true',
+    'repo',
+    'clone',
+  )
+  symlinkSync(
+    path.join(projectRoot, 'node_modules'),
+    path.join(clone, 'node_modules'),
+  )
+  return { ...at, dir: clone }
+}
+
+describe.concurrent(
+  'the Swagger source record, on the identity target (#19)',
+  () => {
+    it('generate writes the document and the sha256 of its bytes', () =>
+      withTree({}, async (at) => {
+        const run = await generate(at, 'definitions')
+        expect(run.status, run.out).toBe(0)
+        expect(recorded(path.join(at.dir, identitySource))).toEqual({
+          document: identityDocument,
+          sha256: sha256(path.join(at.dir, identityDocument)),
+        })
+      }))
+
+    it('--check fails on a document changed without regenerating', () =>
+      withTree({}, async (at) => {
+        appendFileSync(path.join(at.dir, identityDocument), '\n')
+        const run = await generate(at, 'definitions', '--check')
+        expect(run.out).toContain(`stale or unexpected: ${identitySource}`)
+        expect(run.out).toMatch(/1 missing or changed, 0 unexpected/)
+        expect(run.status).toBe(1)
+      }))
+
+    it('a custom area records the document as its header writes it', () =>
+      withTree({}, async (at) => {
+        cpSync(
+          path.join(at.dir, identityDocument),
+          path.join(at.dir, 'docs', 'identity copy.json'),
+        )
+        const run = await generate(
+          at,
+          'definitions',
+          '--swagger',
+          'docs/identity copy.json',
+          '--area',
+          'zz-recorded',
+        )
+        expect(run.status, run.out).toBe(0)
+        expect(
+          recorded(
+            path.join(
+              at.dir,
+              'src/zz-recorded/zz-recorded-definitions/swagger-source.ts',
+            ),
+          ),
+        ).toEqual({
+          document: 'docs/identity copy.json',
+          sha256: sha256(path.join(at.dir, identityDocument)),
+        })
+      }))
+
+    it('a core.autocrlf=true checkout keeps the committed bytes and sha256', () =>
+      withTree({}, async (at) => {
+        const clone = await crlfClone(at, true)
+        const document = path.join(clone.dir, identityDocument)
+        expect(readFileSync(document, 'utf8')).not.toContain('\r\n')
+        const check = await generate(clone, 'definitions', '--check')
+        expect(check.status, check.out).toBe(0)
+        const run = await generate(clone, 'definitions')
+        expect(run.status, run.out).toBe(0)
+        expect(recorded(path.join(clone.dir, identitySource)).sha256).toBe(
+          sha256(path.join(projectRoot, identityDocument)),
+        )
+      }))
+
+    it('without the rule, the same checkout writes CRLF and --check fails', () =>
+      withTree({}, async (at) => {
+        const clone = await crlfClone(at, false)
+        expect(
+          readFileSync(path.join(clone.dir, identityDocument), 'utf8'),
+        ).toContain('\r\n')
+        const run = await generate(clone, 'definitions', '--check')
+        expect(run.out).toContain(`stale or unexpected: ${identitySource}`)
+        expect(run.status).toBe(1)
+      }))
+  },
+)
+
+describe('the Swagger source record of every registered target (#19)', () => {
+  interface Registered {
+    key: string
+    definitions: string
+    source: string
+  }
+
+  const targets = JSON.parse(
+    execFileSync(
+      'python3',
+      [
+        '-c',
+        [
+          'import json, sys',
+          "sys.path.insert(0, 'scripts')",
+          'from marketo_codegen import ROOT, TARGETS',
+          'print(json.dumps([{"key": t.key, "definitions": t.definitions.relative_to(ROOT).as_posix(), "source": t.source.relative_to(ROOT).as_posix()} for t in TARGETS.values()]))',
+        ].join('\n'),
+      ],
+      {
+        cwd: projectRoot,
+        encoding: 'utf8',
+        env: { ...process.env, PYTHONDONTWRITEBYTECODE: '1' },
+      },
+    ),
+  ) as Registered[]
+
+  it('lists the five documents', () => {
+    expect(targets.map((target) => target.key)).toEqual([
+      'asset',
+      'data-ingestion',
+      'identity',
+      'mapi',
+      'user',
+    ])
+  })
+
+  it.each(targets)(
+    '$key: the record matches the bytes of $source',
+    ({ definitions, source }) => {
+      expect(
+        recorded(path.join(projectRoot, definitions, 'swagger-source.ts')),
+      ).toEqual({
+        document: source,
+        sha256: sha256(path.join(projectRoot, source)),
+      })
+    },
+  )
+
+  it.each(targets)(
+    '$key: $source is out of every line-ending conversion',
+    async ({ source }) => {
+      const root = mkdtempSync(path.join(tmpdir(), 'codegen-spec-'))
+      try {
+        const run = await exec('git', ['check-attr', 'text', '--', source], {
+          cwd: projectRoot,
+          env: cleanEnv(root),
+          timeout: 30_000,
+        })
+        expect(run.status, run.stderr).toBe(0)
+        expect(run.stdout.trim()).toBe(`${source}: text: unset`)
+      } finally {
+        rmSync(root, { recursive: true, force: true })
+      }
+    },
   )
 })
