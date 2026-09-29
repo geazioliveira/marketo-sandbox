@@ -20,5 +20,7 @@ Uma escolha relevante por arquivo. Nome, template e vocabulário de status estã
 | [0010](0010-loopback-only-by-default.md) | O mock só fala com a própria máquina por padrão | Accepted |
 | [0011](0011-generators-format-without-ignore-files.md) | Os geradores formatam sem arquivo de ignore e falham quando não formatam | Accepted |
 | [0012](0012-swagger-source-record-per-area.md) | Cada área registra o Swagger que a gerou, com o sha256 dos bytes commitados | Accepted |
+| [0013](0013-top-level-definitions-without-members-as-type-aliases.md) | Definição de topo sem membros vira alias de tipo, e a factory dela devolve o valor inteiro | Accepted |
+| [0014](0014-multipart-read-by-a-hand-written-interceptor.md) | O corpo multipart lido num interceptor escrito à mão | Accepted |
 
 As decisões de 0004 a 0009 são o registro retroativo dos commits anteriores ao loop (#4). O racional que o histórico não registra está marcado "(inferido; confirmar)". A 0009 fica `Proposed` até a primeira sub-issue da Track A que construir comportamento.

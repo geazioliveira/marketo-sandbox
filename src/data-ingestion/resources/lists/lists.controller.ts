@@ -8,7 +8,10 @@ import {
   HttpCode,
   Param,
   Post,
+  Res,
 } from '@nestjs/common'
+import type { Response } from 'express'
+import { mockRequestId } from '../../../mocks/request-id'
 import { ListsService } from './lists.service'
 
 import type { ListOperationRequest } from '../../data-ingestion-definitions/requests/list-operation-request'
@@ -20,12 +23,14 @@ export class ListsController {
   @Post('subscriptions/:munchkinId/lists')
   @HttpCode(202)
   async addToList(
+    @Res({ passthrough: true }) reply: Response,
     @Param('munchkinId') munchkinId: string,
     @Headers('X-Mkto-User-Token') xMktoUserToken: string,
     @Body() body: ListOperationRequest,
     @Headers('X-Correlation-Id') xCorrelationId?: string,
     @Headers('X-Request-Source') xRequestSource?: string,
   ): Promise<void> {
+    reply.setHeader('X-Request-Id', mockRequestId())
     return this.listsService.addToList(
       munchkinId,
       xMktoUserToken,
@@ -38,12 +43,14 @@ export class ListsController {
   @Post('subscriptions/:munchkinId/lists/remove')
   @HttpCode(202)
   async removeFromList(
+    @Res({ passthrough: true }) reply: Response,
     @Param('munchkinId') munchkinId: string,
     @Headers('X-Mkto-User-Token') xMktoUserToken: string,
     @Body() body: ListOperationRequest,
     @Headers('X-Correlation-Id') xCorrelationId?: string,
     @Headers('X-Request-Source') xRequestSource?: string,
   ): Promise<void> {
+    reply.setHeader('X-Request-Id', mockRequestId())
     return this.listsService.removeFromList(
       munchkinId,
       xMktoUserToken,

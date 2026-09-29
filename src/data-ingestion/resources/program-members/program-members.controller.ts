@@ -8,7 +8,10 @@ import {
   HttpCode,
   Param,
   Post,
+  Res,
 } from '@nestjs/common'
+import type { Response } from 'express'
+import { mockRequestId } from '../../../mocks/request-id'
 import { ProgramMembersService } from './program-members.service'
 
 import type { DeleteProgramMembersRequest } from '../../data-ingestion-definitions/requests/delete-program-members-request'
@@ -21,12 +24,14 @@ export class ProgramMembersController {
   @Post('subscriptions/:munchkinId/programmembers')
   @HttpCode(202)
   async syncProgramMembers(
+    @Res({ passthrough: true }) reply: Response,
     @Param('munchkinId') munchkinId: string,
     @Headers('X-Mkto-User-Token') xMktoUserToken: string,
     @Body() body: SyncProgramMembersRequest,
     @Headers('X-Correlation-Id') xCorrelationId?: string,
     @Headers('X-Request-Source') xRequestSource?: string,
   ): Promise<void> {
+    reply.setHeader('X-Request-Id', mockRequestId())
     return this.programMembersService.syncProgramMembers(
       munchkinId,
       xMktoUserToken,
@@ -39,12 +44,14 @@ export class ProgramMembersController {
   @Post('subscriptions/:munchkinId/programmembers/delete')
   @HttpCode(202)
   async deleteProgramMembers(
+    @Res({ passthrough: true }) reply: Response,
     @Param('munchkinId') munchkinId: string,
     @Headers('X-Mkto-User-Token') xMktoUserToken: string,
     @Body() body: DeleteProgramMembersRequest,
     @Headers('X-Correlation-Id') xCorrelationId?: string,
     @Headers('X-Request-Source') xRequestSource?: string,
   ): Promise<void> {
+    reply.setHeader('X-Request-Id', mockRequestId())
     return this.programMembersService.deleteProgramMembers(
       munchkinId,
       xMktoUserToken,
