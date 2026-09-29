@@ -15,7 +15,7 @@ Editar à mão um arquivo que um gerador emite separa o que está commitado do q
 - **O gerador nem rodava nesse commit.** Os dois geradores importam `marketo_codegen` desde `a967f26`, e ele só chega em `0ef242d`, 22 segundos depois de `5cc5e09`. Medido na #4: em `5cc5e09`, os dois saem com `ModuleNotFoundError: No module named 'marketo_codegen'`.
 - **Só o prefixo diferia do que o gerador emitia.** As factories e o `exports` são o que o código do gerador passou a emitir em `a967f26` (`a967f26:scripts/generate-marketo-resources.py:189` e `:236`). O prefixo dos imports, não: até a #6, o gerador emitia `../../../asset-definitions/…` e `../../../asset-mocks/factories/…` (`610e101:scripts/generate-marketo-resources.py:59` e `:63`), e nenhuma versão commitada dele antes da #6 emitia `../../`: a de `0c8e760` emite `../../../asset-definitions/<categoria>/<arquivo>.js` (`0c8e760:scripts/generate-marketo-resources.py:73`).
 - **O `--check` acusa a edição.** Medido na #4, numa cópia de `origin/main`: `npm run check:resources` sai com 1 e aponta 46 arquivos alterados, os 23 controllers e os 23 services. A diferença é só o prefixo dos imports, e os 23 módulos estão em dia.
-- **Regenerar desfaz a edição.** O gerador apaga a pasta de saída antes de escrever (`shutil.rmtree`, `scripts/marketo_codegen.py:385`). Medido na #4: um `npm run generate:resources` devolvia os 46 arquivos ao prefixo `../../../`, e o `npm run generate:all` recriaria as pastas no layout antigo, ao lado das atuais (#7).
+- **Regenerar desfaz a edição.** O gerador apaga a pasta de saída antes de escrever (`shutil.rmtree`, `scripts/marketo_codegen.py:411`). Medido na #4: um `npm run generate:resources` devolvia os 46 arquivos ao prefixo `../../../`, e o `npm run generate:all` recriaria as pastas no layout antigo, ao lado das atuais (#7).
 - **Até a #7, o CI não via uma edição nova.** O `npm run check:all` passa desde a #6, e desde a #7 roda dentro do `npm run check`, e com ele no CI ([Check, no fluxo](../../../docs/development/workflow.md#check)). Antes, só quem o rodava à mão via a edição.
 
 ## O que fazer em vez disso
@@ -45,3 +45,4 @@ return f"../../../asset-definitions/{definition_category(name)}/{definition_file
 - **Criado**: 2026-09-25 (Fase: Build), registro retroativo de `0c8e760`..`fb4a804` (#4)
 - **Status**: Active
 - **Atualizado**: 2026-09-28 (Fase: Build), as citações dos geradores, do `AppModule`, do `package.json` e do lockfile seguiram as linhas novas (#24)
+- **Atualizado**: 2026-09-29 (Fase: Build), a citação do `shutil.rmtree` seguiu as linhas novas (#29)

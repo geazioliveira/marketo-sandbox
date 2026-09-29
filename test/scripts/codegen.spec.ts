@@ -16,6 +16,7 @@ import {
 } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { cleanEnv } from '../support/clean-env'
 import { exec, projectRoot } from '../support/temp-repo'
 
@@ -25,10 +26,11 @@ import { exec, projectRoot } from '../support/temp-repo'
  * that one target needs: the identity document (6 KB), its committed output,
  * the shared mocks, the Prettier config and the .gitignore (#7).
  *
- * The scripts are copied, never linked: ROOT is the resolved parent of
- * scripts/, so a link would point the generator back at this repository and
- * `generate` would rewrite it. node_modules is linked, and only when the case
- * wants Prettier present. An empty .git marks the tree as a project root, so
+ * The scripts, with the formatter they call (scripts/format-generated.mjs,
+ * #29), are copied, never linked: ROOT is the resolved parent of scripts/, so
+ * a link would point the generator back at this repository and `generate`
+ * would rewrite it. node_modules is linked, and only when the case wants
+ * Prettier present. An empty .git marks the tree as a project root, so
  * Prettier never climbs out of it looking for an .editorconfig.
  */
 
@@ -54,14 +56,11 @@ interface Tree {
   remove: () => void
 }
 
-function tree({
-  prettier = true,
-  wrapped = false,
-}: { prettier?: boolean; wrapped?: boolean } = {}): Tree {
+function tree({ prettier = true }: { prettier?: boolean } = {}): Tree {
   const root = realpathSync(mkdtempSync(path.join(tmpdir(), 'codegen-spec-')))
   const remove = () => rmSync(root, { recursive: true, force: true })
   try {
-    fill(root, { prettier, wrapped })
+    fill(root, { prettier })
   } catch (error) {
     remove()
     throw error
@@ -69,15 +68,12 @@ function tree({
   return { root, dir: path.join(root, 'repo'), remove }
 }
 
-function fill(
-  root: string,
-  { prettier, wrapped }: { prettier: boolean; wrapped: boolean },
-): void {
+function fill(root: string, { prettier }: { prettier: boolean }): void {
   const dir = path.join(root, 'repo')
   mkdirSync(path.join(dir, 'scripts'), { recursive: true })
   mkdirSync(path.join(dir, '.git'))
   for (const file of readdirSync(path.join(projectRoot, 'scripts')))
-    if (file.endsWith('.py'))
+    if (file.endsWith('.py') || file === 'format-generated.mjs')
       cpSync(
         path.join(projectRoot, 'scripts', file),
         path.join(dir, 'scripts', file),
@@ -88,31 +84,7 @@ function fill(
       recursive: true,
     })
   }
-  if (wrapped) {
-    // The regression the guard exists for: Prettier run without --ignore-path.
-    const bin = path.join(dir, 'node_modules', '.bin')
-    mkdirSync(bin, { recursive: true })
-    const cli = path.join(
-      projectRoot,
-      'node_modules',
-      'prettier',
-      'bin',
-      'prettier.cjs',
-    )
-    writeFileSync(
-      path.join(bin, 'prettier'),
-      `#!/usr/bin/env node
-const args = process.argv.slice(2)
-const at = args.indexOf('--ignore-path')
-if (at >= 0) args.splice(at, 2)
-const eq = args.findIndex((arg) => arg.startsWith('--ignore-path='))
-if (eq >= 0) args.splice(eq, 1)
-const run = require('node:child_process').spawnSync(process.execPath, [${JSON.stringify(cli)}, ...args], { stdio: 'inherit' })
-process.exit(run.status ?? 1)
-`,
-      { mode: 0o755 },
-    )
-  } else if (prettier)
+  if (prettier)
     symlinkSync(
       path.join(projectRoot, 'node_modules'),
       path.join(dir, 'node_modules'),
@@ -201,7 +173,7 @@ function plantSentinels(at: Tree): void {
 }
 
 async function withTree(
-  options: { prettier?: boolean; wrapped?: boolean },
+  options: { prettier?: boolean },
   body: (at: Tree) => Promise<void>,
 ): Promise<void> {
   const at = tree(options)
@@ -258,9 +230,7 @@ describe.concurrent('the generators, on the identity target (#7)', () => {
     (generator) =>
       withTree({ prettier: false }, async (at) => {
         const run = await generate(at, generator, '--check')
-        expect(run.out).toMatch(
-          /Prettier not found at node_modules\/\.bin\/prettier/,
-        )
+        expect(run.out).toMatch(/Prettier not found at node_modules\/prettier/)
         expect(run.out).toMatch(/npm ci/)
         expect(run.out).not.toMatch(/stale|current/)
         expect(run.status, run.out).toBe(2)
@@ -268,20 +238,21 @@ describe.concurrent('the generators, on the identity target (#7)', () => {
   )
 
   it.each(generators)(
-    '%s: a Prettier that is not executable fails on Prettier, never as stale',
+    '%s: a Prettier that cannot load fails on Prettier, never as stale',
     (generator) =>
       withTree({ prettier: false }, async (at) => {
-        const bin = path.join(at.dir, 'node_modules', '.bin')
-        mkdirSync(bin, { recursive: true })
-        writeFileSync(path.join(bin, 'prettier'), '#!/usr/bin/env node\n', {
-          mode: 0o644,
-        })
+        const prettier = path.join(at.dir, 'node_modules', 'prettier')
+        mkdirSync(prettier, { recursive: true })
+        writeFileSync(
+          path.join(prettier, 'index.mjs'),
+          "throw new Error('a broken install')\n",
+        )
         plantSentinels(at)
         const before = snapshot(at)
         for (const args of [['--check'], []]) {
           const run = await generate(at, generator, ...args)
           expect(run.out).toMatch(
-            /Prettier at node_modules\/\.bin\/prettier is not executable/,
+            /Prettier at node_modules\/prettier could not load: a broken install/,
           )
           expect(run.out).not.toMatch(/Traceback|stale|current/)
           expect(run.status, run.out).toBe(2)
@@ -304,19 +275,18 @@ describe.concurrent('the generators, on the identity target (#7)', () => {
       }),
   )
 
-  // Prettier 3 reads .gitignore and .prettierignore by default and skips, in
-  // silence, any path they match, even one passed on the command line. The
-  // checker stages its copy inside the tree, so an ignore rule over that copy
-  // left it unformatted and every file looked stale: #6 took .gitignore out of
-  // the way, and .prettierignore still could. `/*` then `!/src/` matches every
-  // top-level path but src/, wherever the checker stages its copy.
+  // The Prettier CLI reads .gitignore and .prettierignore by default and skips,
+  // in silence, any path they match, even one passed on the command line: #6
+  // and #7 fought that on the copy the check staged inside the tree. The
+  // formatter uses the API, which reads no ignore file (#29). `/*` then
+  // `!/src/` matches every top-level path but src/.
   it.each(
     generators.flatMap((generator) =>
       ['.gitignore', '.prettierignore'].map(
         (file) => [generator, file] as const,
       ),
     ),
-  )('%s: --check formats its copy even when %s matches it', (generator, file) =>
+  )('%s: --check formats even when %s matches it', (generator, file) =>
     withTree({}, async (at) => {
       appendFileSync(path.join(at.dir, file), '\n/*\n!/src/\n')
       const run = await generate(at, generator, '--check')
@@ -346,38 +316,6 @@ describe.concurrent('the generators, on the identity target (#7)', () => {
       expect(run.status).toBe(1)
     }))
 
-  // The wrapped Prettier drops --ignore-path=, so the default ignore files are
-  // back: the copied .gitignore (its /.codegen-tmp/ line), or a .prettierignore
-  // once that line is gone.
-  it.each(
-    generators.flatMap((generator) =>
-      ['.gitignore', '.prettierignore'].map(
-        (file) => [generator, file] as const,
-      ),
-    ),
-  )(
-    '%s: a Prettier run that skips files through %s fails loud, never as stale',
-    (generator, file) =>
-      withTree({ wrapped: true }, async (at) => {
-        const gitignore = path.join(at.dir, '.gitignore')
-        if (file === '.gitignore') appendFileSync(gitignore, '\n/*\n!/src/\n')
-        else {
-          writeFileSync(
-            gitignore,
-            readFileSync(gitignore, 'utf8').replace(/^\/\.codegen-tmp\/$/m, ''),
-          )
-          writeFileSync(
-            path.join(at.dir, '.prettierignore'),
-            '/.codegen-tmp/\n',
-          )
-        }
-        const run = await generate(at, generator, '--check')
-        expect(run.out).toMatch(/Prettier did not process \d+ of \d+ files/)
-        expect(run.out).not.toMatch(/stale|current/)
-        expect(run.status, run.out).toBe(2)
-      }),
-  )
-
   it.each(generators)(
     '%s: generate formats src/ even when .prettierignore matches it',
     (generator) =>
@@ -391,7 +329,7 @@ describe.concurrent('the generators, on the identity target (#7)', () => {
   )
 
   // A config that makes Prettier process a file without formatting it: the
-  // command line beats it (--no-require-pragma, the whole-file range).
+  // formatter forces requirePragma off and the whole-file range over it.
   it.each(generators)(
     '%s: a config with requirePragma and a range still formats the output',
     (generator) =>
@@ -415,7 +353,9 @@ describe.concurrent('the generators, on the identity target (#7)', () => {
       }),
   )
 
-  // The experimental CLI formats without the per-file report the guard reads.
+  // Prettier's own variables change what its CLI does (the experimental CLI
+  // formats without the per-file report the CLI guard read until #29); the
+  // formatter goes through the API, and they change nothing.
   it.each(generators)(
     '%s: a PRETTIER_EXPERIMENTAL_CLI in the environment changes nothing',
     (generator) =>
@@ -576,37 +516,6 @@ describe.concurrent('the generators, on the identity target (#7)', () => {
       expect(run.status, run.out).toBe(0)
     }))
 
-  it.each([
-    [
-      'a registered area',
-      [] as string[],
-      'src/identity/identity-definitions',
-      'restore it with `git checkout -- src/identity/identity-definitions && git clean -fd -- src/identity/identity-definitions`',
-    ],
-    [
-      'a custom area',
-      [
-        '--swagger',
-        'docs/marketo-swagger-identity.json',
-        '--area',
-        'zz-broken',
-      ],
-      'src/zz-broken/zz-broken-definitions',
-      'delete it',
-    ],
-  ] as const)(
-    'a Prettier that fails on %s says how to undo the rewrite',
-    (_, args, folder, undo) =>
-      withTree({}, async (at) => {
-        writeFileSync(path.join(at.dir, '.prettierrc'), '{ broken')
-        const run = await generate(at, 'definitions', ...args)
-        expect(run.status, run.out).toBe(2)
-        expect(run.out).toContain(
-          `${folder} was rewritten unformatted: run the generator again once Prettier works, or ${undo}.`,
-        )
-      }),
-  )
-
   it('a NODE_BIN whose node is not executable fails before touching the output', () =>
     withTree({}, async (at) => {
       const bin = path.join(at.root, 'fake-bin')
@@ -685,6 +594,263 @@ describe.concurrent('the generators, on the identity target (#7)', () => {
       }),
   )
 })
+
+/** The folders each generator writes in the identity tree. */
+const outputsOf: Record<Generator, string[]> = {
+  definitions: ['src/identity/identity-definitions'],
+  resources: ['src/identity/resources'],
+  factories: ['src/identity/identity-mocks', 'src/mocks'],
+}
+
+/**
+ * Prettier configs the generated code has to follow as the hand-written code
+ * does (#29). The first three only apply under src/: the check used to format
+ * its copy in .codegen-tmp/src/…, where none of them reach, while generate and
+ * `npm run format:check` format in src/. A CRLF endOfLine has to survive the
+ * check reading every file as \n, and a config that logs has to leave the
+ * formatter's stdout alone.
+ */
+const pathConfigs: Record<string, (at: Tree) => void> = {
+  'an overrides entry for src/**': (at) => {
+    const rc = path.join(at.dir, '.prettierrc')
+    writeFileSync(
+      rc,
+      JSON.stringify({
+        ...JSON.parse(readFileSync(rc, 'utf8')),
+        overrides: [{ files: 'src/**/*.ts', options: { semi: true } }],
+      }),
+    )
+  },
+  'a src/.prettierrc': (at) =>
+    writeFileSync(path.join(at.dir, 'src', '.prettierrc'), '{"semi":true}\n'),
+  'a src/.editorconfig': (at) =>
+    writeFileSync(
+      path.join(at.dir, 'src', '.editorconfig'),
+      '[*.ts]\nindent_style = space\nindent_size = 4\n',
+    ),
+  'an endOfLine of crlf': (at) => {
+    const rc = path.join(at.dir, '.prettierrc')
+    writeFileSync(
+      rc,
+      JSON.stringify({
+        ...JSON.parse(readFileSync(rc, 'utf8')),
+        endOfLine: 'crlf',
+      }),
+    )
+  },
+  'a src/prettier.config.mjs that logs': (at) =>
+    writeFileSync(
+      path.join(at.dir, 'src', 'prettier.config.mjs'),
+      "console.log('config loaded')\nexport default { semi: true }\n",
+    ),
+}
+
+/** `prettier --check` over folders of the tree, as `npm run format:check` runs it. */
+async function formatCheck(
+  at: Tree,
+  folders: string[],
+): Promise<{ status: number | null; out: string }> {
+  const run = await exec(
+    process.execPath,
+    [
+      path.join(projectRoot, 'node_modules', 'prettier', 'bin', 'prettier.cjs'),
+      '--check',
+      ...folders.map((folder) => `${folder}/**/*.ts`),
+    ],
+    { cwd: at.dir, env: cleanEnv(at.root), timeout: 30_000 },
+  )
+  return { status: run.status, out: `${run.stdout}${run.stderr}` }
+}
+
+describe.concurrent(
+  'the generators format at the destination path (#29)',
+  () => {
+    it.each(
+      generators.flatMap((generator) =>
+        Object.keys(pathConfigs).map((config) => [generator, config] as const),
+      ),
+    )(
+      '%s: with %s, generate, --check and format:check agree',
+      (generator, config) =>
+        withTree({}, async (at) => {
+          pathConfigs[config](at)
+          const before = snapshot(at)
+          const run = await generate(at, generator)
+          expect(run.status, run.out).toBe(0)
+          // The config reaches the output, or the case would prove nothing.
+          expect(snapshot(at)).not.toEqual(before)
+          const check = await generate(at, generator, '--check')
+          expect(check.out).not.toMatch(/stale/)
+          expect(check.status, check.out).toBe(0)
+          const format = await formatCheck(at, outputsOf[generator])
+          expect(format.status, format.out).toBe(0)
+        }),
+    )
+
+    it.each(generators)(
+      '%s: a Prettier that fails leaves src/ untouched',
+      (generator) =>
+        withTree({}, async (at) => {
+          plantSentinels(at)
+          writeFileSync(path.join(at.dir, '.prettierrc'), '{ broken')
+          const before = snapshot(at)
+          const run = await generate(at, generator)
+          expect(run.out).toMatch(/Prettier/)
+          expect(run.out).not.toMatch(/Traceback|rewritten unformatted/)
+          expect(run.status, run.out).toBe(2)
+          expect(snapshot(at)).toEqual(before)
+        }),
+    )
+
+    // The shared mocks are written before the identity factories: a Prettier that
+    // only fails inside src/identity/ must not find src/mocks already rewritten.
+    it('a Prettier that fails on a later output leaves the earlier ones untouched', () =>
+      withTree({}, async (at) => {
+        plantSentinels(at)
+        writeFileSync(
+          path.join(at.dir, 'src', 'identity', '.prettierrc'),
+          '{ broken',
+        )
+        const before = snapshot(at)
+        const run = await generate(at, 'factories')
+        expect(run.status, run.out).toBe(2)
+        expect(snapshot(at)).toEqual(before)
+      }))
+
+    it('a Prettier that fails on a custom area creates nothing', () =>
+      withTree({}, async (at) => {
+        writeFileSync(path.join(at.dir, '.prettierrc'), '{ broken')
+        const before = snapshot(at)
+        const run = await generate(
+          at,
+          'definitions',
+          '--swagger',
+          'docs/marketo-swagger-identity.json',
+          '--area',
+          'zz-broken',
+        )
+        expect(run.status, run.out).toBe(2)
+        expect(run.out).not.toMatch(/rewritten unformatted/)
+        expect(snapshot(at)).toEqual(before)
+        expect(existsSync(path.join(at.dir, 'src', 'zz-broken'))).toBe(false)
+      }))
+
+    // Node resolves a bare `prettier` by climbing to any node_modules above the
+    // file: a worktree without `npm ci` would format with the main checkout's.
+    it.each(generators)(
+      '%s: a tree without node_modules never uses the one of a folder above it',
+      (generator) =>
+        withTree({ prettier: false }, async (at) => {
+          symlinkSync(
+            path.join(projectRoot, 'node_modules'),
+            path.join(at.root, 'node_modules'),
+          )
+          plantSentinels(at)
+          const before = snapshot(at)
+          for (const args of [['--check'], []]) {
+            const run = await generate(at, generator, ...args)
+            expect(run.out).toMatch(/Prettier not found/)
+            expect(run.out).not.toMatch(/Traceback|stale|current/)
+            expect(run.status, run.out).toBe(2)
+          }
+          expect(snapshot(at)).toEqual(before)
+        }),
+    )
+
+    // Only the formatter's own import tells the two apart: a module in the
+    // tree's node_modules/prettier with no package.json, which a bare
+    // `import('prettier')` would not load.
+    it('the formatter imports the Prettier of its own root, by path', () =>
+      withTree({ prettier: false }, async (at) => {
+        symlinkSync(
+          path.join(projectRoot, 'node_modules'),
+          path.join(at.root, 'node_modules'),
+        )
+        const own = path.join(at.dir, 'node_modules', 'prettier')
+        mkdirSync(own, { recursive: true })
+        const real = path.join(
+          projectRoot,
+          'node_modules',
+          'prettier',
+          'index.mjs',
+        )
+        writeFileSync(
+          path.join(own, 'index.mjs'),
+          `process.stderr.write('the Prettier of the tree\\n')\nexport * from ${JSON.stringify(pathToFileURL(real).href)}\n`,
+        )
+        const run = await generate(at, 'definitions', '--check')
+        expect(run.out).toContain('the Prettier of the tree')
+        expect(run.status, run.out).toBe(0)
+      }))
+
+    it('a formatter that returns the wrong list touches nothing', () =>
+      withTree({}, async (at) => {
+        writeFileSync(
+          path.join(at.dir, 'scripts', 'format-generated.mjs'),
+          "process.stdout.write('[]')\n",
+        )
+        plantSentinels(at)
+        const before = snapshot(at)
+        for (const args of [['--check'], []]) {
+          const run = await generate(at, 'definitions', ...args)
+          expect(run.out).toMatch(/did not return one formatted text/)
+          expect(run.out).not.toMatch(/Traceback|stale|current/)
+          expect(run.status, run.out).toBe(2)
+        }
+        expect(snapshot(at)).toEqual(before)
+      }))
+
+    // Every folder of the run is cleared for writing before the first one is
+    // deleted: src/mocks, written first, must survive a refusal of the custom
+    // area that comes after it.
+    it('a refused custom area stops the run before any folder is deleted', () =>
+      withTree({}, async (at) => {
+        const foreign = path.join(
+          at.dir,
+          'src',
+          'zz-foreign',
+          'zz-foreign-mocks',
+        )
+        mkdirSync(foreign, { recursive: true })
+        writeFileSync(path.join(foreign, 'notes.txt'), 'escrito à mão\n')
+        plantSentinels(at)
+        const before = snapshot(at)
+        const run = await generate(
+          at,
+          'factories',
+          '--swagger',
+          'docs/marketo-swagger-identity.json',
+          '--area',
+          'zz-foreign',
+        )
+        expect(run.out).toMatch(/holds files this run would not write again/)
+        expect(run.status, run.out).toBe(1)
+        expect(snapshot(at)).toEqual(before)
+      }))
+
+    // A lone surrogate in a Swagger description formats, but it cannot be
+    // written as UTF-8: the run has to stop before it deletes anything.
+    it('a text that is not valid UTF-8 stops the run before any folder is deleted', () =>
+      withTree({}, async (at) => {
+        const swagger = path.join(
+          at.dir,
+          'docs',
+          'marketo-swagger-identity.json',
+        )
+        const document = JSON.parse(readFileSync(swagger, 'utf8'))
+        document.definitions.IdentityRequest.properties.grant_type.description =
+          'Grant type \ud800'
+        writeFileSync(swagger, JSON.stringify(document))
+        plantSentinels(at)
+        const before = snapshot(at)
+        const run = await generate(at, 'definitions')
+        expect(run.out).toMatch(/cannot be written as UTF-8/)
+        expect(run.out).not.toMatch(/Traceback/)
+        expect(run.status, run.out).toBe(1)
+        expect(snapshot(at)).toEqual(before)
+      }))
+  },
+)
 
 /** The document and the sha256 a `swagger-source.ts` records (#19). */
 function recorded(file: string): { document?: string; sha256?: string } {

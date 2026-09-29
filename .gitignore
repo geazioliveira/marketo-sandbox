@@ -38,6 +38,5 @@
 /.claude/scheduled_tasks.lock
 
 # codegen and tooling output
-/.codegen-tmp/
 /scripts/__pycache__/
 /coverage/
