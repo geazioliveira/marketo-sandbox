@@ -13,6 +13,7 @@ As regras vivem no Context Mesh. Esta página só aponta para elas.
 - [O gate do loop](context/knowledge/patterns/loop-gate.md)
 - [Revisão antes do merge](context/knowledge/patterns/review-before-merge.md)
 - [Revisão classificada por risco](context/knowledge/patterns/risk-classified-review.md)
+- [Timeouts de testes que disparam processos](context/knowledge/patterns/process-test-timeouts.md)
 
 ## Anti-patterns
 

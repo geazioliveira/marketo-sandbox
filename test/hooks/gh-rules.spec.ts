@@ -29,6 +29,7 @@ import {
   type ShellLib,
   setupTimeout,
   processTimeout,
+  spawnTimeout,
 } from '../support/hooks'
 
 /**
@@ -2094,6 +2095,7 @@ describe('the fake refuses anything but the documented calls', () => {
     const run = spawnSync('gh', args as string[], {
       env: { ...f.env, GH_PROMPT_DISABLED: '1', GH_NO_UPDATE_NOTIFIER: '1' },
       encoding: 'utf8',
+      timeout: spawnTimeout,
     })
     expect(run.status).toBe(97)
     expect(f.calls()[0].violation).toMatch(/argv inesperado/)

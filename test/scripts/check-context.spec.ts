@@ -174,7 +174,11 @@ async function check(
     }
     const env = cleanEnv(root, { extra: { GIT_CEILING_DIRECTORIES: root } })
     if (options.git === true) {
-      const init = await exec('git', ['init', '-q'], { cwd: dir, env })
+      const init = await exec('git', ['init', '-q'], {
+        cwd: dir,
+        env,
+        timeout: 30_000,
+      })
       if (init.status !== 0) throw new Error(`git init falhou: ${init.stderr}`)
     }
     const run = await exec(process.execPath, [script], {
@@ -967,7 +971,7 @@ describe('scripts/check-context.mjs', () => {
           const run = await exec(
             'git',
             ['check-ignore', '--no-index', '--quiet', file],
-            { cwd: projectRoot, env },
+            { cwd: projectRoot, env, timeout: 30_000 },
           )
           expect(run.status, `${file}: ${run.stderr}`).toBe(0)
         }
