@@ -6,7 +6,7 @@ import {
   writeFileSync,
 } from 'node:fs'
 import path from 'node:path'
-import { test as base } from 'vitest'
+import { afterAll, test as base } from 'vitest'
 import {
   branchShapes,
   bugSections,
@@ -44,20 +44,64 @@ import {
  * machine where every spawn is scanned that is minutes when run one by one.
  * So each case uses its own repositories (`fresh`), removed when that case
  * finishes, and the `expect` of its own context.
+ *
+ * On a loaded machine the sum of a case's processes decides whether it ends
+ * within its 120 s (#59). So a repository many cases start from is built
+ * once per file and copied for each (`templated`), and a case runs the gate
+ * at most `maxGateRuns` times: the fixture fails a case that runs it more.
  */
 
-const test = base.extend<{ fresh: () => Promise<TempRepo> }>({
+/** The most gate runs one case may start (#59): split a case that needs more. */
+const maxGateRuns = 3
+
+const test = base.extend<{
+  fresh: (template?: TempRepo) => Promise<TempRepo>
+}>({
   // oxlint-disable-next-line no-empty-pattern -- vitest reads fixture dependencies from this pattern
   fresh: async ({}, use) => {
     const made: TempRepo[] = []
-    await use(async () => {
-      const repo = await TempRepo.create()
+    await use(async (template) => {
+      const repo =
+        template === undefined
+          ? await TempRepo.create()
+          : TempRepo.fromTemplate(template)
       made.push(repo)
       return repo
     })
+    const runs = made.reduce((sum, repo) => sum + repo.gateRuns, 0)
     for (const repo of made) repo.remove()
+    if (runs > maxGateRuns)
+      throw new Error(
+        `o caso rodou o gate ${runs} vezes, e o teto é ${maxGateRuns}: divida-o em casos menores (#59)`,
+      )
   },
 })
+
+/** The templates of this file, removed once every case is done. */
+const templates: TempRepo[] = []
+afterAll(() => {
+  for (const template of templates) template.remove()
+})
+
+/**
+ * A repository several cases start from, built by `build` the first time a
+ * case asks for it and copied for that case and every other (#59). The
+ * template lives outside any case, so no case's cleanup removes it, and no
+ * case ever gets the template itself: only a copy.
+ */
+function templated(
+  build: (fresh: Fresh) => Promise<TempRepo>,
+): (fresh: Fresh) => Promise<TempRepo> {
+  let template: Promise<TempRepo> | undefined
+  return async (fresh) => {
+    template ??= build(async () => {
+      const repo = await TempRepo.create()
+      templates.push(repo)
+      return repo
+    })
+    return fresh(await template)
+  }
+}
 
 vi.setConfig({ testTimeout: 120_000, maxConcurrency: 12 })
 
@@ -417,7 +461,7 @@ async function workBranch(
   return repo.head()
 }
 
-type Fresh = () => Promise<TempRepo>
+type Fresh = (template?: TempRepo) => Promise<TempRepo>
 
 /** A repository on the standard work branch, and the gate run over it. */
 async function local(
@@ -3976,7 +4020,7 @@ describe.concurrent('scripts/gate.mjs', () => {
        * The three slices, each cut from the one below: the first starts with
        * the intent, the last carries the Learn citing the parent.
        */
-      const stack = async (
+      const buildStack = async (
         fresh: Fresh,
         learn = `# Changelog\n\n${STACK_ENTRY}\n\nO que mudou.\n`,
       ) => {
@@ -4010,6 +4054,11 @@ describe.concurrent('scripts/gate.mjs', () => {
         )
         return repo
       }
+
+      /** The standard stack, built once and copied (#59); another Learn builds its own. */
+      const standardStack = templated((fresh) => buildStack(fresh))
+      const stack = (fresh: Fresh, learn?: string) =>
+        learn === undefined ? standardStack(fresh) : buildStack(fresh, learn)
 
       /** The local gate on `branch`, a slice, with its sub-issue and parent as given. */
       const onSlice = async (
@@ -4537,7 +4586,7 @@ describe.concurrent('scripts/gate.mjs', () => {
         })
 
       /** A stack whose first slice starts with code: nothing in it touches the intent. */
-      const stackWithoutIntent = async (fresh: Fresh) => {
+      const stackWithoutIntent = templated(async (fresh: Fresh) => {
         const repo = await fresh()
         await slice(
           repo,
@@ -4563,7 +4612,7 @@ describe.concurrent('scripts/gate.mjs', () => {
           },
         )
         return repo
-      }
+      })
 
       test('refuses a slice on main while a slice below is not merged, so the stack merges bottom first', async ({
         expect,
@@ -4630,7 +4679,7 @@ describe.concurrent('scripts/gate.mjs', () => {
       })
 
       /** The first slice merged; the middle one cut from a foreign lane (#60) whose ref is then gone. */
-      const middleOverForeign = async (fresh: Fresh) => {
+      const middleOverForeign = templated(async (fresh: Fresh) => {
         const repo = await fresh()
         await slice(
           repo,
@@ -4661,7 +4710,7 @@ describe.concurrent('scripts/gate.mjs', () => {
           'refs/remotes/origin/feature/60-outra',
         )
         return repo
-      }
+      })
 
       test('refuses a slice above the first that carries commits of a lane whose ref is gone', async ({
         expect,
@@ -5181,7 +5230,7 @@ describe.concurrent('scripts/gate.mjs', () => {
         )
       })
 
-      test('fails closed when the parent is refused, missing, or unread in CI', async ({
+      test('fails closed when the parent is refused, missing, or unread', async ({
         expect,
         fresh,
       }) => {
@@ -5234,6 +5283,12 @@ describe.concurrent('scripts/gate.mjs', () => {
           `o GitHub não disse de que repositório é a mãe #${PARENT} da fatia #44`,
         )
         expect(noRepo.result.verified).toBe(false)
+      })
+
+      test('fails closed in CI when the parent cannot be reached', async ({
+        expect,
+        fresh,
+      }) => {
         const inCi = await stack(fresh)
         const unreachable = await ciAt(inCi, BOTTOM, (head) => ({
           issue: sliceAnswer(BOTTOM),
@@ -5269,60 +5324,57 @@ describe.concurrent('scripts/gate.mjs', () => {
         expect(result.open).toBe(false)
       })
 
-      test('refuses every label trick on the slice and on the parent', async ({
-        expect,
-        fresh,
-      }) => {
-        const repo = await stack(fresh)
-        const cases: [string, GhAnswer, GhAnswer][] = [
-          [
-            'slice also in needs-triage',
-            sliceAnswer(MIDDLE, {
-              labels: ['enhancement', 'stack-slice', 'needs-triage'],
-            }),
-            parentAnswer(),
-          ],
-          [
-            'slice labels on a partial page',
-            sliceAnswer(MIDDLE, { labelsTotal: 3 }),
-            parentAnswer(),
-          ],
-          [
-            'parent labels on a partial page',
-            sliceAnswer(MIDDLE),
-            parentAnswer({ labelsTotal: 3 }),
-          ],
-          [
-            'parent with two state labels',
-            sliceAnswer(MIDDLE),
-            parentAnswer({
-              labels: ['enhancement', 'ready-for-human', 'ready-for-agent'],
-            }),
-          ],
-          [
-            'parent itself a slice',
-            sliceAnswer(MIDDLE),
-            parentAnswer({ labels: ['enhancement', 'stack-slice'] }),
-          ],
-          [
-            'parent ready label by another user',
-            sliceAnswer(MIDDLE),
-            parentAnswer({
-              events: [
-                ...defaultEvents(),
-                labeled('ready-for-agent', at('12:30'), {
-                  __typename: 'User',
-                  login: 'outra-pessoa',
-                }),
-              ],
-            }),
-          ],
-        ]
-        for (const [name, issue, parent] of cases) {
+      test.for<[string, GhAnswer, GhAnswer]>([
+        [
+          'slice also in needs-triage',
+          sliceAnswer(MIDDLE, {
+            labels: ['enhancement', 'stack-slice', 'needs-triage'],
+          }),
+          parentAnswer(),
+        ],
+        [
+          'slice labels on a partial page',
+          sliceAnswer(MIDDLE, { labelsTotal: 3 }),
+          parentAnswer(),
+        ],
+        [
+          'parent labels on a partial page',
+          sliceAnswer(MIDDLE),
+          parentAnswer({ labelsTotal: 3 }),
+        ],
+        [
+          'parent with two state labels',
+          sliceAnswer(MIDDLE),
+          parentAnswer({
+            labels: ['enhancement', 'ready-for-human', 'ready-for-agent'],
+          }),
+        ],
+        [
+          'parent itself a slice',
+          sliceAnswer(MIDDLE),
+          parentAnswer({ labels: ['enhancement', 'stack-slice'] }),
+        ],
+        [
+          'parent ready label by another user',
+          sliceAnswer(MIDDLE),
+          parentAnswer({
+            events: [
+              ...defaultEvents(),
+              labeled('ready-for-agent', at('12:30'), {
+                __typename: 'User',
+                login: 'outra-pessoa',
+              }),
+            ],
+          }),
+        ],
+      ])(
+        'refuses a label trick on the slice or on the parent: %s',
+        async ([name, issue, parent], { expect, fresh }) => {
+          const repo = await stack(fresh)
           const { result } = await onSlice(repo, MIDDLE, issue, parent)
           expect(result.open, name).toBe(false)
-        }
-      })
+        },
+      )
 
       test('refuses a copy of a slice below kept under another remote', async ({
         expect,
@@ -5439,80 +5491,77 @@ describe.concurrent('scripts/gate.mjs', () => {
         expect(parentOwn.result.open).toBe(false)
       })
 
-      test('refuses a slice after every revocation of the parent’s Approve', async ({
-        expect,
-        fresh,
-      }) => {
-        const repo = await stack(fresh)
-        const variants: [string, IssueOptions][] = [
-          [
-            'reopened after the Approve',
-            { events: [...defaultEvents(), reopened(at('12:10'))] },
-          ],
-          [
-            'Approve withdrawn',
-            {
-              comments: [
-                approve(),
-                comment('# Approve retirado\n\nNão.', at('12:30')),
-              ],
-            },
-          ],
-          [
-            'near-miss heading',
-            {
-              comments: [
-                approve(),
-                comment('## Approve retirado\n\nNão.', at('12:30')),
-              ],
-            },
-          ],
-          [
-            'comment deleted',
-            { events: [...defaultEvents(), deleted(at('12:30'))] },
-          ],
-          [
-            'older comment edited',
-            {
-              comments: [
-                comment('Um comentário.', at('11:00'), {
-                  lastEditedAt: at('12:30'),
-                }),
-                approve(),
-              ],
-            },
-          ],
-          ['body edited', { lastEditedAt: at('12:30') }],
-          [
-            'new # Plano',
-            {
-              comments: [
-                approve(),
-                comment(`# Plano\n\n${parentBody()}`, at('12:30')),
-              ],
-            },
-          ],
-          [
-            'ready label before the Approve',
-            {
-              events: [
-                labeled('enhancement', at('10:00')),
-                labeled('ready-for-agent', at('11:00')),
-              ],
-            },
-          ],
-          [
-            'Approve by another user',
-            {
-              comments: [
-                approve(at('12:00'), {
-                  author: { __typename: 'User', login: 'outra-pessoa' },
-                }),
-              ],
-            },
-          ],
-        ]
-        for (const [name, options] of variants) {
+      test.for<[string, IssueOptions]>([
+        [
+          'reopened after the Approve',
+          { events: [...defaultEvents(), reopened(at('12:10'))] },
+        ],
+        [
+          'Approve withdrawn',
+          {
+            comments: [
+              approve(),
+              comment('# Approve retirado\n\nNão.', at('12:30')),
+            ],
+          },
+        ],
+        [
+          'near-miss heading',
+          {
+            comments: [
+              approve(),
+              comment('## Approve retirado\n\nNão.', at('12:30')),
+            ],
+          },
+        ],
+        [
+          'comment deleted',
+          { events: [...defaultEvents(), deleted(at('12:30'))] },
+        ],
+        [
+          'older comment edited',
+          {
+            comments: [
+              comment('Um comentário.', at('11:00'), {
+                lastEditedAt: at('12:30'),
+              }),
+              approve(),
+            ],
+          },
+        ],
+        ['body edited', { lastEditedAt: at('12:30') }],
+        [
+          'new # Plano',
+          {
+            comments: [
+              approve(),
+              comment(`# Plano\n\n${parentBody()}`, at('12:30')),
+            ],
+          },
+        ],
+        [
+          'ready label before the Approve',
+          {
+            events: [
+              labeled('enhancement', at('10:00')),
+              labeled('ready-for-agent', at('11:00')),
+            ],
+          },
+        ],
+        [
+          'Approve by another user',
+          {
+            comments: [
+              approve(at('12:00'), {
+                author: { __typename: 'User', login: 'outra-pessoa' },
+              }),
+            ],
+          },
+        ],
+      ])(
+        'refuses a slice after the parent’s Approve is revoked: %s',
+        async ([name, options], { expect, fresh }) => {
+          const repo = await stack(fresh)
           const { result } = await onSlice(
             repo,
             MIDDLE,
@@ -5521,8 +5570,8 @@ describe.concurrent('scripts/gate.mjs', () => {
           )
           expect(step(result, 'approve').status, name).toBe('no')
           expect(result.open, name).toBe(false)
-        }
-      })
+        },
+      )
 
       test('judges a sub-issue by its own parent, not by another plan whose Stack names it', async ({
         expect,
@@ -5603,40 +5652,37 @@ describe.concurrent('scripts/gate.mjs', () => {
         )
       })
 
-      test('refuses a Stack whose branches are not all slices of the parent, read whole', async ({
-        expect,
-        fresh,
-      }) => {
-        const repo = await stack(fresh)
-        const rest = [{ number: 44 }, { number: 45 }]
-        const cases: [string, IssueOptions, string][] = [
-          [
-            'a sub-issue without the slice label',
-            {
-              subIssues: [
-                { number: 43, labels: ['enhancement', 'ready-for-agent'] },
-                ...rest,
-              ],
-            },
-            `a seção Stack cita ${BOTTOM}, mas a #43 não tem a label stack-slice`,
-          ],
-          [
-            'a sub-issue in another repository',
-            { subIssues: [{ number: 43, repo: 'alguem/outro' }, ...rest] },
-            `a seção Stack cita ${BOTTOM}, mas a #43 não é sub-issue da mãe #${PARENT} neste repositório`,
-          ],
-          [
-            'a sub-issue whose labels were read in part',
-            { subIssues: [{ number: 43, labelsTotal: 101 }, ...rest] },
-            `a seção Stack cita ${BOTTOM}, e as labels da #43 não foram lidas inteiras`,
-          ],
-          [
-            'more sub-issues than one page',
-            { subIssuesTotal: 101 },
-            `a mãe #${PARENT} tem 101 sub-issues e o gate leu 3: ele não julga a seção Stack sem ler todas`,
-          ],
-        ]
-        for (const [name, options, problem] of cases) {
+      const restOfStack = [{ number: 44 }, { number: 45 }]
+      test.for<[string, IssueOptions, string]>([
+        [
+          'a sub-issue without the slice label',
+          {
+            subIssues: [
+              { number: 43, labels: ['enhancement', 'ready-for-agent'] },
+              ...restOfStack,
+            ],
+          },
+          `a seção Stack cita ${BOTTOM}, mas a #43 não tem a label stack-slice`,
+        ],
+        [
+          'a sub-issue in another repository',
+          { subIssues: [{ number: 43, repo: 'alguem/outro' }, ...restOfStack] },
+          `a seção Stack cita ${BOTTOM}, mas a #43 não é sub-issue da mãe #${PARENT} neste repositório`,
+        ],
+        [
+          'a sub-issue whose labels were read in part',
+          { subIssues: [{ number: 43, labelsTotal: 101 }, ...restOfStack] },
+          `a seção Stack cita ${BOTTOM}, e as labels da #43 não foram lidas inteiras`,
+        ],
+        [
+          'more sub-issues than one page',
+          { subIssuesTotal: 101 },
+          `a mãe #${PARENT} tem 101 sub-issues e o gate leu 3: ele não julga a seção Stack sem ler todas`,
+        ],
+      ])(
+        'refuses a Stack whose branches are not all slices of the parent, read whole: %s',
+        async ([name, options, problem], { expect, fresh }) => {
+          const repo = await stack(fresh)
           const { result } = await onSlice(
             repo,
             MIDDLE,
@@ -5646,8 +5692,8 @@ describe.concurrent('scripts/gate.mjs', () => {
           expect(step(result, 'branch-in-plan').status, name).toBe('no')
           expect(step(result, 'branch-in-plan').detail, name).toContain(problem)
           expect(result.open, name).toBe(false)
-        }
-      })
+        },
+      )
 
       test('turns the slice below red when a slice above is merged into it', async ({
         expect,
@@ -5872,7 +5918,7 @@ describe.concurrent('scripts/gate.mjs', () => {
 
       // Reopening resets the Approve on any issue. A slice has no Approve of
       // its own, so its acts count against its parent's, for this slice.
-      test('counts the slice’s own reopening, withdrawal and revision against the parent’s Approve', async ({
+      test('counts the slice’s own reopening against the parent’s Approve, and a new Approve renews it', async ({
         expect,
         fresh,
       }) => {
@@ -5904,11 +5950,16 @@ describe.concurrent('scripts/gate.mjs', () => {
           }),
         )
         expect(step(renewed.result, 'approve').status).toBe('ok')
-        for (const [name, body] of [
-          ['a withdrawal', '# Approve retirado\n\nPare esta fatia.'],
-          ['a revision', '# Plano\n\nOutra fatia.'],
-          ['a title naming Approve', '## Approve da fatia\n\nOk.'],
-        ]) {
+      })
+
+      test.for([
+        ['a withdrawal', '# Approve retirado\n\nPare esta fatia.'],
+        ['a revision', '# Plano\n\nOutra fatia.'],
+        ['a title naming Approve', '## Approve da fatia\n\nOk.'],
+      ] as const)(
+        'counts %s on the slice against the parent’s Approve',
+        async ([name, body], { expect, fresh }) => {
+          const repo = await stack(fresh)
           const { result } = await onSlice(
             repo,
             MIDDLE,
@@ -5918,7 +5969,14 @@ describe.concurrent('scripts/gate.mjs', () => {
           expect(step(result, 'approve').detail, name).toContain(
             `(na mãe #${PARENT} e na fatia #44)`,
           )
-        }
+        },
+      )
+
+      test('does not count the slice’s own Approve, and an edit on the slice revokes the parent’s', async ({
+        expect,
+        fresh,
+      }) => {
+        const repo = await stack(fresh)
         const edited = await onSlice(
           repo,
           MIDDLE,
