@@ -42,7 +42,7 @@ Uma entrada por mudança mergeada, da mais nova para a mais antiga, escrita no p
 
 - **Conferir a forma da resposta achou o que conferir a rota não achava.** O e2e da #6 via uma rota para cada operação, e o da #8, cada requisição no próprio handler. Só ler o corpo contra o schema mostrou o array vazio, a string sem corpo e o header ausente.
 - **Um middleware do Nest para todas as rotas é uma rota do Express.** Os e2e do roteador da #6 e da #8 o pegaram na hora. Rodando o app, nada mudava.
-- **Uma falha intermitente num teste de muitas requisições pode vir de outro processo.** O `403 text/plain`, que o app não sabe dar, apontou para a porta efêmera do supertest, não para o seed.
+- **Uma falha intermitente num teste de muitas requisições pode vir de outro processo.** O `403 text/plain`, que o app não sabe dar, apontou para o supertest, não para o seed: ele escuta no curinga e conecta em `127.0.0.1`, onde, no macOS, outro processo na mesma porta responde no lugar do app. O mecanismo foi provado, e a origem daquele `403`, inferida.
 - **O plano publicado no mesmo comando que outra consulta não tirou o marcador do `plan-to-issue`.** O hook só aceita um `gh issue comment` sozinho na linha. Publicar de novo cancelaria o Approve, e o dono apagou o marcador à mão.
 - **Um `npm install <pacote>` sem versão sobe a versão do lockfile.** Para usar direto uma dependência transitiva, declare a versão que o lockfile já tem.
 - **Um e2e que só confere a resposta não guarda um tipo.** Com o gerador de aliases revertido, os dois testes novos e o `check:all` passavam, porque `string[]` cabe em `{}`. Um `@ts-expect-error` num teste é o que faz o `tsc` notar.
