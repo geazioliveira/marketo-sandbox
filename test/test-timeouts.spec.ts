@@ -1267,32 +1267,71 @@ function runnerFor(node: ts.Node, scope: Scope): Runner | undefined {
     })
     return { kind: role, call: parent, timeout, unread }
   }
-  // A fixture: a function in the object handed to `.extend`.
-  const object = ts.isMethodDeclaration(argument)
-    ? parent
-    : ts.isPropertyAssignment(parent)
-      ? parent.parent
+  // A fixture: a function in the object handed to `.extend`, alone or as
+  // the tuple `[fn, options]`, whose options may give it a timeout.
+  const tuple =
+    ts.isArrayLiteralExpression(parent) && parent.elements[0] === argument
+      ? parent
+      : undefined
+  const value = tuple ?? argument
+  const object = ts.isMethodDeclaration(value)
+    ? value.parent
+    : ts.isPropertyAssignment(value.parent)
+      ? value.parent.parent
       : undefined
   const call = object?.parent
   if (
-    object !== undefined &&
-    ts.isObjectLiteralExpression(object) &&
-    call !== undefined &&
-    ts.isCallExpression(call) &&
-    ts.isPropertyAccessExpression(call.expression) &&
-    call.expression.name.text === 'extend' &&
-    vitestRole(call.expression.expression, scope) === 'case'
+    object === undefined ||
+    !ts.isObjectLiteralExpression(object) ||
+    call === undefined ||
+    !ts.isCallExpression(call) ||
+    !ts.isPropertyAccessExpression(call.expression) ||
+    call.expression.name.text !== 'extend' ||
+    vitestRole(call.expression.expression, scope) !== 'case'
   )
-    return { kind: 'case', call }
-  return undefined
+    return undefined
+  const options =
+    tuple?.elements[1] === undefined
+      ? undefined
+      : objectOf(tuple.elements[1], scope)
+  if (tuple?.elements[1] !== undefined && options === undefined)
+    return { kind: 'case', call, unread: tuple.elements[1].getText() }
+  const last =
+    options === undefined ? undefined : lastValue(options, 'timeout', scope)
+  return last === undefined
+    ? { kind: 'case', call }
+    : 'unread' in last
+      ? { kind: 'case', call, unread: last.unread }
+      : { kind: 'case', call, timeout: last.value }
 }
 
-/** The name a function is declared or assigned under, if any. */
-function functionName(fn: ts.Node): ts.Identifier | undefined {
-  if (ts.isFunctionDeclaration(fn)) return fn.name
+/**
+ * The name a function is reached by: its declaration or the `const` it is
+ * assigned to, or, for a method of an object literal assigned to a `const`,
+ * that name and the member (`helpers.body`).
+ */
+function functionName(
+  fn: ts.Node,
+): { name: ts.Identifier; member?: string } | undefined {
+  if (ts.isFunctionDeclaration(fn))
+    return fn.name === undefined ? undefined : { name: fn.name }
   const holder = wrapped(fn).parent
-  return ts.isVariableDeclaration(holder) && ts.isIdentifier(holder.name)
-    ? holder.name
+  if (ts.isVariableDeclaration(holder) && ts.isIdentifier(holder.name))
+    return { name: holder.name }
+  const member = ts.isMethodDeclaration(fn)
+    ? fn
+    : ts.isPropertyAssignment(holder)
+      ? holder
+      : undefined
+  const object = member?.parent
+  const owner = object?.parent
+  return member !== undefined &&
+    object !== undefined &&
+    ts.isObjectLiteralExpression(object) &&
+    owner !== undefined &&
+    ts.isVariableDeclaration(owner) &&
+    ts.isIdentifier(owner.name)
+    ? { name: owner.name, member: member.name.getText() }
     : undefined
 }
 
@@ -1316,12 +1355,40 @@ function runnersOf(
     if (!ts.isFunctionLike(current)) continue
     const runner = runnerFor(current, scope)
     if (runner !== undefined) return [runner]
-    const name = functionName(current)
-    if (name === undefined || seen.has(current)) continue
+    const reached = functionName(current)
+    if (reached === undefined || seen.has(current)) continue
     seen.add(current)
-    const uses = references(name).filter(
-      (use) => use.pos < current.pos || use.end > current.end,
-    )
+    const outside = current
+    /**
+     * The places the function is used: each use of its name, or of
+     * `name.member`, and, through an alias (`const alias = body`), each use
+     * of the alias.
+     */
+    const usesOf = (name: ts.Identifier, member?: string): ts.Node[] =>
+      references(name)
+        .filter((use) => use.pos < outside.pos || use.end > outside.end)
+        .flatMap((use): ts.Node[] => {
+          if (member === undefined) return [use]
+          const access = use.parent
+          return ts.isPropertyAccessExpression(access) &&
+            access.expression === use &&
+            access.name.text === member
+            ? [access]
+            : []
+        })
+        .flatMap((use) => {
+          const holder = wrapped(use).parent
+          if (
+            !ts.isVariableDeclaration(holder) ||
+            !ts.isIdentifier(holder.name) ||
+            holder.initializer !== wrapped(use) ||
+            seen.has(holder)
+          )
+            return [use]
+          seen.add(holder)
+          return usesOf(holder.name)
+        })
+    const uses = usesOf(reached.name, reached.member)
     if (uses.length > 0)
       return uses.flatMap((use) => {
         const direct = runnerFor(use, scope)
@@ -2404,6 +2471,28 @@ describe('auditSpec', () => {
       'x.spec.ts:5: o caso tem 5000 ms, e o processo de x.spec.ts:4 tem 60000 ms: o caso precisa esperar mais que o processo',
       'x.spec.ts:6: o caso tem 5000 ms, e o processo de x.spec.ts:4 tem 60000 ms: o caso precisa esperar mais que o processo',
       'x.spec.ts:8: o caso tem 5000 ms, e o processo de x.spec.ts:4 tem 60000 ms: o caso precisa esperar mais que o processo',
+    ])
+  })
+
+  it('follows a function through an alias or an object method, and reads a fixture tuple', () => {
+    expect(
+      audit(
+        `import { test as base } from 'vitest'`,
+        `import { spawnSync } from 'node:child_process'`,
+        `vi.setConfig({ testTimeout: 120_000 })`,
+        `function body() { spawnSync('git', [], { timeout: 60_000 }) }`,
+        `const alias = body`,
+        `base('alias', alias, 5_000)`,
+        `const helpers = { run() { spawnSync('git', [], { timeout: 60_000 }) } }`,
+        `base('method', helpers.run, 5_000)`,
+        `const test = base.extend<{ fresh: number }>({`,
+        `  fresh: [async ({}, use) => { spawnSync('git', [], { timeout: 60_000 }); await use(1) }, { timeout: 30_000 }],`,
+        `})`,
+      ),
+    ).toEqual([
+      'x.spec.ts:6: o caso tem 5000 ms, e o processo de x.spec.ts:4 tem 60000 ms: o caso precisa esperar mais que o processo',
+      'x.spec.ts:8: o caso tem 5000 ms, e o processo de x.spec.ts:7 tem 60000 ms: o caso precisa esperar mais que o processo',
+      'x.spec.ts:9: o caso tem 30000 ms, e o processo de x.spec.ts:10 tem 60000 ms: o caso precisa esperar mais que o processo',
     ])
   })
 
