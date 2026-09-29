@@ -34,6 +34,10 @@ Uma entrada por mudança mergeada, da mais nova para a mais antiga, escrita no p
   - os helpers são registrados pelos nomes de export, default e re-export.
 - **Da oitava revisão, o ternário guarda cada ramo.** O timeout de uma chamada guarda todo valor, se algum ramo repassa o de quem chama e se algum não dá nenhum. O default export anônimo de um helper é lido.
 - **Da nona revisão, a classe exportada como default também é lida.**
+- **Da décima revisão:**
+  - o `require` do topo de um helper é lido;
+  - num spec, o timeout tirado de um parâmetro não é lido;
+  - o spec vira disparador pelo uso como valor, e não pelo import.
 - **A regra virou pattern:** [Timeouts de testes que disparam processos](../knowledge/patterns/process-test-timeouts.md).
 
 ### Números medidos
