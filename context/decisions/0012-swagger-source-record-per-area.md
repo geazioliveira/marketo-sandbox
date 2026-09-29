@@ -4,7 +4,7 @@
 
 - **O critério sem prova.** O [project intent](../intent/project-intent.md) pede que o mock registre qual cópia do Swagger o gerou, com o sha256. Até a #19, o sha256 de cada documento só estava na tabela da [ADR 0004](0004-swagger-as-single-source-with-committed-generated-code.md) e no changelog, e o cabeçalho de gerado cita o documento, não a cópia.
 - **O furo, medido na #19 sobre `e5b013c`.** Com um `\n` a mais no fim de `docs/marketo-swagger-asset.json`, o `npm run check:all` saía com 0 e imprimia as 16 linhas "are current". Nenhum gerador lê o `info` nem o espaço entre os tokens, então uma mudança assim não mudava nenhum arquivo gerado, e a tabela da ADR 0004 envelhecia em silêncio.
-- **As quebras de linha.** Quatro documentos estão no índice com LF, e `docs/marketo-swagger-user.json` com CRLF, como veio da Adobe. Medido no planejamento da #19: num checkout `core.autocrlf=true`, o sha256 dos quatro documentos LF muda (asset vira `9269d0fc…`), e o do user não. O `check:all` não via isso porque nenhum arquivo gerado dependia dos bytes do documento: o `json.loads` ignora o espaço entre os tokens. O `read_text()` do `check_output()` só explica por que os `.ts` gerados, regravados com CRLF, também passavam.
+- **As quebras de linha.** Quatro documentos estão no índice com LF, e `docs/marketo-swagger-user.json` com CRLF, como veio da Adobe. Medido no planejamento da #19: num checkout `core.autocrlf=true`, o sha256 dos quatro documentos LF muda (asset vira `9269d0fc…`), e o do user não. O `check:all` não via isso porque nenhum arquivo gerado dependia dos bytes do documento: o `json.loads` ignora o espaço entre os tokens. O `read_text()` do `check_output()` de então só explica por que os `.ts` gerados, regravados com CRLF, também passavam.
 - **A decisão em aberto depende disso.** A escolha entre a cópia de assets daqui (`ced6c339…`) e a do lite-campaign (`ff7ec628…`) sai de um diff nas rotas que o consumidor usa, e o diff só vale se o mock disser qual cópia gerou cada versão.
 
 ## Decisão
@@ -20,7 +20,7 @@
 
 - **Um arquivo por área muda só quando o documento muda.** Trocar uma descrição do Swagger de assets muda o documento, o arquivo gerado daquela descrição e o registro: 3 arquivos (medido no planejamento).
 - **A regra `-text` é a única que mantém os cinco sha256 sem esconder o diff.** O `binary` também os mantém, mas esconde o diff do Swagger na revisão. Medido no planejamento: com `-text`, um checkout `core.autocrlf=true` mantém os cinco; com `text eol=lf`, o `git status` dá o user como modificado, porque o índice dele tem CRLF.
-- **O registro onde o gerador já escreve.** A raiz de `<área>-definitions/` não tinha arquivo nenhum, então o registro não colide com schema nenhum, e o `write_output()` e o `check_output()` já cuidam dele sem código novo.
+- **O registro onde o gerador já escreve.** A raiz de `<área>-definitions/` não tinha arquivo nenhum, então o registro não colide com schema nenhum, e o `write_output()` e o `check_output()`, hoje `write_outputs()` e `check_outputs()`, já cuidam dele sem código novo.
 - **Sem runtime por ora.** Expor o registro em `/api-json` pediria um módulo escrito à mão com uma linha por área, tiraria a montagem da Swagger UI do `bootstrap()` e faria um consumidor depender do `/api-json`. O esquema de release e tag, que diria onde ler o registro, ainda está em aberto no project intent.
 
 ## Alternativas consideradas
@@ -28,7 +28,7 @@
 | Opção | Por que não |
 | --- | --- |
 | O sha256 no cabeçalho de todo arquivo gerado | Trocar uma descrição do Swagger de assets mudaria 583 arquivos em vez de 3 (medido no planejamento, no corpo da #19), e o diff esconderia a mudança de verdade |
-| Um manifesto único com as cinco áreas | Um `--target` reescreveria a linha de uma área que não regenerou, ou teria de ler e mesclar o manifesto, e o `check_output()` compara pasta por pasta |
+| Um manifesto único com as cinco áreas | Um `--target` reescreveria a linha de uma área que não regenerou, ou teria de ler e mesclar o manifesto, e o `check_output()`, hoje `check_outputs()`, compara pasta por pasta |
 | Normalizar as quebras antes do hash | O sha256 do user deixaria de ser o do `shasum -a 256` do arquivo commitado e o do blob da Adobe |
 | `binary` no `.gitattributes` | Também fixa os bytes, mas esconde o diff do Swagger na revisão |
 | `text eol=lf` no `.gitattributes` | O user, com CRLF no índice, passaria a aparecer modificado no `git status` |
@@ -58,3 +58,4 @@
 
 - **Criado**: 2026-09-28 (Fase: Build), do plano vigente da #19, com a pergunta 1 respondida no Approve do dono (#19)
 - **Status**: Accepted
+- **Atualizado**: 2026-09-29 (Fase: Build), o `write_output()` e o `check_output()` passaram a `write_outputs()` e `check_outputs()`, na [ADR 0015](0015-generators-format-in-memory-at-the-destination-path.md) (#29)

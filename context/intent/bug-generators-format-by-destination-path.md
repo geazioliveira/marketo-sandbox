@@ -10,8 +10,8 @@
 
 ## Causa raiz
 
-- **O `--check` formata noutro caminho.** O `check_output()` grava a cópia em `.codegen-tmp/src/…` (`scripts/marketo_codegen.py:23`, `:379-408`), e o Prettier resolve a config pelo caminho do arquivo. O modo de gerar e o `format:check` formatam em `src/`.
-- **O modo de gerar grava antes de formatar.** O `write_output()` apaga a pasta, grava o texto cru e só então formata (`scripts/marketo_codegen.py:365-376`).
+- **O `--check` formata noutro caminho.** O `check_output()` grava a cópia em `.codegen-tmp/src/…` (`d50fd00:scripts/marketo_codegen.py:23`, `:379-408`), e o Prettier resolve a config pelo caminho do arquivo. O modo de gerar e o `format:check` formatam em `src/`.
+- **O modo de gerar grava antes de formatar.** O `write_output()` apaga a pasta, grava o texto cru e só então formata (`d50fd00:scripts/marketo_codegen.py:365-376`).
 - **Cada alvo grava antes do próximo formatar.** O `main()` de cada gerador chama o `write_output()` alvo por alvo, então uma falha num alvo encontra os anteriores já regravados.
 
 ## Abordagem da correção

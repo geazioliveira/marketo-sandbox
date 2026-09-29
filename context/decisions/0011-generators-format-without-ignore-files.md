@@ -2,9 +2,11 @@
 
 ## Contexto
 
+Desde a #29, esta decisão está substituída pela [ADR 0015](0015-generators-format-in-memory-at-the-destination-path.md): os geradores formatam em memória, pela API do Prettier, com a config do caminho de destino. As citações de código abaixo levam o commit `d50fd00`, o último com o CLI.
+
 - **A saída passa pelo Prettier.** Os três geradores formatam o que escrevem com o Prettier de `node_modules`, e o `--check` compara a cópia formatada com a saída commitada ([ADR 0004](0004-swagger-as-single-source-with-committed-generated-code.md), [ADR 0008](0008-toolchain.md)). Se um dos dois lados não for formatado, a comparação mente.
 - **O Prettier 3 pula em silêncio um arquivo ignorado, mesmo passado pelo nome.** Ele lê o `.gitignore` e o `.prettierignore` por padrão. No `--write` e no `-l`, sai com 0 sem mensagem; no `--check`, sai com 0 dizendo "All matched files use Prettier code style!" (Prettier 3.9.6, travado no lock; medido na #7).
-- **A #6 tirou o `.gitignore` do caminho.** A regra `/.codegen-tmp/` do `.gitignore:41` deixava sem formatação a cópia que o `--check` compara, e os 459 DTOs pareciam defasados. A #6 passou a chamar o Prettier com `--ignore-path .prettierignore` (`3ddceb4:scripts/marketo_codegen.py:229-233`) e registrou que "o Prettier dos geradores lê só o `.prettierignore`" (ADR 0004 e ADR 0008), com a regra de convivência "Não ponha caminhos de `src/` num `.prettierignore`", deixada para a #7.
+- **A #6 tirou o `.gitignore` do caminho.** A regra `/.codegen-tmp/` do `d50fd00:.gitignore:41` deixava sem formatação a cópia que o `--check` compara, e os 459 DTOs pareciam defasados. A #6 passou a chamar o Prettier com `--ignore-path .prettierignore` (`3ddceb4:scripts/marketo_codegen.py:229-233`) e registrou que "o Prettier dos geradores lê só o `.prettierignore`" (ADR 0004 e ADR 0008), com a regra de convivência "Não ponha caminhos de `src/` num `.prettierignore`", deixada para a #7.
 - **Medido na #7, em `3ddceb4`:**
   - `/.codegen-tmp/` num `.prettierignore` trazia de volta os 459 defasados falsos;
   - uma regra sem âncora, como `identity/`, fazia gerar gravar sem formatar e sair com 0, e depois os três `--check` e o `format:check` respondiam que estava tudo certo;
@@ -13,9 +15,9 @@
 
 ## Decisão
 
-- **Nenhum arquivo de ignore alcança a saída gerada.** Os geradores chamam o Prettier com `--write --no-color --no-require-pragma --range-start=0 --range-end=Infinity --ignore-path=` e os caminhos relativos à raiz (`scripts/marketo_codegen.py:319-362`). O `--ignore-path=` vazio desliga o `.gitignore` e o `.prettierignore`. Esta decisão substitui "o Prettier dos geradores lê só o `.prettierignore`", que a #6 registrou nas ADRs 0004 e 0008.
+- **Nenhum arquivo de ignore alcança a saída gerada.** Os geradores chamam o Prettier com `--write --no-color --no-require-pragma --range-start=0 --range-end=Infinity --ignore-path=` e os caminhos relativos à raiz (`d50fd00:scripts/marketo_codegen.py:319-362`). O `--ignore-path=` vazio desliga o `.gitignore` e o `.prettierignore`. Esta decisão substitui "o Prettier dos geradores lê só o `.prettierignore`", que a #6 registrou nas ADRs 0004 e 0008.
 - **O gerador confere que o Prettier processou cada arquivo.** Todo caminho passado precisa aparecer no relatório por arquivo do `--write` (`<caminho> <N>ms`, com `(unchanged)` quando nada muda). Um que falte para a execução. As variáveis `PRETTIER_*` saem do ambiente do Prettier, porque mudam o que o CLI imprime: o `PRETTIER_EXPERIMENTAL_CLI` formata sem esse relatório, e o `PRETTIER_PERF_REPEAT` nem grava nem relata.
-- **O gerador confere o Prettier e o node antes de mexer na saída.** O Prettier precisa existir e ser executável, e um que não roda sai com 2 mesmo assim. `prettier_environment()` roda antes do `refuse_foreign_files()` e do `rmtree` (`scripts/marketo_codegen.py:294-316`). O node vem do `NODE_BIN`, do `PATH`, de `~/.nvm`, de `/usr/local/bin` ou de `/opt/homebrew/bin`, nessa ordem, e só conta um `node` que é arquivo executável (`:268-291`), e um `NODE_BIN` sem um node executável é erro. A pasta escolhida entra no `PATH` do Prettier como caminho absoluto, porque ele roda com `cwd` na raiz.
+- **O gerador confere o Prettier e o node antes de mexer na saída.** O Prettier precisa existir e ser executável, e um que não roda sai com 2 mesmo assim. `prettier_environment()` roda antes do `refuse_foreign_files()` e do `rmtree` (`d50fd00:scripts/marketo_codegen.py:294-316`). O node vem do `NODE_BIN`, do `PATH`, de `~/.nvm`, de `/usr/local/bin` ou de `/opt/homebrew/bin`, nessa ordem, e só conta um `node` que é arquivo executável (`d50fd00:scripts/marketo_codegen.py:268-291`), e um `NODE_BIN` sem um node executável é erro. A pasta escolhida entra no `PATH` do Prettier como caminho absoluto, porque ele roda com `cwd` na raiz.
 - **A saída 2 quer dizer "não consegui formatar".** A mensagem vai para o stderr, sem traceback, e diz o que falta. A saída 1 continua querendo dizer defasado, e também cobre as recusas de `--swagger` e `--area` que a #6 trouxe e a recusa de duas rotas que se capturam uma à outra, que a #8 trouxe ([ADR 0005](0005-nestjs-express-one-module-per-tag.md)). O argparse também sai com 2 num uso errado, e a mensagem distingue os dois casos. Um traceback, como o de um Python anterior ao 3.9 ([ADR 0008](0008-toolchain.md)), sai com 1. No modo de gerar, a mensagem de saída 2 diz também como desfazer a pasta que já foi regravada: rodar o gerador de novo quando o Prettier funcionar, ou, numa área registrada, `git checkout` e `git clean` na pasta, e numa área avulsa, apagá-la.
 
 ## Racional
@@ -60,4 +62,6 @@
 ## Status
 
 - **Criado**: 2026-09-26 (Fase: Build), da pergunta 1 do plano vigente da #7, aceita no Approve do dono (#7)
-- **Status**: Accepted
+- **Status**: Superseded
+- **Substituída por**: [0015: Os geradores formatam em memória, com a config do caminho de destino, antes de tocar na saída](0015-generators-format-in-memory-at-the-destination-path.md)
+- **Atualizado**: 2026-09-29 (Fase: Build), substituída pela ADR 0015, que resolve os dois limites das Consequências; as citações de código passaram a levar o commit `d50fd00` (#29)
