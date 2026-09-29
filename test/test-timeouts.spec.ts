@@ -796,6 +796,14 @@ function declaredFunction(
   return fn !== undefined && ts.isFunctionLike(fn) ? fn : undefined
 }
 
+/** A function or class declared as `export default`. */
+const isDefaultExport = (
+  statement: ts.FunctionDeclaration | ts.ClassDeclaration,
+): boolean =>
+  (ts.getModifiers(statement) ?? []).some(
+    (modifier) => modifier.kind === ts.SyntaxKind.DefaultKeyword,
+  )
+
 /** The function an anonymous default export is: `export default function ()`, `export default () =>`. */
 function anonymousDefault(
   statement: ts.Statement,
@@ -803,9 +811,7 @@ function anonymousDefault(
   if (
     ts.isFunctionDeclaration(statement) &&
     statement.name === undefined &&
-    (ts.getModifiers(statement) ?? []).some(
-      (modifier) => modifier.kind === ts.SyntaxKind.DefaultKeyword,
-    )
+    isDefaultExport(statement)
   )
     return statement
   if (ts.isExportAssignment(statement) && !statement.isExportEquals) {
@@ -868,6 +874,7 @@ function analyzeSupport(
         const fn = anonymousDefault(statement)
         const isDefault =
           fn !== undefined ||
+          (ts.isClassDeclaration(statement) && isDefaultExport(statement)) ||
           (ts.isExportAssignment(statement) && !statement.isExportEquals)
         const index =
           fn?.parameters.findIndex((parameter) =>
@@ -904,11 +911,10 @@ function analyzeSupport(
     const byName = helpers.get(module.name)!
     for (const statement of files[index].statements) {
       if (
-        ts.isFunctionDeclaration(statement) &&
+        (ts.isFunctionDeclaration(statement) ||
+          ts.isClassDeclaration(statement)) &&
         statement.name !== undefined &&
-        (ts.getModifiers(statement) ?? []).some(
-          (modifier) => modifier.kind === ts.SyntaxKind.DefaultKeyword,
-        )
+        isDefaultExport(statement)
       )
         byName.set('default', byName.get(statement.name.text)!)
       if (
@@ -1621,6 +1627,32 @@ describe('analyzeSupport', () => {
       spawns: true,
       timeouts: [{ ms: 1_000, at: 'base.ts:2' }],
     })
+  })
+
+  it('reads a class exported as default, named or not', () => {
+    const named = analyze([
+      'base',
+      lines(
+        `import { spawnSync } from 'node:child_process'`,
+        `export default class Repo { git() { return spawnSync('git', [], { timeout: 60_000 }) } }`,
+      ),
+    ])
+    expect(named.helpers.get('base')?.get('default')).toBe(
+      named.helpers.get('base')?.get('Repo'),
+    )
+    expect(named.helpers.get('base')?.get('default')).toMatchObject({
+      spawns: true,
+      timeouts: [{ ms: 60_000, at: 'base.ts:2' }],
+    })
+    const anonymous = analyze([
+      'base',
+      lines(
+        `import { spawnSync } from 'node:child_process'`,
+        `export default class { git() { return spawnSync('git') } }`,
+      ),
+    ])
+    expect(anonymous.helpers.get('base')?.get('default')?.spawns).toBe(true)
+    expect(anonymous.problems).toEqual([untimedAt('base.ts:2', 'spawnSync')])
   })
 
   it('registers a helper under every name it is exported with', () => {
