@@ -514,19 +514,29 @@ function delegates(expression: ts.Expression, scope: Scope): boolean {
   )
 }
 
-/** The timeout a call gives its process, as the guard reads it. */
+/**
+ * The timeout a call gives its process, as the guard reads it, over every
+ * way the options can come out (a ternary has two): every explicit value,
+ * whether some way hands the caller's timeout on, and whether some way gives
+ * none. Or unreadable, when some way gives one the guard cannot read.
+ */
 type CallTimeout =
-  | { kind: 'none' }
-  | { kind: 'value'; ms: number }
+  | { kind: 'read'; values: number[]; delegated: boolean; missing: boolean }
   | { kind: 'unread'; text: string }
-  | { kind: 'delegated' }
+
+const noTimeout: CallTimeout = {
+  kind: 'read',
+  values: [],
+  delegated: false,
+  missing: true,
+}
 
 /**
  * The timeout in a call's options, read in order as the object is built: a
  * `timeout` property, or a spread that comes after it and may replace it.
  * A spread of the caller's options (a parameter typed with a `timeout`)
- * hands the timeout to the caller; a spread the guard cannot see into makes
- * it unreadable.
+ * hands the timeout to the caller, and keeps the earlier one for a caller
+ * that gives none; a spread the guard cannot see into makes it unreadable.
  */
 function timeoutOf(
   call: ts.CallExpression,
@@ -534,11 +544,9 @@ function timeoutOf(
   target: Target | undefined,
   helperOf: (target: Target | undefined) => Helper | undefined,
 ): CallTimeout {
-  const none: CallTimeout = { kind: 'none' }
-  /** The object's timeout, reading its properties in order onto `timeout`. */
   const fromObject = (
     object: ts.ObjectLiteralExpression,
-    timeout: CallTimeout = none,
+    timeout: CallTimeout = noTimeout,
   ): CallTimeout => {
     for (const property of object.properties) {
       if (ts.isSpreadAssignment(property)) {
@@ -546,9 +554,13 @@ function timeoutOf(
         timeout =
           spread !== undefined
             ? fromObject(spread, timeout)
-            : delegates(property.expression, scope)
-              ? { kind: 'delegated' }
-              : { kind: 'unread', text: `...${property.expression.getText()}` }
+            : !delegates(property.expression, scope)
+              ? { kind: 'unread', text: `...${property.expression.getText()}` }
+              : timeout.kind === 'unread'
+                ? timeout
+                : // The caller must give a timeout now, and an earlier one
+                  // stays for a caller that gives none.
+                  { ...timeout, delegated: true, missing: false }
         continue
       }
       const value = ts.isPropertyAssignment(property)
@@ -559,42 +571,46 @@ function timeoutOf(
       if (value === undefined || property.name?.getText() !== 'timeout')
         continue
       if (delegates(value, scope)) {
-        timeout = { kind: 'delegated' }
+        timeout = { kind: 'read', values: [], delegated: true, missing: false }
         continue
       }
       const ms = valueOf(value, scope)
       timeout =
         ms === undefined || !(ms > 0)
           ? { kind: 'unread', text: value.getText() }
-          : { kind: 'value', ms }
+          : { kind: 'read', values: [ms], delegated: false, missing: false }
     }
     return timeout
   }
-  /** Either branch may run: the worse of the two, the longer of two values. */
+  /** Either branch may run: every value, and any branch that delegates or gives none. */
   const either = (a: CallTimeout, b: CallTimeout): CallTimeout =>
-    a.kind === 'unread' || b.kind === 'unread'
-      ? a.kind === 'unread'
-        ? a
-        : b
-      : a.kind === 'delegated' || b.kind === 'delegated'
-        ? { kind: 'delegated' }
-        : a.kind === 'value' && b.kind === 'value'
-          ? { kind: 'value', ms: Math.max(a.ms, b.ms) }
-          : a.kind === 'value'
-            ? a
-            : b
-  const fromArgument = (argument: ts.Expression): CallTimeout => {
+    a.kind === 'unread'
+      ? a
+      : b.kind === 'unread'
+        ? b
+        : {
+            kind: 'read',
+            values: [...a.values, ...b.values],
+            delegated: a.delegated || b.delegated,
+            missing: a.missing || b.missing,
+          }
+  /** The options an argument gives, or nothing when it is not options. */
+  const fromArgument = (argument: ts.Expression): CallTimeout | undefined => {
     const value = unwrap(argument)
     if (ts.isConditionalExpression(value))
-      return either(fromArgument(value.whenTrue), fromArgument(value.whenFalse))
+      return either(
+        fromArgument(value.whenTrue) ?? noTimeout,
+        fromArgument(value.whenFalse) ?? noTimeout,
+      )
     const object = objectOf(value, scope)
     if (object !== undefined) return fromObject(object)
-    if (delegates(value, scope)) return { kind: 'delegated' }
+    if (delegates(value, scope))
+      return { kind: 'read', values: [], delegated: true, missing: false }
     // Options handed to a helper that the guard cannot see into may replace
     // its timeout with any other.
     return target?.kind === 'helper'
       ? { kind: 'unread', text: argument.getText() }
-      : none
+      : undefined
   }
   // Any object handed to a child_process function is its options; a helper
   // takes them at its parameter typed with a `timeout`, and only there (a
@@ -606,9 +622,12 @@ function timeoutOf(
       : optionsAt === undefined
         ? []
         : call.arguments.slice(optionsAt, optionsAt + 1)
-  return options
-    .map(fromArgument)
-    .reduce((timeout, next) => (next.kind === 'none' ? timeout : next), none)
+  return (
+    options
+      .map(fromArgument)
+      .filter((timeout) => timeout !== undefined)
+      .at(-1) ?? noTimeout
+  )
 }
 
 /** The object literal an expression is, or a `const` it names is bound to. */
@@ -777,6 +796,26 @@ function declaredFunction(
   return fn !== undefined && ts.isFunctionLike(fn) ? fn : undefined
 }
 
+/** The function an anonymous default export is: `export default function ()`, `export default () =>`. */
+function anonymousDefault(
+  statement: ts.Statement,
+): ts.SignatureDeclaration | undefined {
+  if (
+    ts.isFunctionDeclaration(statement) &&
+    statement.name === undefined &&
+    (ts.getModifiers(statement) ?? []).some(
+      (modifier) => modifier.kind === ts.SyntaxKind.DefaultKeyword,
+    )
+  )
+    return statement
+  if (ts.isExportAssignment(statement) && !statement.isExportEquals) {
+    const value = unwrap(statement.expression)
+    if (ts.isArrowFunction(value) || ts.isFunctionExpression(value))
+      return value
+  }
+  return undefined
+}
+
 /** The position of a function's parameter typed with a `timeout`. */
 function optionsIndex(
   statement: ts.Statement,
@@ -822,14 +861,28 @@ function analyzeSupport(
     helpers.set(module.name, byName)
     for (const statement of file.statements) {
       const declared = declaredNames(statement)
-      // A top-level statement that declares nothing, like a bare call, is
+      // An anonymous default export is a helper named `default`; any other
+      // top-level statement that declares nothing, like a bare call, is
       // still read for the processes it starts.
-      if (declared.length === 0)
-        exports.push({
-          statement,
-          scope,
-          helper: { spawns: false, needsTimeout: false, timeouts: [] },
-        })
+      if (declared.length === 0) {
+        const fn = anonymousDefault(statement)
+        const isDefault =
+          fn !== undefined ||
+          (ts.isExportAssignment(statement) && !statement.isExportEquals)
+        const index =
+          fn?.parameters.findIndex((parameter) =>
+            hasTimeoutMember(parameter.type, file),
+          ) ?? -1
+        const helper: Helper = {
+          spawns: false,
+          needsTimeout: false,
+          timeouts: [],
+          optionsAt: index < 0 ? undefined : index,
+          callable: fn !== undefined,
+        }
+        if (isDefault && !byName.has('default')) byName.set('default', helper)
+        exports.push({ statement, scope, helper })
+      }
       for (const name of declared) {
         const helper: Helper = {
           spawns: false,
@@ -956,12 +1009,13 @@ function analyzeSupport(
         // leaves the default when the caller gives none: only a callee
         // with no timeout of its own makes the caller's required.
         needsTimeout: calls.some(
-          ({ required, timeout }) => required && timeout.kind === 'delegated',
+          ({ required, timeout }) =>
+            required && timeout.kind === 'read' && timeout.delegated,
         ),
         timeouts: distinct([
           ...calls.flatMap(({ call, timeout }) =>
-            timeout.kind === 'value'
-              ? [{ ms: timeout.ms, at: where(call) }]
+            timeout.kind === 'read'
+              ? timeout.values.map((ms) => ({ ms, at: where(call) }))
               : [],
           ),
           ...used.flatMap((other) => other.timeouts),
@@ -976,9 +1030,8 @@ function analyzeSupport(
   const problems = [
     ...exports.flatMap((entry) =>
       processCalls(entry).flatMap(({ call, required, timeout }) => {
-        if (timeout.kind === 'none' && required) return [untimed(call)]
         if (timeout.kind === 'unread') return [unread(call, timeout.text)]
-        return []
+        return timeout.missing && required ? [untimed(call)] : []
       }),
     ),
     ...scopes.flatMap(({ file, scope }) =>
@@ -1117,15 +1170,16 @@ function auditSpec(
     )
       continue
     const timeout = timeoutOf(call, scope, target, helperOf)
-    if (timeout.kind === 'value')
-      timeouts.push({ ms: timeout.ms, at: where(call) })
-    else if (timeout.kind === 'unread')
+    if (timeout.kind === 'unread') {
       problems.push(unread(call, timeout.text))
-    else if (timeout.kind === 'delegated')
+      continue
+    }
+    for (const ms of timeout.values) timeouts.push({ ms, at: where(call) })
+    if (timeout.delegated)
       problems.push(
         `${where(call)}: ${call.expression.getText()}(…) repassa o timeout de quem a chama: num spec, dê o valor na própria chamada`,
       )
-    else if (required(target)) problems.push(untimed(call))
+    else if (timeout.missing && required(target)) problems.push(untimed(call))
   }
   problems.push(
     ...indirectUses(file, scope, (target) => follows(target, helperOf)),
@@ -1354,9 +1408,10 @@ describe('analyzeSupport', () => {
         `}`,
       ),
     ])
+    // The 30 s stays for a caller that gives no timeout of its own.
     expect(helpers.get('temp-repo')?.get('late')).toMatchObject({
       needsTimeout: true,
-      timeouts: [],
+      timeouts: [{ ms: 30_000, at: 'temp-repo.ts:3' }],
     })
     expect(helpers.get('temp-repo')?.get('early')).toMatchObject({
       needsTimeout: false,
@@ -1521,6 +1576,51 @@ describe('analyzeSupport', () => {
       untimedAt('temp-repo.ts:2', 'spawnSync'),
       untimedAt('temp-repo.ts:4', 'spawnSync'),
     ])
+  })
+
+  it('keeps what each branch of a ternary gives', () => {
+    const { helpers, problems } = analyze([
+      'temp-repo',
+      lines(
+        `import { spawn } from 'node:child_process'`,
+        `export function half(flag: boolean) {`,
+        `  return spawn('git', [], flag ? {} : { timeout: 30_000 })`,
+        `}`,
+        `export function mixed(flag: boolean, options: { timeout?: number } = {}) {`,
+        `  return spawn('git', [], flag ? { ...options } : { timeout: 45_000 })`,
+        `}`,
+      ),
+    ])
+    // One branch of half gives no timeout.
+    expect(problems).toEqual([untimedAt('temp-repo.ts:3', 'spawn')])
+    // mixed hands the caller's timeout on, and keeps its own 45 s.
+    expect(helpers.get('temp-repo')?.get('mixed')).toMatchObject({
+      needsTimeout: true,
+      timeouts: [{ ms: 45_000, at: 'temp-repo.ts:6' }],
+    })
+  })
+
+  it('reads an anonymous default export', () => {
+    const arrow = analyze([
+      'base',
+      lines(
+        `import { spawnSync } from 'node:child_process'`,
+        `export default () => spawnSync('git')`,
+      ),
+    ])
+    expect(arrow.helpers.get('base')?.get('default')?.spawns).toBe(true)
+    expect(arrow.problems).toEqual([untimedAt('base.ts:2', 'spawnSync')])
+    const declared = analyze([
+      'base',
+      lines(
+        `import { spawnSync } from 'node:child_process'`,
+        `export default function () { return spawnSync('git', [], { timeout: 1_000 }) }`,
+      ),
+    ])
+    expect(declared.helpers.get('base')?.get('default')).toMatchObject({
+      spawns: true,
+      timeouts: [{ ms: 1_000, at: 'base.ts:2' }],
+    })
   })
 
   it('registers a helper under every name it is exported with', () => {
