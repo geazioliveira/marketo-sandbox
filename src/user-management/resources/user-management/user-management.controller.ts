@@ -5,6 +5,7 @@ import {
   Body,
   Controller,
   Get,
+  Header,
   HttpCode,
   Param,
   Post,
@@ -42,10 +43,13 @@ export class UserManagementController {
 
   @Post('userservice/management/v1/users/invite.json')
   @HttpCode(200)
+  @Header('Content-Type', 'application/json')
   async inviteUserUsingPOST(
     @Body() inviteUserRequest: InviteUserRequest,
   ): Promise<string> {
-    return this.userManagementService.inviteUserUsingPOST(inviteUserRequest)
+    return JSON.stringify(
+      await this.userManagementService.inviteUserUsingPOST(inviteUserRequest),
+    )
   }
 
   @Get('userservice/management/v1/users/roles.json')

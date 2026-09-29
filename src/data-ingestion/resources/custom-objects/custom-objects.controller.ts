@@ -8,7 +8,10 @@ import {
   HttpCode,
   Param,
   Post,
+  Res,
 } from '@nestjs/common'
+import type { Response } from 'express'
+import { mockRequestId } from '../../../mocks/request-id'
 import { CustomObjectsService } from './custom-objects.service'
 
 import type { SyncCustomObjectsRequest } from '../../data-ingestion-definitions/requests/sync-custom-objects-request'
@@ -20,6 +23,7 @@ export class CustomObjectsController {
   @Post('subscriptions/:munchkinId/customobjects/:customObjectAPIName')
   @HttpCode(202)
   async syncCustomObjects(
+    @Res({ passthrough: true }) reply: Response,
     @Param('munchkinId') munchkinId: string,
     @Param('customObjectAPIName') customObjectAPIName: string,
     @Headers('X-Mkto-User-Token') xMktoUserToken: string,
@@ -27,6 +31,7 @@ export class CustomObjectsController {
     @Headers('X-Correlation-Id') xCorrelationId?: string,
     @Headers('X-Request-Source') xRequestSource?: string,
   ): Promise<void> {
+    reply.setHeader('X-Request-Id', mockRequestId())
     return this.customObjectsService.syncCustomObjects(
       munchkinId,
       customObjectAPIName,

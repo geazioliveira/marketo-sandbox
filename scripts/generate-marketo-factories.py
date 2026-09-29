@@ -20,6 +20,7 @@ from marketo_codegen import (  # noqa: E402
     definition_category,
     definition_file,
     generated_header,
+    is_type_alias,
     property_key,
     quote,
     reference_name,
@@ -180,7 +181,38 @@ class FactoryGenerator:
 
         return "faker.lorem.word()"
 
+    def render_value(self, name: str, schema: dict[str, Any]) -> str:
+        """A definition that is not an object, such as a top-level array (#24).
+
+        There are no members to override one by one, so the override replaces the
+        whole value.
+        """
+        imports: set[str] = set()
+        expression = self.value(name, "", schema, imports) or "[]"
+        imports.discard(name)
+
+        lines: list[str] = []
+        if "faker." in expression:
+            lines.append("import { faker } from '@faker-js/faker'")
+        lines.append(f"import type {{ {name} }} from '{self.definition_import(name)}'")
+        for dependency in sorted(imports):
+            lines.append(
+                f"import {{ {factory_name(dependency)} }} from './{definition_file(dependency)}'",
+            )
+        lines.extend(
+            [
+                "",
+                f"export function {factory_name(name)}(override?: {name}): {name} {{",
+                f"  return override ?? {expression}",
+                "}",
+            ],
+        )
+        return "\n".join(lines) + "\n"
+
     def render(self, name: str, schema: dict[str, Any]) -> str:
+        if is_type_alias(schema) and schema.get("type") not in (None, "object"):
+            return self.render_value(name, schema)
+
         imports: set[str] = set()
         bases: list[str] = []
         properties: dict[str, dict[str, Any]] = {}

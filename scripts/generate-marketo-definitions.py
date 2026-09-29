@@ -20,6 +20,7 @@ from marketo_codegen import (  # noqa: E402
     definition_file as file_name,
     document_path,
     generated_header,
+    is_type_alias,
     pascal_case,
     property_key as property_name,
     quote,
@@ -83,6 +84,9 @@ class TypeScriptGenerator:
         }.get(schema_type, "unknown")
 
     def render(self, name: str, schema: dict[str, Any]) -> str:
+        if is_type_alias(schema):
+            return self.render_alias(name, schema)
+
         imports: set[str] = set()
         inline_types: list[str] = []
         bases: list[str] = []
@@ -133,6 +137,20 @@ class TypeScriptGenerator:
         definition.append(f"export interface {name}{extends} {{")
         definition.extend(member_lines)
         definition.append("}")
+        return "\n".join(definition) + "\n"
+
+    def render_alias(self, name: str, schema: dict[str, Any]) -> str:
+        """A definition with no members, such as a top-level array, as a type alias (#24)."""
+        imports: set[str] = set()
+        alias = self.type_name(schema, imports)
+        imports.discard(name)
+        definition = [
+            f"import type {{ {import_name} }} from '{self.import_path(name, import_name)}';"
+            for import_name in sorted(imports)
+        ]
+        if definition:
+            definition.append("")
+        definition.append(f"export type {name} = {alias};")
         return "\n".join(definition) + "\n"
 
     def import_path(self, source: str, target: str) -> str:
