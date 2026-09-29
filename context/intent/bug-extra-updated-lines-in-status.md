@@ -62,6 +62,7 @@ Os commits seguem os passos do plano: o intent (`9fa71f5`), os testes que falham
   | A referência desce depois de uma linha fora de ordem | 1 |
 
 - **Onde se afastou do plano.**
+  - Antes da PR, entraram em `main` a #69 (da #32) e a #65 (da #29), e as duas acrescentaram uma linha `Atualizado` em seis arquivos fora das decisões. Três desses arquivos já estavam entre os nove (`generate-and-check.md`, `generated-code-boundary.md` e `loop-gate.md`), e três são novos: `bug-codegen-header-prettier-ci.md`, `hand-editing-generated-code.md` e `trusting-a-tool-to-process-a-named-file.md`. Depois do merge de `c1a50ab`, o guarda recusou as seis linhas antigas, e um commit à parte as tirou pela mesma regra: fica a última, que é a da #29 ou a da #32. No total, saíram 22 linhas de 12 arquivos.
   - A ordem é conferida contra a data mais nova acima, não só contra a linha de cima. Assim, uma linha fora de ordem não baixa a régua para as de baixo. As duas últimas mutações da tabela sobreviviam, e o commit do guarda ganhou o caso `holds every decision Atualizado line to the latest date above it, naming its first line`.
   - O teste do guia, escrito no `7b837a8`, cortava a seção no `## Status` do exemplo cercado. O commit do guarda o fez cortar no `## Templates`, como o teste vizinho.
   - A seção Check do [fluxo](../../docs/development/workflow.md#check) lista o que o `check:context` recusa e ganhou a regra nova. O plano não a citava, mas sem ela a lista derivaria.

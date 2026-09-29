@@ -44,5 +44,4 @@ return f"../../../asset-definitions/{definition_category(name)}/{definition_file
 
 - **Criado**: 2026-09-25 (Fase: Build), registro retroativo de `0c8e760`..`fb4a804` (#4)
 - **Status**: Active
-- **Atualizado**: 2026-09-28 (Fase: Build), as citações dos geradores, do `AppModule`, do `package.json` e do lockfile seguiram as linhas novas (#24)
 - **Atualizado**: 2026-09-29 (Fase: Build), a citação do `shutil.rmtree` seguiu as linhas novas (#29)

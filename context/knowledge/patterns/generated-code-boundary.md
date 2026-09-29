@@ -83,5 +83,4 @@ As cinco áreas, com os arquivos medidos na #6 e o registro da #19 nas definiç�
 
 - **Criado**: 2026-09-25 (Fase: Build), registro retroativo de `0c8e760`..`fb4a804` (#4)
 - **Status**: Active
-- **Atualizado**: 2026-09-28 (Fase: Build), as citações dos geradores, do `AppModule`, do `package.json` e do lockfile seguiram as linhas novas (#24)
 - **Atualizado**: 2026-09-29 (Fase: Build), as citações do `write_outputs()` e do `check_outputs()` seguiram as linhas novas (#29)

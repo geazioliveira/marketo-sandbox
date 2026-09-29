@@ -70,5 +70,4 @@ npm run check:all      # sai com 0 só quando a saída commitada é a que os ger
 
 - **Criado**: 2026-09-25 (Fase: Build), registro retroativo de `0c8e760`..`fb4a804` (#4)
 - **Status**: Active
-- **Atualizado**: 2026-09-28 (Fase: Build), as citações dos geradores, do `AppModule`, do `package.json` e do lockfile seguiram as linhas novas (#24)
 - **Atualizado**: 2026-09-29 (Fase: Build), os geradores formatam em memória, pela API do Prettier, com a config do caminho de destino, antes de tocar em qualquer pasta; a regra contra uma config do Prettier que dependa do caminho saiu, e o `.codegen-tmp` também (#29)

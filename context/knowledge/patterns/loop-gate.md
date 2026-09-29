@@ -230,5 +230,4 @@ Este repositório tem uma conta só no GitHub. O dono e o agente postam com o me
 
 - **Criado**: 2026-09-24 (Fase: Build), do gate do lite-campaign (brunohab/lite-campaign#101), dos três defeitos dele e do plano aprovado na #2 (#2)
 - **Status**: Active
-- **Atualizado**: 2026-09-28 (Fase: Build), os passos `copilot-review` e `review-threads` passaram a só relatar no `issue-link` (`--review-report`), com aviso na PR, e o sinal de revisão saiu (#30)
 - **Atualizado**: 2026-09-29 (Fase: Build), o `stacked` passou a apontar o rebase só para um merge da cópia publicada que ainda não foi publicado, e o recorte para um merge de fora já publicado (#32)
