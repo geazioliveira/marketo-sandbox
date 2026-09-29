@@ -94,5 +94,4 @@ A branch `fix/7-codegen-header-prettier-ci` nasce de `origin/main` em `3ddceb4` 
 
 - **Criado**: 2026-09-26 (Fase: Intent), do plano vigente na issue #7, revisado depois do merge da #6 (#7)
 - **Status**: Resolved
-- **Atualizado**: 2026-09-26 (Fase: Learn), os geradores saem com 2 quando não conseguem formatar, todo arquivo gerado abre com o cabeçalho, e o `check:all` roda no `npm run check` e no CI (#7)
 - **Atualizado**: 2026-09-29 (Fase: Build), os dois limites que este intent deixou para a #29 foram resolvidos pela [ADR 0015](../decisions/0015-generators-format-in-memory-at-the-destination-path.md), que substituiu a ADR 0011; as citações de código deste intent valem para `d50fd00` (#29)

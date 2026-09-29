@@ -4,6 +4,44 @@ Uma entrada por mudança mergeada, da mais nova para a mais antiga, escrita no p
 
 ---
 
+## 2026-09-29: O check:context confere as linhas Atualizado do bloco Status, e fora das decisões só a última fica (#66)
+
+**Fase**: Learn
+**Tipo**: Bug Fix
+
+### O que foi construído / corrigido
+
+- **O guarda.** O `check:context` passou a ler as linhas `Atualizado` do bloco Status. Cada uma precisa estar no formato do guia, `- **Atualizado**: AAAA-MM-DD (Fase: Intent | Build | Learn), …`, com uma data de calendário. Fora das decisões, toda linha depois da primeira é recusada. Nenhuma data vem antes do `Criado` nem da mais nova acima dela. Uma linha numa lista numerada, numa citação ou em negrito com `__` também conta. Em código ou em comentário HTML, não conta.
+- **O contrato** em `scripts/loop-sections.mjs`: `statusCreatedLine`, `statusUpdatedLine`, `statusUpdatedDeclaration`, `statusPhases` e o `keepsEveryUpdate` do tipo `ADR`. A regra de quem guarda todas as linhas ficou num lugar só.
+- **A limpeza.** Doze arquivos que não são decisão ficaram só com a última linha `Atualizado`, e 22 linhas saíram. Nove arquivos vieram do relato. Outros três ganharam a linha a mais com a #32 e a #29, que entraram em `main` antes da PR. As linhas que a #24 trocou em cinco arquivos não voltaram, porque a troca era a regra.
+- **O guia e o fluxo** dizem que o check confere a regra, e o cabeçalho do `check-context.mjs` a lista.
+- **Um anti-pattern novo**, [Regra de formato escrita só na prosa do guia](../knowledge/anti-patterns/format-rule-only-in-prose.md).
+
+### Números medidos
+
+- **A deriva**, em `22059b6` e em `624eafa`: 9 dos 43 arquivos tipados que não são decisão tinham de 2 a 4 linhas `Atualizado`. A primeira linha a mais entrou com a PR #33 (#31, `b96caad`). O guarda novo, rodado nas duas árvores, deu 16 problemas, as 16 linhas que a limpeza tirou, e nenhum outro. Depois do merge de `c1a50ab`, que trouxe a #32 e a #29, deu mais 6, uma linha a mais por arquivo.
+- **Os testes**: 21 casos novos falharam antes do guarda, e depois os 137 do `check-context.spec.ts` passam. Nove mutações do guarda, numa cópia fora do git, foram pegas.
+- **`npm run check` e o e2e.** Com a média de carga entre 18 e 24, o `npm test` deu 8 falhas em 3.855 testes, todas por prazo, em quatro specs de `test/hooks/` que esta PR não toca (#59). Rodados de novo, os 705 testes desses quatro arquivos passaram. Passaram o lint, o `format:check`, o typecheck, o `check:context`, o build, o `check:all` e o e2e, com 447 testes em 6 arquivos. A prova da cadeia inteira é o `Qualidade / check` da PR.
+
+### Decisões tomadas
+
+- As respostas do Approve da #66: conferir a ordem das datas nas decisões, com o `Criado` como a primeira; manter a última linha de cada arquivo, sem uma linha nova da #66; e fazer tudo numa PR só.
+- Manter a regra do guia, que só a decisão guarda todas as linhas, em vez de restaurar as linhas que a #24 trocou. O plano da #66 dá o porquê em "Fora de escopo".
+
+### Patterns aplicados ou criados
+
+- [Regra de formato escrita só na prosa do guia](../knowledge/anti-patterns/format-rule-only-in-prose.md), anti-pattern novo
+- [Revisão classificada por risco](../knowledge/patterns/risk-classified-review.md): HIGH, porque a PR mexe no `check-context.mjs`, no `loop-sections.mjs` e nos testes do harness
+
+### Aprendizados / surpresas
+
+- **O relato veio ao contrário.** O pedido era restaurar as linhas que a #24 trocou em cinco arquivos. O guia dizia que a troca era a regra, e o defeito estava nos nove arquivos que acrescentavam. Conferir a premissa no guia antes de abrir a issue evitou desfazer uma regra que estava certa.
+- **A ordem das datas sozinha não teria pegado a #24.** A troca pôs uma linha mais nova no lugar de uma mais velha. O que pega a deriva é a contagem.
+- **As mutações acharam o que os testes do plano não fixavam.** Duas mutações da referência da ordem sobreviviam: citar a última linha do mesmo dia e baixar a régua depois de uma linha fora de ordem. Um caso a mais as pegou.
+- **O Build do harness precisou do dono fora do modo automático**, como na #48.
+
+---
+
 ## 2026-09-29: Os geradores formatam em memória, com a config do caminho de destino, antes de tocar na saída (#29)
 
 **Fase**: Learn
