@@ -22,13 +22,13 @@ A branch `fix/23-test-timeout-child-process` nasce de `origin/main` em `e5b013c`
 1. **O guarda, vermelho.** `test/test-timeouts.spec.ts` lê cada `*.spec.ts` de `test/` e `src/`. Um spec que dispara processos, ou seja, que importa `node:child_process` ou, de `test/support/`, um dos helpers `exec`, `spawnWith`, `runHook`, `hookRepo` ou `realGit`, precisa declarar `vi.setConfig({ testTimeout })` com valor maior que todo timeout de processo do arquivo e dos helpers que ele usa.
 2. **A correção.** `refresh-issue-link.spec.ts` passa a `testTimeout: 120_000`. `loop-sections.spec.ts` ganha `timeout: 30_000` no `spawnSync` e `testTimeout: 60_000`.
 3. **A medição**, nos Resultados.
-4. **Learn**, com o pattern `process-test-timeouts.md` e a issue nova dos prazos dos hooks sob carga.
+4. **Learn**, com o pattern [Timeouts de testes que disparam processos](../knowledge/patterns/process-test-timeouts.md) e a issue nova dos prazos dos hooks sob carga.
 
 ## Critérios de aceite
 
-- [ ] `test/test-timeouts.spec.ts` falha em `e5b013c` nos dois specs acima e passa depois da correção.
-- [ ] Nenhum teste que espera um processo filho tem timeout menor ou igual ao do processo.
-- [ ] Em cinco rodadas com duas `npx vitest run` ao mesmo tempo, nenhuma falha vem de um caso cujo timeout é menor ou igual ao do processo filho que ele espera. As falhas por prazo de hook e por caso acima de 120 s ficam registradas aqui e vão para uma issue nova.
+- [x] `test/test-timeouts.spec.ts` falha em `e5b013c` nos dois specs acima e passa depois da correção.
+- [x] Nenhum teste que espera um processo filho tem timeout menor ou igual ao do processo.
+- [x] Em cinco rodadas com duas `npx vitest run` ao mesmo tempo, nenhuma falha vem de um caso cujo timeout é menor ou igual ao do processo filho que ele espera. As falhas por prazo de hook e por caso acima de 120 s ficam registradas aqui e vão para uma issue nova.
 - [ ] A PR fecha só a #23, com revisão do Copilot na cabeça, nenhuma thread aberta e veredito fresco do gate.
 
 ## Decisões relacionadas
@@ -37,10 +37,40 @@ A branch `fix/23-test-timeout-child-process` nasce de `origin/main` em `e5b013c`
 
 ## Resultados
 
-- A escrever no Learn.
+- **O que foi construído**, na branch `fix/23-test-timeout-child-process`:
+  - `3fdfae8`: este intent;
+  - `f9d4333`: `test/test-timeouts.spec.ts`, vermelho em `refresh-issue-link.spec.ts` (caso e processo com 60 s) e em `loop-sections.spec.ts` (sem `testTimeout`). O guarda classifica cada export de `test/support/` pelo próprio corpo, e não pelo módulo inteiro. Senão o `check-context.spec.ts`, que só usa o `exec`, herdaria os 60 s do gate do `TempRepo`, que ele não roda;
+  - `37864d8`: `refresh-issue-link.spec.ts` com `testTimeout: 120_000`, e `loop-sections.spec.ts` com `timeout: 30_000` no `spawnSync` e `testTimeout: 60_000`. O guarda fica verde;
+  - o Learn: este intent, o pattern [Timeouts de testes que disparam processos](../knowledge/patterns/process-test-timeouts.md), citado no `CODING_STANDARDS.md`, e o changelog.
+- **O guarda foi conferido por mutação.** Ele reconhece como disparadores 15 specs: os de `test/hooks/`, menos `budget`, `settings` e `shell`, que carregam as libs no mesmo processo, e os de `test/scripts/`, menos `drift` e `forms-parity`. Com o `testTimeout` do `check-context.spec.ts` baixado para 30 s, ele recusa o arquivo citando `:183` e `:216`.
+- **A causa raiz se confirmou, e era a menor parte do problema.** O descompasso existia, mas a medição mostrou que a carga derruba a suíte por outras causas.
+- **Medido** em `37864d8`, numa worktree destacada com `npm ci` feito: uma rodada sozinha e cinco rodadas de duas `npx vitest run` ao mesmo tempo, com load average entre 16 e 26 no início de cada uma:
+
+  | Rodada | Falhas em 3.754 (A / B) | Duração (A / B) |
+  | --- | --- | --- |
+  | Sozinha | 8 | 678 s |
+  | 1 | 158 / 162 | 1.279 s / 1.280 s |
+  | 2 | 32 / 33 | 741 s / 742 s |
+  | 3 | 22 / 16 | 673 s / 673 s |
+  | 4 | 31 / 22 | 907 s / 921 s |
+  | 5 | 81 / 60 | 1.192 s / 1.196 s |
+
+  Das 625 falhas, nenhuma caiu em `refresh-issue-link.spec.ts`, `loop-sections.spec.ts` ou `check-context.spec.ts`, e nenhuma vem de um caso com timeout menor ou igual ao do processo que ele espera. Pela causa:
+  - 488 são respostas de hook que mudam sob carga. Delas, 248 citam na mensagem o `git` ou o `gh` lento, ou o prazo do hook, e as outras 240 são asserções sobre uma resposta diferente, compatíveis com a mesma causa;
+  - 110 são casos que passam dos 120 s inteiros, com processos de timeout abaixo disso: ou o caso soma muitos processos, ou espera um `git` de helper sem timeout;
+  - 27 são processos mortos pelo próprio timeout antes do caso, como a correção quer: o gate e o `audit-main` com 60 s, o `plan-to-issue` com 90 s e um gerador do `codegen` com 30 s.
+
+  As 598 primeiras foram para a #59, com a tabela por arquivo.
+- **Desvios do plano aprovado:**
+  - o critério 2 vale para os timeouts escritos. Os `git` que os helpers `HookRepo.git` e `TempRepo.git` rodam, e o `sh` do `realGit`, não têm timeout nenhum, e o guarda não tem o que comparar. A #59 ficou com esse ponto;
+  - o `TempRepo` e o `HookRepo` entraram na lista de helpers que disparam processos, junto com os cinco do plano, porque o `gate.spec.ts` e os specs dos hooks os usam. O guarda descobre essa lista pelo corpo de cada export, sem uma lista fixa;
+  - a primeira medição do plano, sem `npm ci` na worktree, trouxe 46 falhas falsas do `codegen.spec.ts` por falta do Prettier.
+- **Fica para depois:** a #59, com os prazos dos hooks sob carga, os casos acima de 120 s e os processos de helper sem timeout.
+
+  O último critério, a revisão do Copilot na cabeça, as threads e o veredito fresco, é conferido no fluxo da PR, depois deste Learn.
 
 ## Status
 
 - **Criado**: 2026-09-28 (Fase: Intent), do plano vigente na issue #23 (#23)
-- **Status**: In Progress
-- **Atualizado**: 2026-09-28 (Fase: Intent), o plano aprovado com as recomendações das três perguntas (#23)
+- **Status**: Resolved
+- **Atualizado**: 2026-09-28 (Fase: Learn), o guarda confere o timeout de caso de todo spec que dispara processos, os dois specs com o descompasso foram corrigidos, e a medição sob carga foi para a #59 (#23)

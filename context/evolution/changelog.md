@@ -4,6 +4,39 @@ Uma entrada por mudança mergeada, da mais nova para a mais antiga, escrita no p
 
 ---
 
+## 2026-09-28: Todo spec que dispara processos espera mais que o processo filho, e um guarda confere (#23)
+
+**Fase**: Learn
+**Tipo**: Bug Fix
+
+### O que foi construído / corrigido
+
+- **O guarda `test/test-timeouts.spec.ts`.** Ele lê cada `*.spec.ts` de `test/` e `src/` como texto e trata como disparador o spec que importa `node:child_process` ou um export de `test/support/` cujo corpo dispara processos. Um spec assim precisa declarar `vi.setConfig({ testTimeout })` maior que todo timeout de processo dele e dos exports que usa, e cada recusa cita `arquivo:linha` do caso e do processo.
+- **Os dois specs com o descompasso.** `refresh-issue-link.spec.ts` dava ao caso os mesmos 60 s do processo e passou a 120 s. `loop-sections.spec.ts` rodava um `sh` sem timeout num caso de 5 s e passou a 30 s no processo e 60 s no caso. O caso do relato, em `check-context.spec.ts`, já tinha sido corrigido pela #34.
+- **A regra virou pattern:** [Timeouts de testes que disparam processos](../knowledge/patterns/process-test-timeouts.md).
+
+### Números medidos
+
+- **O guarda**, em `e5b013c`, recusou exatamente os dois specs, e passa depois da correção. Com o `testTimeout` do `check-context.spec.ts` baixado para 30 s, ele recusa o arquivo citando os dois processos de 30 s.
+- **Sob carga**, em `37864d8`, com uma rodada sozinha e cinco de duas `npx vitest run` ao mesmo tempo, as 11 rodadas de 3.754 testes somaram 625 falhas, de 8 (sozinha) a 162 por rodada. Nenhuma veio de um caso com timeout menor ou igual ao do processo que ele espera. São 488 respostas de hook que mudam sob carga, 110 casos acima de 120 s e 27 processos mortos pelo próprio timeout antes do caso.
+
+### Decisões tomadas
+
+- As três respostas do Approve da #23: o critério "sem nenhum timeout sob carga" trocado por "nenhuma falha de um caso que espera menos que o processo", com a carga indo para a #59; o guarda por spec no lugar de um `testTimeout` global; e o pattern novo.
+
+### Patterns aplicados ou criados
+
+- [Timeouts de testes que disparam processos](../knowledge/patterns/process-test-timeouts.md), pattern novo
+
+### Aprendizados / surpresas
+
+- **O relato mediu o sintoma, não a causa.** A medição do plano mostrou que o descompasso da #23 não derrubava nenhum caso. Quem falha sob carga são os prazos de produção dos hooks e casos que somam dezenas de processos. Dar mais tempo aos testes não resolveria o critério do relato, e o escopo foi para a #59.
+- **Uma worktree nova nasce sem `node_modules`.** O vitest roda pelo `node_modules` do checkout principal, mas o `codegen.spec.ts` procura o Prettier na própria árvore e deu 46 falhas falsas. Rode `npm ci` antes de medir.
+- **Medir numa worktree separada.** Specs como o `check-context` leem `context/` ao vivo. Uma medição de uma hora na worktree da branch quebraria enquanto o Learn é escrito, então ela rodou numa worktree destacada no commit da correção.
+- **O `guard-bash` recusa a troca de label no mesmo comando do comentário `# Plano`.** Ela só vale depois de o comentário existir, então vão em dois comandos.
+
+---
+
 ## 2026-09-28: O issue-link só relata a revisão do Copilot e as threads, e o veredito fresco é só o gate (#30)
 
 **Fase**: Learn
