@@ -19,6 +19,7 @@ Uma entrada por mudança mergeada, da mais nova para a mais antiga, escrita no p
 
 - **O guarda**, em `e5b013c`, recusou exatamente os dois specs, e passa depois da correção. Com o `testTimeout` do `check-context.spec.ts` baixado para 30 s, ele recusa o arquivo citando os dois processos de 30 s.
 - **Sob carga**, em `37864d8`, com uma rodada sozinha e cinco de duas `npx vitest run` ao mesmo tempo, as 11 rodadas de 3.754 testes somaram 625 falhas, de 8 (sozinha) a 162 por rodada. Nenhuma veio de um caso com timeout menor ou igual ao do processo que ele espera. São 488 respostas de hook que mudam sob carga, 110 casos acima de 120 s e 27 processos mortos pelo próprio timeout antes do caso.
+- **`npm run check`**, depois do merge de `main` (#19 e #20): 3.774 testes em 22 arquivos, com os 7 do guarda. Houve 1 falha, em `plan-to-issue.spec.ts:617`, pelo `git` de 10 s da lib dos hooks com `ETIMEDOUT` e load average perto de 18, a classe da #59. O arquivo passa isolado (145 de 145), e o `check:context`, o build e o `check:all` passam. O e2e passa com 33.
 
 ### Decisões tomadas
 
