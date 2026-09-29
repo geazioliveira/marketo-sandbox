@@ -14,6 +14,7 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from marketo_codegen import (  # noqa: E402
+    SHARED_MOCKS,
     Target,
     add_target_arguments,
     camel_case,
@@ -141,6 +142,23 @@ def success_status(operation: dict[str, Any], method: str) -> int | None:
     return codes[0] if codes[0] != default else None
 
 
+def success_headers(operation: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    """The headers the lowest declared 2xx response carries, the one the route answers (#24)."""
+    responses = operation.get("responses", {})
+    codes = sorted(status for status in responses if status.isdigit() and status.startswith("2"))
+    if not codes:
+        return {}
+    return responses[codes[0]].get("headers") or {}
+
+
+def header_value(name: str, header: dict[str, Any]) -> str:
+    """The mocked value of a response header: a request id looks like the envelope's `requestId`."""
+    if re.search(r"request-?id", name, re.IGNORECASE):
+        return "mockRequestId()"
+    header_type = header.get("schema", header).get("type", "string")
+    return f"String({PRIMITIVE_VALUES.get(header_type, PRIMITIVE_VALUES['string'])})"
+
+
 def schema_references(schema: Any, acc: set[str] | None = None) -> set[str]:
     """Every definition name referenced anywhere inside a schema."""
     acc = acc if acc is not None else set()
@@ -239,6 +257,7 @@ class ResourceGenerator:
         imports = {"Controller"}
         definition_imports: set[str] = set()
         methods: list[str] = []
+        header_values: list[str] = []
 
         for method, path, operation in tagged:
             imports.add(method.capitalize())
@@ -269,6 +288,19 @@ class ResourceGenerator:
                 arguments.append(f"{decorator_for(parameter)} {identifier}{optional}: {type_name}")
                 argument_names.append(identifier)
 
+            headers = success_headers(operation)
+            header_lines: list[str] = []
+            if headers:
+                imports.add("Res")
+                reply = "reply"
+                while reply in used_names:
+                    reply = f"_{reply}"
+                # First, because a required parameter cannot follow an optional one.
+                arguments.insert(0, f"@Res({{ passthrough: true }}) {reply}: Response")
+                for header_name, header in headers.items():
+                    value = header_value(header_name, header)
+                    header_values.append(value)
+                    header_lines.append(f"    {reply}.setHeader({quote(header_name)}, {value})")
             service_call = (
                 f"this.{service_property}.{operation['operationId']}({', '.join(argument_names)})"
             )
@@ -285,6 +317,7 @@ class ResourceGenerator:
                     *(["  @Header('Content-Type', 'application/json')"] if response.primitive else []),
                     f"  async {operation['operationId']}({', '.join(arguments)}): "
                     f"Promise<{'string' if response.primitive else response.type_name}> {{",
+                    *header_lines,
                     (
                         f"    return JSON.stringify(await {service_call})"
                         if response.primitive
@@ -295,10 +328,15 @@ class ResourceGenerator:
                 ],
             )
 
-        lines = [
-            f"import {{ {', '.join(sorted(imports))} }} from '@nestjs/common'",
-            f"import {{ {service_name} }} from './{kebab_case(tag)}.service'",
-        ]
+        lines = [f"import {{ {', '.join(sorted(imports))} }} from '@nestjs/common'"]
+        if any("faker." in value for value in header_values):
+            lines.append("import { faker } from '@faker-js/faker'")
+        if header_values:
+            lines.append("import type { Response } from 'express'")
+        if "mockRequestId()" in header_values:
+            request_id = relative_import(self.resource_dir, SHARED_MOCKS / "request-id.ts")
+            lines.append(f"import {{ mockRequestId }} from '{request_id}'")
+        lines.append(f"import {{ {service_name} }} from './{kebab_case(tag)}.service'")
         if definition_imports:
             lines.append("")
             lines.extend(
