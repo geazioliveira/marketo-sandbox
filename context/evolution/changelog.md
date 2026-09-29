@@ -4,6 +4,38 @@ Uma entrada por mudança mergeada, da mais nova para a mais antiga, escrita no p
 
 ---
 
+## 2026-09-29: O gate aponta o rebase só para o merge da própria cópia ainda não publicado (#32)
+
+**Fase**: Learn
+**Tipo**: Bug Fix
+
+### O que foi construído / corrigido
+
+- **O remédio do `stacked` para um merge de fora.** Com a branch publicada, todo merge de fora recebia "o merge trouxe a cópia publicada desta própria branch", com `git pull --rebase`, até o merge de outra branch. Isso aparecia sempre no CI, onde a branch está publicada. O `ownCopyMerge` de `scripts/gate.mjs` passou a exigir que a cópia publicada ainda não contenha o merge. Um merge já publicado recebe o recorte da branch a partir de `origin/main`, que vale nos dois casos. O veredito não mudou.
+- **Os testes.** Dois casos novos no `stacked` do `test/scripts/gate.spec.ts`: o merge de outra branch antes do push, depois do push e no CI, e o merge da própria cópia depois do push e no CI. O merge da própria cópia antes do push segue no teste que já existia.
+- **O pattern [O gate do loop](../knowledge/patterns/loop-gate.md)** diz que o rebase vale antes do push, e o recorte depois.
+
+### Números medidos
+
+- **Antes**, em `d50fd00`: os dois casos novos falharam com a mensagem da cópia publicada, no modo local e no CI.
+- **Depois**: o `gate.spec.ts` e o `drift.spec.ts` passam com 567 de 567, com load average perto de 18, e nenhum veredito do `stacked` mudou.
+
+### Decisões tomadas
+
+- A resposta do Approve da #32: um merge já publicado recebe o recorte que o gate já dava para um merge de fora, e não uma mensagem que nomeie as duas possibilidades.
+
+### Patterns aplicados ou criados
+
+- [O gate do loop](../knowledge/patterns/loop-gate.md), atualizado
+
+### Aprendizados / surpresas
+
+- **A ancestralidade só fala do passado enquanto a ref não andou.** Antes do push, `origin/<branch>` é uma foto de antes do merge. Depois, ela contém o merge, e "ser ancestral da cópia publicada" vale para tudo o que a branch tem.
+- **Uma prova antes do Approve vai numa worktree de rascunho.** A primeira reprodução foi escrita no worktree da branch por um script Python, que o `build-guard` não interceptou. Com o gate fechado, o hook negou o `git checkout` que a desfaria, e o dono desfez à mão.
+- **Editar o harness pede o modo com aprovação.** Em modo automático, a confirmação que o hook pede para `scripts/gate.mjs` vira negação. O dono trocou o modo da sessão para a edição passar.
+
+---
+
 ## 2026-09-28: Todo spec que dispara processos espera mais que o processo filho, e um guarda confere (#23)
 
 **Fase**: Learn
