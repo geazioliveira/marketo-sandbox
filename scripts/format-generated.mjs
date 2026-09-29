@@ -32,6 +32,9 @@ function fail(message) {
   process.exit(2)
 }
 
+// stdout carries the list of texts: a config or plugin that logs writes to stderr instead.
+for (const method of ['log', 'info', 'debug']) console[method] = console.error
+
 if (!existsSync(entry))
   fail('Prettier not found at node_modules/prettier: run `npm ci` first.')
 

@@ -16,6 +16,7 @@ import {
 } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { cleanEnv } from '../support/clean-env'
 import { exec, projectRoot } from '../support/temp-repo'
 
@@ -602,9 +603,12 @@ const outputsOf: Record<Generator, string[]> = {
 }
 
 /**
- * Prettier configs that only apply under src/: the check used to format its
- * copy in .codegen-tmp/src/…, where none of them reach, while generate and
- * `npm run format:check` format in src/ (#29).
+ * Prettier configs the generated code has to follow as the hand-written code
+ * does (#29). The first three only apply under src/: the check used to format
+ * its copy in .codegen-tmp/src/…, where none of them reach, while generate and
+ * `npm run format:check` format in src/. A CRLF endOfLine has to survive the
+ * check reading every file as \n, and a config that logs has to leave the
+ * formatter's stdout alone.
  */
 const pathConfigs: Record<string, (at: Tree) => void> = {
   'an overrides entry for src/**': (at) => {
@@ -623,6 +627,21 @@ const pathConfigs: Record<string, (at: Tree) => void> = {
     writeFileSync(
       path.join(at.dir, 'src', '.editorconfig'),
       '[*.ts]\nindent_style = space\nindent_size = 4\n',
+    ),
+  'an endOfLine of crlf': (at) => {
+    const rc = path.join(at.dir, '.prettierrc')
+    writeFileSync(
+      rc,
+      JSON.stringify({
+        ...JSON.parse(readFileSync(rc, 'utf8')),
+        endOfLine: 'crlf',
+      }),
+    )
+  },
+  'a src/prettier.config.mjs that logs': (at) =>
+    writeFileSync(
+      path.join(at.dir, 'src', 'prettier.config.mjs'),
+      "console.log('config loaded')\nexport default { semi: true }\n",
     ),
 }
 
@@ -737,6 +756,99 @@ describe.concurrent(
           expect(snapshot(at)).toEqual(before)
         }),
     )
+
+    // Only the formatter's own import tells the two apart: a module in the
+    // tree's node_modules/prettier with no package.json, which a bare
+    // `import('prettier')` would not load.
+    it('the formatter imports the Prettier of its own root, by path', () =>
+      withTree({ prettier: false }, async (at) => {
+        symlinkSync(
+          path.join(projectRoot, 'node_modules'),
+          path.join(at.root, 'node_modules'),
+        )
+        const own = path.join(at.dir, 'node_modules', 'prettier')
+        mkdirSync(own, { recursive: true })
+        const real = path.join(
+          projectRoot,
+          'node_modules',
+          'prettier',
+          'index.mjs',
+        )
+        writeFileSync(
+          path.join(own, 'index.mjs'),
+          `process.stderr.write('the Prettier of the tree\\n')\nexport * from ${JSON.stringify(pathToFileURL(real).href)}\n`,
+        )
+        const run = await generate(at, 'definitions', '--check')
+        expect(run.out).toContain('the Prettier of the tree')
+        expect(run.status, run.out).toBe(0)
+      }))
+
+    it('a formatter that returns the wrong list touches nothing', () =>
+      withTree({}, async (at) => {
+        writeFileSync(
+          path.join(at.dir, 'scripts', 'format-generated.mjs'),
+          "process.stdout.write('[]')\n",
+        )
+        plantSentinels(at)
+        const before = snapshot(at)
+        for (const args of [['--check'], []]) {
+          const run = await generate(at, 'definitions', ...args)
+          expect(run.out).toMatch(/did not return one formatted text/)
+          expect(run.out).not.toMatch(/Traceback|stale|current/)
+          expect(run.status, run.out).toBe(2)
+        }
+        expect(snapshot(at)).toEqual(before)
+      }))
+
+    // Every folder of the run is cleared for writing before the first one is
+    // deleted: src/mocks, written first, must survive a refusal of the custom
+    // area that comes after it.
+    it('a refused custom area stops the run before any folder is deleted', () =>
+      withTree({}, async (at) => {
+        const foreign = path.join(
+          at.dir,
+          'src',
+          'zz-foreign',
+          'zz-foreign-mocks',
+        )
+        mkdirSync(foreign, { recursive: true })
+        writeFileSync(path.join(foreign, 'notes.txt'), 'escrito à mão\n')
+        plantSentinels(at)
+        const before = snapshot(at)
+        const run = await generate(
+          at,
+          'factories',
+          '--swagger',
+          'docs/marketo-swagger-identity.json',
+          '--area',
+          'zz-foreign',
+        )
+        expect(run.out).toMatch(/holds files this run would not write again/)
+        expect(run.status, run.out).toBe(1)
+        expect(snapshot(at)).toEqual(before)
+      }))
+
+    // A lone surrogate in a Swagger description formats, but it cannot be
+    // written as UTF-8: the run has to stop before it deletes anything.
+    it('a text that is not valid UTF-8 stops the run before any folder is deleted', () =>
+      withTree({}, async (at) => {
+        const swagger = path.join(
+          at.dir,
+          'docs',
+          'marketo-swagger-identity.json',
+        )
+        const document = JSON.parse(readFileSync(swagger, 'utf8'))
+        document.definitions.IdentityRequest.properties.grant_type.description =
+          'Grant type \ud800'
+        writeFileSync(swagger, JSON.stringify(document))
+        plantSentinels(at)
+        const before = snapshot(at)
+        const run = await generate(at, 'definitions')
+        expect(run.out).toMatch(/cannot be written as UTF-8/)
+        expect(run.out).not.toMatch(/Traceback/)
+        expect(run.status, run.out).toBe(1)
+        expect(snapshot(at)).toEqual(before)
+      }))
   },
 )
 

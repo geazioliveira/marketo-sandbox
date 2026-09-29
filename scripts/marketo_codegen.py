@@ -313,6 +313,8 @@ def prettier_environment() -> dict[str, str]:
             f"Prettier not found at {PRETTIER.parent.relative_to(ROOT)}: run `npm ci` first. "
             "The generators never write or compare unformatted code."
         )
+    if not FORMATTER.is_file():
+        raise _cannot_format(f"The formatter {FORMATTER.relative_to(ROOT)} is missing: restore it from git.")
     environment = _node_environment()
     if shutil.which("node", path=environment.get("PATH")) is None:
         raise _cannot_format(
@@ -387,11 +389,20 @@ def _formatted(outputs: list[Output]) -> dict[Path, str]:
 def write_outputs(outputs: list[Output]) -> int:
     """Replace each output folder with its generated files, formatted.
 
-    Every file of the run is formatted first, and every folder is cleared for writing next: a Prettier
-    that fails, or a folder that holds a file no generator writes, stops the run before any folder of
-    it is deleted (#29).
+    Every file of the run is formatted and encoded first, and every folder is cleared for writing next:
+    a Prettier that fails, a text that is not valid UTF-8, or a folder that holds a file no generator
+    writes, stops the run before any folder of it is deleted (#29).
     """
     formatted = _formatted(outputs)
+    encoded: dict[Path, bytes] = {}
+    for path, text in formatted.items():
+        try:
+            encoded[path] = text.encode("utf-8")
+        except UnicodeEncodeError as error:
+            raise SystemExit(
+                f"{path.relative_to(ROOT)} cannot be written as UTF-8 ({error.reason}): fix the Swagger text "
+                "it comes from. Nothing was touched."
+            ) from None
     for output in outputs:
         if output.folder.exists():
             refuse_foreign_files(output.folder, output.files)
@@ -400,7 +411,7 @@ def write_outputs(outputs: list[Output]) -> int:
             shutil.rmtree(output.folder)
         for path in output.files:
             path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(formatted[path])
+            path.write_bytes(encoded[path])
         print(f"Generated {len(output.files)} {output.label}.")
     return 0
 
@@ -408,9 +419,12 @@ def write_outputs(outputs: list[Output]) -> int:
 def check_outputs(outputs: list[Output]) -> int:
     """Compare each output folder with the text write_outputs() would write there, `header` included."""
     formatted = _formatted(outputs)
+    # read_text() reads every line ending as \n, so the formatted text is read the same way: an
+    # endOfLine of crlf or cr, or a checkout that rewrote the files with CRLF, still compares equal.
+    expected = {path: text.replace("\r\n", "\n").replace("\r", "\n") for path, text in formatted.items()}
     status = 0
     for output in outputs:
-        stale = [path for path in output.files if not path.is_file() or path.read_text() != formatted[path]]
+        stale = [path for path in output.files if not path.is_file() or path.read_text() != expected[path]]
         unexpected = (
             [path for path in output.folder.rglob("*.ts") if path not in output.files]
             if output.folder.exists()
