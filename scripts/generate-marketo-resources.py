@@ -14,11 +14,11 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from marketo_codegen import (  # noqa: E402
+    Output,
     SHARED_MOCKS,
     Target,
     add_target_arguments,
     camel_case,
-    check_output,
     definition_category,
     definition_file,
     generated_header,
@@ -31,7 +31,7 @@ from marketo_codegen import (  # noqa: E402
     relative_import,
     resolve_targets,
     success_schemas,
-    write_output,
+    write_or_check_outputs,
 )
 
 
@@ -471,17 +471,16 @@ def main() -> int:
     add_target_arguments(parser)
     arguments = parser.parse_args()
 
-    status = 0
-    for target in resolve_targets(arguments):
-        files = ResourceGenerator(target).files()
-        label = f"{target.key} resource files"
-        header = generated_header(Path(__file__).name, target)
-        status |= (
-            check_output(target.resources, files, label, header)
-            if arguments.check
-            else write_output(target.resources, files, label, header)
+    outputs = [
+        Output(
+            target.resources,
+            ResourceGenerator(target).files(),
+            f"{target.key} resource files",
+            generated_header(Path(__file__).name, target),
         )
-    return status
+        for target in resolve_targets(arguments)
+    ]
+    return write_or_check_outputs(outputs, arguments.check)
 
 
 if __name__ == "__main__":

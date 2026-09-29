@@ -12,7 +12,7 @@ Em cada área de `src/`, três pastas são saída de gerador, e `src/mocks/` tam
   - o `5cc5e09` mudou os 69 arquivos de `src/asset/resources/` e deixou em 46 deles um prefixo de import que nenhuma versão do gerador emitia ([editar código gerado à mão](../anti-patterns/hand-editing-generated-code.md)).
 
   Até a #6, os geradores e a saída commitada divergiam, e o `npm run check:all` não passava (#7). Eles já divergiam no `0c8e760`, pelo sufixo `.js` dos imports ([gerar e conferir](generate-and-check.md)).
-- Uma edição à mão não sobrevive. O gerador apaga a pasta de saída inteira antes de escrever (`scripts/marketo_codegen.py:383-385`), e o check acusa todo arquivo mudado e todo `*.ts` a mais (`scripts/marketo_codegen.py:408-418`).
+- Uma edição à mão não sobrevive. O gerador apaga a pasta de saída inteira antes de escrever (`scripts/marketo_codegen.py:409-411`), e o check acusa todo arquivo mudado e todo `*.ts` a mais (`scripts/marketo_codegen.py:427-432`).
 - O mock ainda precisa de comportamento que o Swagger não descreve: estado, autenticação, falhas roteirizadas e validação estrita ([project intent](../../intent/project-intent.md)). Escrito dentro das pastas geradas, ele sumiria na próxima geração.
 
 ## Solução
@@ -83,7 +83,4 @@ As cinco áreas, com os arquivos medidos na #6 e o registro da #19 nas definiç�
 
 - **Criado**: 2026-09-25 (Fase: Build), registro retroativo de `0c8e760`..`fb4a804` (#4)
 - **Status**: Active
-- **Atualizado**: 2026-09-26 (Fase: Build), todo arquivo gerado passou a abrir com o cabeçalho de gerado, e as citações seguiram as linhas novas (#7)
-- **Atualizado**: 2026-09-28 (Fase: Build), a pasta de definições ganhou o registro `swagger-source.ts` de cada área, com as contagens e a citação do gerador seguindo as linhas novas ([ADR 0012](../../decisions/0012-swagger-source-record-per-area.md)) (#19)
-- **Atualizado**: 2026-09-28 (Fase: Learn), `src/body-limit.ts` entrou entre os arquivos escritos à mão (#25)
-- **Atualizado**: 2026-09-28 (Fase: Build), as citações dos geradores, do `AppModule`, do `package.json` e do lockfile seguiram as linhas novas (#24)
+- **Atualizado**: 2026-09-29 (Fase: Build), as citações do `write_outputs()` e do `check_outputs()` seguiram as linhas novas (#29)

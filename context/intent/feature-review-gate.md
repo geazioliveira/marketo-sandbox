@@ -90,5 +90,4 @@ O último critério depende do GitHub ao vivo: a PR desta issue esperar a revis�
 
 - **Criado**: 2026-09-25 (Fase: Intent), do plano aprovado na #13 (#13)
 - **Status**: Completed
-- **Atualizado**: 2026-09-25 (Fase: Learn), a PR #15 foi mergeada com a revisão do Copilot na cabeça e zero threads abertas, e o último critério foi marcado com a evidência da #13 (#4)
 - **Atualizado**: 2026-09-28 (Fase: Build), o sinal de revisão e o `workflow_run` do refresh saíram, e o veredito fresco passou a ser só o gate em modo CI (#30)

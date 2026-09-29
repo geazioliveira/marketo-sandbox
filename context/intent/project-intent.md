@@ -55,5 +55,4 @@ Um critério só é marcado quando um teste ou um check o prova.
 
 - **Criado**: 2026-09-24 (Fase: Intent), a partir do código em `fb4a804` e do plano do consumidor lite-campaign (#2)
 - **Status**: In Progress
-- **Atualizado**: 2026-09-26 (Fase: Learn), o critério do CI com o `check:all` foi marcado, com o `check:all` no fim do `npm run check` (#7)
 - **Atualizado**: 2026-09-28 (Fase: Learn), o critério do sha256 foi marcado, com o registro `swagger-source.ts` de cada área conferido pelo `check:all`, e a decisão em aberto da cópia de assets passou a citar o registro (#19)

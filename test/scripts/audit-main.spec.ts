@@ -1548,8 +1548,14 @@ describe.concurrent('scripts/audit-main.mjs', () => {
         ['Vínculo com issue / issue-link'],
       ],
       [
-        'issue-link still running when the PR merged',
+        'issue-link red before the merge, beside a run still going at it',
         [
+          {
+            ...ISSUE_LINK,
+            conclusion: 'FAILURE',
+            startedAt: at('00:59'),
+            completedAt: at('00:59'),
+          },
           {
             ...ISSUE_LINK,
             conclusion: 'SUCCESS',
@@ -1594,6 +1600,186 @@ describe.concurrent('scripts/audit-main.mjs', () => {
         expect(issue.body?.match(/mergeada sem/g)).toHaveLength(missing.length)
       },
     )
+
+    // A run that started before the merge and had not concluded at it is the
+    // newest verdict, still unknown: the merge stays out of the loop, under a
+    // reason of its own that gives the last run concluded before the merge
+    // (#48). The merge of PR #43 had issue-link attempts 1 and 2 green and
+    // attempt 3, started before the merge, red after it (#46).
+    test.for<[string, CheckRun[], string[]]>([
+      [
+        'issue-link still running when the PR merged',
+        [
+          {
+            ...ISSUE_LINK,
+            conclusion: 'SUCCESS',
+            startedAt: at('00:59'),
+            completedAt: at('01:02'),
+          },
+          { ...QUALITY, conclusion: 'SUCCESS' },
+        ],
+        [
+          'Vínculo com issue / issue-link em andamento; a última run concluída antes do merge: nenhuma',
+        ],
+      ],
+      [
+        'issue-link green, then re-run before the merge and red after it (#43)',
+        [
+          {
+            ...ISSUE_LINK,
+            conclusion: 'SUCCESS',
+            startedAt: at('00:40'),
+            completedAt: at('00:45'),
+          },
+          {
+            ...ISSUE_LINK,
+            conclusion: 'FAILURE',
+            startedAt: at('00:59'),
+            completedAt: at('01:02'),
+          },
+          { ...QUALITY, conclusion: 'SUCCESS' },
+        ],
+        [
+          'Vínculo com issue / issue-link em andamento; a última run concluída antes do merge: SUCCESS',
+        ],
+      ],
+      [
+        'issue-link red, then re-run before the merge and green after it',
+        [
+          {
+            ...ISSUE_LINK,
+            conclusion: 'FAILURE',
+            startedAt: at('00:40'),
+            completedAt: at('00:45'),
+          },
+          {
+            ...ISSUE_LINK,
+            conclusion: 'SUCCESS',
+            startedAt: at('00:59'),
+            completedAt: at('01:02'),
+          },
+          { ...QUALITY, conclusion: 'SUCCESS' },
+        ],
+        [
+          'Vínculo com issue / issue-link em andamento; a última run concluída antes do merge: FAILURE',
+        ],
+      ],
+      [
+        'issue-link still running when the audit reads it',
+        [
+          {
+            ...ISSUE_LINK,
+            conclusion: 'SUCCESS',
+            startedAt: at('00:40'),
+            completedAt: at('00:45'),
+          },
+          {
+            ...ISSUE_LINK,
+            conclusion: null,
+            startedAt: at('00:59'),
+            completedAt: null,
+          },
+          { ...QUALITY, conclusion: 'SUCCESS' },
+        ],
+        [
+          'Vínculo com issue / issue-link em andamento; a última run concluída antes do merge: SUCCESS',
+        ],
+      ],
+      [
+        'both checks still running when the PR merged',
+        [
+          {
+            ...ISSUE_LINK,
+            conclusion: 'SUCCESS',
+            startedAt: at('00:59'),
+            completedAt: at('01:02'),
+          },
+          {
+            ...QUALITY,
+            conclusion: 'SUCCESS',
+            startedAt: at('00:40'),
+            completedAt: at('00:45'),
+          },
+          {
+            ...QUALITY,
+            conclusion: 'SUCCESS',
+            startedAt: at('00:58'),
+            completedAt: at('01:03'),
+          },
+        ],
+        [
+          'Vínculo com issue / issue-link em andamento; a última run concluída antes do merge: nenhuma',
+          'Qualidade / check em andamento; a última run concluída antes do merge: SUCCESS',
+        ],
+      ],
+    ])(
+      'opens an issue for a PR merged with %s, naming the run in flight',
+      async ([, runs, inFlight], { expect, fresh }) => {
+        const history = await fresh()
+        const { baseline } = await preLoop(history)
+        const merge = await history.merge(baseline, 11)
+        const run = await history.audit({
+          before: baseline,
+          after: merge,
+          baseline,
+          fixture: {
+            answers: {
+              ...pullsOf(merge, pull(11, merge)),
+              ...prAnswer(11),
+              ...checksOn(headOf(11), runs),
+              ...filed(merge),
+            },
+          },
+        })
+        expect(run.status, run.out).toBe(1)
+        const [issue] = created(run.calls)
+        for (const reason of inFlight)
+          expect(issue.body).toContain(`- PR #11 mergeada com ${reason}.`)
+        expect(issue.body?.match(/em andamento;/g)).toHaveLength(
+          inFlight.length,
+        )
+        expect(issue.body).not.toContain('mergeada sem')
+      },
+    )
+
+    test('does not count a run with no start, queued when the audit reads it', async ({
+      expect,
+      fresh,
+    }) => {
+      const history = await fresh()
+      const { baseline } = await preLoop(history)
+      const merge = await history.merge(baseline, 11)
+      const run = await history.audit({
+        before: baseline,
+        after: merge,
+        baseline,
+        fixture: {
+          answers: {
+            ...pullsOf(merge, pull(11, merge)),
+            ...prAnswer(11),
+            ...checksOn(headOf(11), [
+              {
+                ...ISSUE_LINK,
+                conclusion: 'SUCCESS',
+                startedAt: at('00:40'),
+                completedAt: at('00:45'),
+              },
+              {
+                ...ISSUE_LINK,
+                conclusion: null,
+                startedAt: null,
+                completedAt: null,
+              },
+              { ...QUALITY, conclusion: 'SUCCESS' },
+            ]),
+          },
+        },
+      })
+      // GitHub gives no time a run was queued, so one that has not started
+      // cannot be placed before the merge; the merge hook refuses it (#5).
+      expect(run.status, run.out).toBe(0)
+      expect(created(run.calls)).toEqual([])
+    })
 
     test.for<[string, Origin]>([
       [

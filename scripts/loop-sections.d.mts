@@ -288,6 +288,8 @@ export interface ContextKindRule {
   file: RegExp
   shape: string
   statuses: readonly string[]
+  /** Keeps every `Atualizado` line of its Status block; any other kind keeps only the last. */
+  keepsEveryUpdate?: true
 }
 
 export interface UntypedContextPath {
@@ -308,10 +310,15 @@ export declare function contextKindOf(file: string | null | undefined): {
   kind: ContextKind
   title: string
   statuses: readonly string[]
+  keepsEveryUpdate: boolean
 } | null
 export declare const statusHeading: RegExp
 export declare const statusLine: RegExp
 export declare const statusDeclaration: RegExp
+export declare const statusPhases: readonly string[]
+export declare const statusCreatedLine: RegExp
+export declare const statusUpdatedLine: RegExp
+export declare const statusUpdatedDeclaration: RegExp
 export declare const repositoryFileUrl: string
 
 // The gate's steps and its cache

@@ -1205,7 +1205,9 @@ export const knowledgeStatuses = ['Active', 'Superseded', 'Deprecated']
  * context/), as a pattern and as the shape the guide's Layout table writes,
  * the kind its title declares (`# <kind>: <título>`) and the statuses its
  * Status block may hold. A decision's title carries its number too:
- * decisions/0001-*.md declares `ADR 0001`.
+ * decisions/0001-*.md declares `ADR 0001`. Only a kind with keepsEveryUpdate
+ * keeps every `Atualizado` line of its Status block, because an amendment is
+ * part of the record; any other keeps only the last (statusUpdatedLine).
  */
 export const contextKinds = [
   {
@@ -1231,6 +1233,7 @@ export const contextKinds = [
     file: /^decisions\/(\d{4})-[^/]+\.md$/,
     shape: 'decisions/NNNN-<slug>.md',
     statuses: decisionStatuses,
+    keepsEveryUpdate: true,
   },
   {
     kind: 'Pattern',
@@ -1277,21 +1280,28 @@ export function isUntypedContextFile(file) {
 
 /**
  * What a file under context/ must declare, from its path relative to
- * context/: the title kind (`ADR 0001` for a decision) and its statuses. Null
- * for a path that is no kind: an untyped file (an index wins over its folder:
- * knowledge/patterns/README.md is no pattern), or one outside the layout.
- * @returns {{ kind: string, title: string, statuses: string[] } | null}
+ * context/: the title kind (`ADR 0001` for a decision), its statuses and
+ * whether it keeps every `Atualizado` line. Null for a path that is no kind:
+ * an untyped file (an index wins over its folder: knowledge/patterns/README.md
+ * is no pattern), or one outside the layout.
+ * @returns {{ kind: string, title: string, statuses: string[], keepsEveryUpdate: boolean } | null}
  */
 export function contextKindOf(file) {
   const relative = String(file ?? '')
   if (isUntypedContextFile(relative)) return null
-  for (const { kind, file: pattern, statuses } of contextKinds) {
+  for (const {
+    kind,
+    file: pattern,
+    statuses,
+    keepsEveryUpdate,
+  } of contextKinds) {
     const matched = pattern.exec(relative)
     if (matched !== null)
       return {
         kind,
         title: matched[1] === undefined ? kind : `${kind} ${matched[1]}`,
         statuses,
+        keepsEveryUpdate: keepsEveryUpdate === true,
       }
   }
   return null
@@ -1304,13 +1314,46 @@ export const statusHeading = /^## Status[ \t]*$/
 export const statusLine = /^- \*\*Status\*\*:[ \t]*(.*?)[ \t]*$/
 
 /**
- * Any line that declares a status: quoted (`>`) or not, in a bulleted or an
- * ordered list or not, bold with `**` or with `__`, the colon inside the bold
- * or after it. Only the Status block's one statusLine may: anywhere else a
- * second status would contradict the block.
+ * Any line that declares the Status block's `label`: quoted (`>`) or not, in
+ * a bulleted or an ordered list or not, bold with `**` or with `__`, the colon
+ * inside the bold or after it.
  */
-export const statusDeclaration =
-  /^[ \t]*(?:>[ \t]*|(?:[-*+]|\d{1,9}[.)])[ \t]+)*(\*\*|__)Status(?:\1[ \t]*:|:\1)/
+const declaring = (label) =>
+  new RegExp(
+    `^[ \\t]*(?:>[ \\t]*|(?:[-*+]|\\d{1,9}[.)])[ \\t]+)*(\\*\\*|__)${label}(?:\\1[ \\t]*:|:\\1)`,
+  )
+
+/**
+ * Any line that declares a status. Only the Status block's one statusLine
+ * may: anywhere else a second status would contradict the block.
+ */
+export const statusDeclaration = declaring('Status')
+
+/** The phase tokens a dated line of the Status block names. */
+export const statusPhases = ['Intent', 'Build', 'Learn']
+
+/** `- **<label>**: AAAA-MM-DD (Fase: <phase>)`, the date captured; the prose after it is free. */
+const datedLine = (label) =>
+  new RegExp(
+    `^- \\*\\*${label}\\*\\*: (\\d{4}-\\d{2}-\\d{2}) \\(Fase: (?:${statusPhases.join('|')})\\)`,
+  )
+
+/** The Status block's creation line: no update is dated before it. */
+export const statusCreatedLine = datedLine('Criado')
+
+/**
+ * An update in the Status block, the guide's shape (#66). A kind with
+ * keepsEveryUpdate keeps every one, oldest first; any other keeps only the
+ * last, and `git log` holds the rest (context/README.md, "O bloco Status").
+ */
+export const statusUpdatedLine = datedLine('Atualizado')
+
+/**
+ * Any line of the Status block that declares an update, in any shape
+ * statusDeclaration reads: each one counts, so another shape cannot dodge the
+ * count, and each must be a statusUpdatedLine.
+ */
+export const statusUpdatedDeclaration = declaring('Atualizado')
 
 /**
  * Where a link in the PR template must point. The template becomes a PR body,

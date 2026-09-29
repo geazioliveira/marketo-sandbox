@@ -44,6 +44,167 @@ Uma entrada por mudança mergeada, da mais nova para a mais antiga, escrita no p
 
 ---
 
+## 2026-09-29: O check:context confere as linhas Atualizado do bloco Status, e fora das decisões só a última fica (#66)
+
+**Fase**: Learn
+**Tipo**: Bug Fix
+
+### O que foi construído / corrigido
+
+- **O guarda.** O `check:context` passou a ler as linhas `Atualizado` do bloco Status. Cada uma precisa estar no formato do guia, `- **Atualizado**: AAAA-MM-DD (Fase: Intent | Build | Learn), …`, com uma data de calendário. Fora das decisões, toda linha depois da primeira é recusada. Nenhuma data vem antes do `Criado` nem da mais nova acima dela. Uma linha numa lista numerada, numa citação ou em negrito com `__` também conta. Em código ou em comentário HTML, não conta.
+- **O contrato** em `scripts/loop-sections.mjs`: `statusCreatedLine`, `statusUpdatedLine`, `statusUpdatedDeclaration`, `statusPhases` e o `keepsEveryUpdate` do tipo `ADR`. A regra de quem guarda todas as linhas ficou num lugar só.
+- **A limpeza.** Doze arquivos que não são decisão ficaram só com a última linha `Atualizado`, e 22 linhas saíram. Nove arquivos vieram do relato. Outros três ganharam a linha a mais com a #32 e a #29, que entraram em `main` antes da PR. As linhas que a #24 trocou em cinco arquivos não voltaram, porque a troca era a regra.
+- **O guia e o fluxo** dizem que o check confere a regra, e o cabeçalho do `check-context.mjs` a lista.
+- **Um anti-pattern novo**, [Regra de formato escrita só na prosa do guia](../knowledge/anti-patterns/format-rule-only-in-prose.md).
+
+### Números medidos
+
+- **A deriva**, em `22059b6` e em `624eafa`: 9 dos 43 arquivos tipados que não são decisão tinham de 2 a 4 linhas `Atualizado`. A primeira linha a mais entrou com a PR #33 (#31, `b96caad`). O guarda novo, rodado nas duas árvores, deu 16 problemas, as 16 linhas que a limpeza tirou, e nenhum outro. Depois do merge de `c1a50ab`, que trouxe a #32 e a #29, deu mais 6, uma linha a mais por arquivo.
+- **Os testes**: 21 casos novos falharam antes do guarda, e depois os 137 do `check-context.spec.ts` passam. Nove mutações do guarda, numa cópia fora do git, foram pegas.
+- **`npm run check` e o e2e.** Com a média de carga entre 18 e 24, o `npm test` deu 8 falhas em 3.855 testes, todas por prazo, em quatro specs de `test/hooks/` que esta PR não toca (#59). Rodados de novo, os 705 testes desses quatro arquivos passaram. Passaram o lint, o `format:check`, o typecheck, o `check:context`, o build, o `check:all` e o e2e, com 447 testes em 6 arquivos. A prova da cadeia inteira é o `Qualidade / check` da PR.
+
+### Decisões tomadas
+
+- As respostas do Approve da #66: conferir a ordem das datas nas decisões, com o `Criado` como a primeira; manter a última linha de cada arquivo, sem uma linha nova da #66; e fazer tudo numa PR só.
+- Manter a regra do guia, que só a decisão guarda todas as linhas, em vez de restaurar as linhas que a #24 trocou. O plano da #66 dá o porquê em "Fora de escopo".
+
+### Patterns aplicados ou criados
+
+- [Regra de formato escrita só na prosa do guia](../knowledge/anti-patterns/format-rule-only-in-prose.md), anti-pattern novo
+- [Revisão classificada por risco](../knowledge/patterns/risk-classified-review.md): HIGH, porque a PR mexe no `check-context.mjs`, no `loop-sections.mjs` e nos testes do harness
+
+### Aprendizados / surpresas
+
+- **O relato veio ao contrário.** O pedido era restaurar as linhas que a #24 trocou em cinco arquivos. O guia dizia que a troca era a regra, e o defeito estava nos nove arquivos que acrescentavam. Conferir a premissa no guia antes de abrir a issue evitou desfazer uma regra que estava certa.
+- **A ordem das datas sozinha não teria pegado a #24.** A troca pôs uma linha mais nova no lugar de uma mais velha. O que pega a deriva é a contagem.
+- **As mutações acharam o que os testes do plano não fixavam.** Duas mutações da referência da ordem sobreviviam: citar a última linha do mesmo dia e baixar a régua depois de uma linha fora de ordem. Um caso a mais as pegou.
+- **O Build do harness precisou do dono fora do modo automático**, como na #48.
+
+---
+
+## 2026-09-29: Os geradores formatam em memória, com a config do caminho de destino, antes de tocar na saída (#29)
+
+**Fase**: Learn
+**Tipo**: Bug Fix
+
+### O que foi construído / corrigido
+
+- **O formatador `scripts/format-generated.mjs`.** Ele recebe a lista de `{ path, content }` no stdin e formata cada texto pela API do Prettier, com a config do caminho de destino (`resolveConfig` com `editorconfig: true`) e com o `requirePragma` e o range forçados. Ele importa o Prettier de `<raiz>/node_modules/prettier/index.mjs` pelo caminho.
+- **Os geradores formatam tudo antes de tocar em qualquer pasta.** Cada gerador monta um `Output` por pasta de saída e chama o `write_or_check_outputs()` uma vez. O `format_files()` formata a execução inteira numa chamada, e só então o `write_outputs()` recusa, apaga e grava, ou o `check_outputs()` compara.
+- **Saiu o caminho do CLI:** o `format_with_prettier()`, a conferência do relatório por arquivo, a limpeza das variáveis `PRETTIER_*`, o `.codegen-tmp` e a linha dele no `.gitignore`.
+- **A ADR 0015** substitui a 0011 e mantém dela o que valia: nenhum arquivo de ignore alcança a saída, o `requirePragma` e o range forçados, a saída 2 e a busca do node. As ADRs 0004, 0008, 0009 e 0012, os dois patterns do código gerado e três anti-patterns dizem o mecanismo novo, e as citações do CLI levam o commit `d50fd00`.
+- **Da verificação adversarial** (`814573a`):
+  - o `--check` lê as quebras de linha do texto formatado como o `read_text()` lê as do arquivo. Com `endOfLine: crlf` ou `cr`, ele saía com 1, uma regressão frente ao CLI;
+  - o `write_outputs()` codifica tudo em UTF-8 antes do primeiro `rmtree`;
+  - o formatador manda o `console.log` para o stderr;
+  - o `prettier_environment()` confere o próprio formatador.
+
+### Números medidos
+
+- **Antes**, sobre `d50fd00`:
+  - com um `overrides` para `src/**`, um `src/.prettierrc` ou um `src/.editorconfig`, gerar saía com 0, o `--check` com 1 e o `format:check` com 0;
+  - com um `.prettierrc` inválido, o `definitions` e o `resources` deixavam 3 arquivos cada regravados sem formatação;
+  - com o `.prettierrc` inválido só em `src/user-management/`, os três geradores mudavam 13, 3 e 6 arquivos dessa área.
+- **Depois**: os três saem com 0 nas três configs, e as falhas saem com 2 sem mudar nenhum arquivo de `src/`.
+- **Tempo**: o `generate:all` caiu de 10,4 s para 4,1 s e o `check:all` de 9,9 s para 3,8 s, com `src/` reescrito byte a byte e as 16 linhas "are current".
+- **`npm run check`**: 3.826 testes em 22 arquivos antes deste Learn, e 3.827 com o caso que o `drift.spec.ts` gera para o anti-pattern novo. O `codegen.spec.ts` foi de 71 para 80 casos. Entraram 17 casos da #29, 14 deles vermelhos antes da correção. Saíram os 6 do Prettier embrulhado, e os 3 de "not executable" e os 2 de "undo the rewrite" foram reescritos. O e2e ficou com 39.
+- **Depois do merge da #24** (`2b48487`): 3.834 testes em 23 arquivos e o e2e com 447. Com a carga média entre 17 e 22, 82 casos dos hooks, do gate e um do `codegen.spec.ts` estouraram o tempo, e o do `codegen.spec.ts` saiu com `status` `null`, o processo morto pelo timeout. Rodados um arquivo de cada vez, os 8 arquivos passaram com os 1.903 casos. As três configs e as falhas deram o mesmo resultado.
+- **A verificação adversarial**:
+  - comparou o CLI e a API em 15 configs, com a saída de gerar igual byte a byte;
+  - matou 6 mutações e achou 2 que passavam: o `import` pelo nome e a recusa no laço do `rmtree`;
+  - o `codegen.spec.ts` ganhou 10 casos e foi a 90, 7 deles vermelhos no código de antes da correção.
+
+### Decisões tomadas
+
+- [0015: Os geradores formatam em memória, com a config do caminho de destino, antes de tocar na saída](../decisions/0015-generators-format-in-memory-at-the-destination-path.md), nova, com a resposta do dono à pergunta 1: a API do Prettier, não o CLI com pasta temporária.
+- [0011: Os geradores formatam sem arquivo de ignore e falham quando não formatam](../decisions/0011-generators-format-without-ignore-files.md), agora `Superseded`.
+
+### Patterns aplicados ou criados
+
+- [Formatar uma cópia noutro caminho que o do destino](../knowledge/anti-patterns/formatting-a-copy-at-another-path.md), anti-pattern novo
+- [Gerar e conferir](../knowledge/patterns/generate-and-check.md) e [A fronteira do código gerado](../knowledge/patterns/generated-code-boundary.md), atualizados; a regra "Não ponha uma config do Prettier que dependa do caminho" saiu
+- [Confiar que a ferramenta processou o arquivo passado pelo nome](../knowledge/anti-patterns/trusting-a-tool-to-process-a-named-file.md), com a API como a saída que a #29 escolheu
+- [Timeouts de testes que disparam processos](../knowledge/patterns/process-test-timeouts.md), aplicado nos casos novos
+
+### Aprendizados / surpresas
+
+- **A alternativa óbvia só mudava o vermelho de lugar.** Formatar os dois modos na mesma pasta temporária fazia gerar concordar com o `--check`, mas não com o `format:check`, que lê a config do destino. Só a medição com as três configs mostrou isso.
+- **A resolução do Node sobe de pasta.** Um `import('prettier')` sem `node_modules` na raiz achou o de uma pasta acima. Num worktree sem `npm ci`, os geradores formatariam com o Prettier do checkout principal.
+- **Tirar uma linha de um módulo muito citado custa caro.** O contexto cita o `marketo_codegen.py` e os três geradores por linha em dezenas de lugares. Pôr o `FORMATTER` na linha do `TEMP` e trocar dois imports por dois manteve essas citações no lugar, como a #19 já tinha feito com o `document_path()`.
+- **O protótipo pagou o plano.** A cópia fora do git mediu a paridade dos 1.088 arquivos e os tempos antes do Approve, e o Build só confirmou.
+- **Com o HEAD destacado, o hook nega o `git checkout` de restauração.** Na medição do plano, a árvore voltou regerando com a config original.
+- **Trocar um lado de uma comparação muda o que ela tolera.** O código antigo lia os dois lados com `read_text()`, e a tolerância a CRLF vinha de graça. O novo lia um lado da memória, e as quebras de linha passaram a contar. Nenhum teste tinha uma config com `crlf`, e só a verificação adversarial viu.
+- **Um merge de `main` desloca de novo as citações que acabaram de ser acertadas.** O `is_type_alias()` da #24 somou 15 linhas no meio do módulo, e duas citações que coincidiam nos dois lados escaparam da resolução dos conflitos. Um script que imprime o código de cada citação `arquivo:linha` as achou.
+
+---
+
+## 2026-09-29: O gate aponta o rebase só para o merge da própria cópia ainda não publicado (#32)
+
+**Fase**: Learn
+**Tipo**: Bug Fix
+
+### O que foi construído / corrigido
+
+- **O remédio do `stacked` para um merge de fora.** Com a branch publicada, todo merge de fora recebia "o merge trouxe a cópia publicada desta própria branch", com `git pull --rebase`, até o merge de outra branch. Isso aparecia sempre no CI, onde a branch está publicada. O `ownCopyMerge` de `scripts/gate.mjs` passou a exigir que a cópia publicada ainda não contenha o merge. Um merge já publicado recebe o recorte da branch a partir de `origin/main`, que vale nos dois casos. O veredito não mudou.
+- **Os testes.** Dois casos novos no `stacked` do `test/scripts/gate.spec.ts`: o merge de outra branch antes do push, depois do push e no CI, e o merge da própria cópia depois do push e no CI. O merge da própria cópia antes do push segue no teste que já existia.
+- **O pattern [O gate do loop](../knowledge/patterns/loop-gate.md)** diz que o rebase vale antes do push, e o recorte depois.
+
+### Números medidos
+
+- **Antes**, em `d50fd00`: os dois casos novos falharam com a mensagem da cópia publicada, no modo local e no CI.
+- **Depois**: o `gate.spec.ts` e o `drift.spec.ts` passam com 567 de 567, com load average perto de 18, e nenhum veredito do `stacked` mudou.
+
+### Decisões tomadas
+
+- A resposta do Approve da #32: um merge já publicado recebe o recorte que o gate já dava para um merge de fora, e não uma mensagem que nomeie as duas possibilidades.
+
+### Patterns aplicados ou criados
+
+- [O gate do loop](../knowledge/patterns/loop-gate.md), atualizado
+
+### Aprendizados / surpresas
+
+- **A ancestralidade só fala do passado enquanto a ref não andou.** Antes do push, `origin/<branch>` é uma foto de antes do merge. Depois, ela contém o merge, e "ser ancestral da cópia publicada" vale para tudo o que a branch tem.
+- **Uma prova antes do Approve vai numa worktree de rascunho.** A primeira reprodução foi escrita no worktree da branch por um script Python, que o `build-guard` não interceptou. Com o gate fechado, o hook negou o `git checkout` que a desfaria, e o dono desfez à mão.
+- **Editar o harness pede o modo com aprovação.** Em modo automático, a confirmação que o hook pede para `scripts/gate.mjs` vira negação. O dono trocou o modo da sessão para a edição passar.
+
+---
+
+## 2026-09-29: A auditoria de main nomeia o check em andamento no merge, e o fluxo pede nenhum no merge (#48)
+
+**Fase**: Learn
+**Tipo**: Bug Fix
+
+### O que foi construído / corrigido
+
+- **O motivo novo da auditoria.** Um merge cuja run mais nova de um check exigido começou antes dele e não tinha concluído nele continua fora do loop, agora com `PR #P mergeada com <workflow / job> em andamento; a última run concluída antes do merge: <conclusão | nenhuma>`. Até aqui, ele saía como `mergeada sem … verde`, o motivo de um check vermelho. O `greenAtMerge` de `scripts/audit-main.mjs` virou `checkAtMerge`.
+- **O fluxo pede nenhum check em andamento no merge**, também no merge feito à mão: `gh pr checks <n>` sem nenhum `pending`. O hook de `gh pr merge` já negava o caso para o agente desde a #5. A triagem da auditoria diz como ler o motivo novo.
+- **A ADR 0002** lista o motivo novo, e o `drift.spec.ts` confere que o fluxo e a ADR citam os dois motivos dos checks como a auditoria os escreve.
+- **Um anti-pattern novo**, [Mergear com uma re-execução do check em andamento](../knowledge/anti-patterns/merge-with-a-run-in-flight.md), com o merge da PR #43 como caso.
+
+### Números medidos
+
+- **O caso da #43**, conferido no GitHub: tentativas 1 e 2 da run 36407495291 verdes às 10:04:59 e às 10:05:27, merge às 10:05:51, tentativa 3 começada às 10:05:42 e vermelha às 10:05:59 com `issue-open: #35 está fechada`.
+- **Os testes**: 5 casos novos em `required checks` falharam antes da correção; depois, os 188 do `audit-main.spec.ts` e os 206 do `drift.spec.ts` passam. Quatro mutações da correção, numa cópia fora do git, foram pegas.
+- **`npm run check`**: 3.831 testes em 23 arquivos; o e2e com 447, em 6 arquivos. Na primeira rodada, com a média de carga entre 18 e 19, 41 testes ficaram vermelhos em `test/hooks/` e em `test/scripts/gate.spec.ts`, por `git` estourando o prazo dentro dos hooks e 19 testes com 120 s. Rodado de novo com a carga mais baixa, o `gate.spec.ts` passou inteiro (365). O lint, o `format:check`, o typecheck, o `check:context`, o build e o `check:all` passaram. A prova da cadeia inteira é o `Qualidade / check` da PR.
+
+### Decisões tomadas
+
+- [0002: Enforcement soft do loop no GitHub Free](../decisions/0002-soft-enforcement-on-github-free.md): o motivo novo, com o merge em andamento ainda fora do loop.
+- As respostas do Approve da #48: manter a regra e nomear o caso, em vez de julgar pela última run concluída como o relato pedia; pôr no motivo a última conclusão antes do merge; e criar o anti-pattern.
+
+### Patterns aplicados ou criados
+
+- [Mergear com uma re-execução do check em andamento](../knowledge/anti-patterns/merge-with-a-run-in-flight.md), anti-pattern novo
+- [Revisão classificada por risco](../knowledge/patterns/risk-classified-review.md): HIGH, porque a PR mexe na auditoria de `main` e nos testes do harness
+
+### Aprendizados / surpresas
+
+- **A causa do relato não se confirmou.** A #48 dizia que a auditoria lia o check como ele estava na hora de auditar. O código já julgava pelo horário do merge, e um teste já fixava que uma run em andamento no merge conta como não verde. O defeito era só o motivo, que não separava esse caso de um vermelho. Ler o código antes de planejar evitou afrouxar uma regra que estava certa.
+- **O Build do harness precisou do dono presente.** No modo automático, o hook negou a edição de `scripts/audit-main.mjs`; fora dele, cada edição passou pela confirmação do dono. As mutações rodaram numa cópia fora do git, para não escrever no harness pelo shell.
+
+---
+
 ## 2026-09-28: O código gerado segue o schema documentado, e um upload multipart chega ao handler (#24)
 
 **Fase**: Learn

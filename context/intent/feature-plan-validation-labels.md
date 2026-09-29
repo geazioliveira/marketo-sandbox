@@ -40,5 +40,4 @@ O primeiro commit (`ae5e24d`) trouxe só este intent. O segundo (`1b3f8f0`) levo
 
 - **Criado**: 2026-09-25 (Fase: Intent), do plano aprovado na issue #17 (#17)
 - **Status**: Completed
-- **Atualizado**: 2026-09-25 (Fase: Learn), regra e contrato central isolados da #5 e checks locais concluídos; veredito final e reconciliação seguem no fluxo da PR (#17)
 - **Atualizado**: 2026-09-28 (Fase: Learn), os dois critérios que ficaram para depois do merge foram marcados, com a evidência da #17, pela PR da última fatia da #5 (#5)
