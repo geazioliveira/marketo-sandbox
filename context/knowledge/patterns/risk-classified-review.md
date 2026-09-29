@@ -25,7 +25,7 @@ Todo plano de issue e toda PR declaram o risco, `HIGH` ou `NORMAL`, com o racioc
 
 Uma mudança é HIGH quando toca pelo menos um destes:
 
-- **Os contratos Swagger e o envelope.** Os cinco `docs/marketo-swagger-*.json` ([ADR 0004](../../decisions/0004-swagger-as-single-source-with-committed-generated-code.md)) e o envelope `{errors, requestId, result, success, warnings}` das respostas `ResponseOf*`, com os valores fixos de `ENVELOPE_VALUES` (`scripts/generate-marketo-factories.py:32-38`).
+- **Os contratos Swagger e o envelope.** Os cinco `docs/marketo-swagger-*.json` ([ADR 0004](../../decisions/0004-swagger-as-single-source-with-committed-generated-code.md)) e o envelope `{errors, requestId, result, success, warnings}` das respostas `ResponseOf*`, com os valores fixos de `ENVELOPE_VALUES` (`scripts/generate-marketo-factories.py:33-39`).
 - **O código gerado.** As pastas geradas das cinco áreas de `src/` e `src/mocks/` ([a fronteira do código gerado](generated-code-boundary.md)).
 - **Os geradores.** `scripts/*.py` ([gerar e conferir](generate-and-check.md)).
 - **O CI.** `.github/workflows/**`. O `check.yml` roda o YAML da própria PR, que consegue afrouxá-lo ([ADR 0002](../../decisions/0002-soft-enforcement-on-github-free.md)).
@@ -81,4 +81,4 @@ As issues já seguem isso. A #6 e a #7 são HIGH porque mexem nos geradores e em
 - **Criado**: 2026-09-25 (Fase: Build), do que o loop das #2, #3 e #13 já pratica, registrado na #4 (#4)
 - **Status**: Active
 - **Atualizado**: 2026-09-26 (Fase: Build), o `check:all` passou a rodar no CI, e as citações dos geradores seguiram as linhas novas (#7)
-- **Atualizado**: 2026-09-28 (Fase: Build), os hooks do Claude Code entraram na lista do harness como existentes, depois de a #6 fazer o HIGH cobrir os cinco documentos Swagger, as pastas geradas das cinco áreas, `src/mocks/` e os status HTTP que o consumidor vê (#5)
+- **Atualizado**: 2026-09-28 (Fase: Build), as citações dos geradores, do `AppModule`, do `package.json` e do lockfile seguiram as linhas novas (#24)

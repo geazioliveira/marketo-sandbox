@@ -11,7 +11,7 @@
 
 ## Decisão
 
-- **Todo DTO é uma `export interface`.** São 255, e nenhuma classe, em `src/asset/asset-definitions/`: 92 em `models/`, 72 em `requests/` e 91 em `responses/`.
+- **Todo DTO é uma `export interface`.** São 255, e nenhuma classe, em `src/asset/asset-definitions/`: 92 em `models/`, 72 em `requests/` e 91 em `responses/`. Desde a #24, uma definição de topo sem membros, como um array, é um alias de tipo ([ADR 0012](0012-top-level-definitions-without-members-as-type-aliases.md)).
 - **A pasta sai do sufixo do nome.** `*Request` vai para `requests/`, `*Response` para `responses/` e o resto para `models/` (`category()`, `610e101:scripts/generate-marketo-definitions.py:27-32`). Os geradores de resources e de factories montam os imports com uma cópia da mesma regra, `definition_category()` (`610e101:scripts/marketo_codegen.py:41-46`).
 - **Como o gerador emite**, em `render()` (`610e101:scripts/generate-marketo-definitions.py:101-152`):
   - um `allOf` com `$ref` vira `extends` (`:108-115`, `:142`);
@@ -52,7 +52,7 @@ O histórico não registra alternativas. As linhas abaixo são as óbvias, e cad
   - **Nenhuma validação em runtime.** Um corpo ou um parâmetro fora do contrato chega ao service como veio. Não há pipe nos parâmetros (`src/asset/resources/snippets/snippets.controller.ts:30`), nem `ValidationPipe`, nem class-validator em `src`.
   - **A validação estrita da Track A vai precisar de outra coisa.** O project intent a lista entre os [critérios de aceite](../intent/project-intent.md#critérios-de-aceite). Uma interface não existe em runtime, então a validação precisa de código de runtime. A [ADR 0009](0009-behaviour-beside-generated-code.md), ainda `Proposed`, o põe ao lado do código gerado, nunca dentro dele. A forma da validação ainda não foi decidida.
   - **A UI do Swagger sai sem schemas.** O `@nestjs/swagger` monta o documento de `/api` e `/api-json` a partir das rotas e dos decorators do app (`src/main.ts:17-18`, `README.md:39-42`), não de `docs/marketo-swagger-asset.json`. Não há nenhum `@Api*` em `src`, e o `nest-cli.json` não liga o plugin do `@nestjs/swagger`. Medido na #4 numa cópia de `origin/main` compilada com `tsc`: o `SwaggerModule.createDocument` sobre o `AssetResourcesModule` devolve 186 caminhos e 0 schemas.
-  - **Desde a #6, um schema de topo sem `properties` vira interface vazia.** `Person` e `CustomObject`, do Data Ingestion, só têm `additionalProperties`, e `LeadAttribute2SearchableFields`, de Lead Database, é um array de strings. Os três saem como `export interface X {}`, o tipo aceita qualquer objeto, e a factory devolve `{}` (medido na #6; #24).
+  - **Da #6 à #24, um schema de topo sem `properties` virava interface vazia.** `Person` e `CustomObject`, do Data Ingestion, só têm `additionalProperties`, e `LeadAttribute2SearchableFields`, de Lead Database, é um array de strings. Os três saíam como `export interface X {}`, o tipo aceitava qualquer objeto, e a factory devolvia `{}` (medido na #6). Desde a #24, os três são aliases de tipo, `Record<string, unknown>` e `Array<string>` ([ADR 0012](0012-top-level-definitions-without-members-as-type-aliases.md)).
   - **O tipo não garante o envelope.** Todo campo do envelope é opcional (`src/asset/asset-definitions/responses/response-of-snippet-response.ts:7-13`), então o tipo aceita um envelope sem `success`. Só a factory garante que ele vem preenchido ([ADR 0007](0007-faker-factories-with-overrides-and-seed.md)).
 
 ## Relacionados
@@ -61,6 +61,7 @@ O histórico não registra alternativas. As linhas abaixo são as óbvias, e cad
 - [ADR 0005: NestJS sobre Express, com um módulo por tag](0005-nestjs-express-one-module-per-tag.md), que usa os DTOs nos controllers e services
 - [ADR 0007: Factories faker com overrides e seed](0007-faker-factories-with-overrides-and-seed.md), que usa os DTOs nos overrides
 - [ADR 0009: Comportamento ao lado do código gerado, nunca dentro](0009-behaviour-beside-generated-code.md), que propõe onde a validação estrita entra
+- [ADR 0012: Definição de topo sem membros vira alias de tipo, e a factory dela devolve o valor inteiro](0012-top-level-definitions-without-members-as-type-aliases.md), que emenda esta decisão
 - [Pattern: A fronteira do código gerado](../knowledge/patterns/generated-code-boundary.md)
 - [Anti-pattern: Mensagem de commit que diz menos do que o commit faz](../knowledge/anti-patterns/commit-message-understating-its-content.md)
 - [Project intent](../intent/project-intent.md)
@@ -72,3 +73,4 @@ O histórico não registra alternativas. As linhas abaixo são as óbvias, e cad
 - **Atualizado**: 2026-09-26 (Fase: Learn), as citações do `src/main.ts`, do `README.md` e do `package-lock.json` seguiram as linhas novas depois da #9 (#9)
 - **Atualizado**: 2026-09-26 (Fase: Learn), 459 interfaces nas cinco áreas, uma regra só de pasta, com `ResponseOf*` em `responses/`, e os schemas do OpenAPI 3; as citações da regra de pasta e do `render()` de antes da #6 passaram a levar o commit `610e101` (#6)
 - **Atualizado**: 2026-09-26 (Fase: Build), as citações dos arquivos gerados e dos geradores seguiram as linhas novas, depois do cabeçalho de gerado (#7)
+- **Atualizado**: 2026-09-28 (Fase: Build), uma definição de topo sem membros passou a ser um alias de tipo, pela ADR 0012, e as citações dos geradores seguiram as linhas novas (#24)
