@@ -27,7 +27,7 @@ import {
   skipChecksTrailer,
   skipCiTokens,
 } from '../../../scripts/loop-sections.mjs'
-import { afterSpawn, spawnTimeout } from './budget.mjs'
+import { afterSpawn, gitTimeoutMs, spawnTimeout } from './budget.mjs'
 import {
   editDecision,
   fold,
@@ -388,9 +388,6 @@ const discoveryVariables = [
   'GIT_PREFIX',
 ]
 
-/** A git hung on a lock must not hold the tool call; the run's budget bounds it too. */
-const gitTimeoutMs = 10_000
-
 /**
  * git, as the command would see its config: in the command's repository,
  * with its `-c` and its environment (GIT_CONFIG_GLOBAL, GIT_CONFIG_COUNT and
@@ -400,7 +397,10 @@ function gitRead(g, args, env, { configArgs = g.configArgs } = {}) {
   const clean = { ...env }
   for (const name of discoveryVariables) delete clean[name]
   const step = `ler o git em ${g.dir}`
-  const timeout = spawnTimeout(gitTimeoutMs, step)
+  // A git hung on a lock must not hold the tool call: 10 s, or
+  // LOOP_HOOKS_GIT_TIMEOUT_MS, and the run's budget bounds it too.
+  const own = gitTimeoutMs()
+  const timeout = spawnTimeout(own, step)
   const run = spawnSync(
     'git',
     [
@@ -418,7 +418,7 @@ function gitRead(g, args, env, { configArgs = g.configArgs } = {}) {
       stdio: ['ignore', 'pipe', 'pipe'],
     },
   )
-  afterSpawn(run, gitTimeoutMs, timeout, step)
+  afterSpawn(run, own, timeout, step)
   if (run.error) return { status: null, out: '' }
   return { status: run.status, out: run.stdout ?? '' }
 }

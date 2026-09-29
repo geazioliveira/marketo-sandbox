@@ -18,7 +18,7 @@ import { spawnSync } from 'node:child_process'
 import { lstatSync } from 'node:fs'
 import path from 'node:path'
 import { gateStatus, gateTtlHours } from '../../../scripts/loop-sections.mjs'
-import { afterSpawn, spawnTimeout } from './budget.mjs'
+import { afterSpawn, gitTimeoutMs, spawnTimeout } from './budget.mjs'
 import { ask, deny, pass } from './io.mjs'
 import {
   existingDirOf,
@@ -49,7 +49,6 @@ export const intentDir = 'context/intent/'
 // English, and reading takes no optional lock.
 const discoveryVariable =
   /^GIT_(DIR|WORK_TREE|COMMON_DIR|INDEX_FILE|OBJECT_DIRECTORY|ALTERNATE_OBJECT_DIRECTORIES|CEILING_DIRECTORIES|DISCOVERY_ACROSS_FILESYSTEM|NAMESPACE|PREFIX)$/
-const gitTimeoutMs = 10_000
 
 function gitEnv() {
   const env = {}
@@ -103,7 +102,8 @@ export function within(dir, target) {
 function isIgnored(top, relative) {
   if (relative === '') return false
   const step = 'conferir o .gitignore'
-  const timeout = spawnTimeout(gitTimeoutMs, step)
+  const own = gitTimeoutMs()
+  const timeout = spawnTimeout(own, step)
   const run = spawnSync(
     'git',
     [
@@ -124,7 +124,7 @@ function isIgnored(top, relative) {
       stdio: ['pipe', 'pipe', 'ignore'],
     },
   )
-  afterSpawn(run, gitTimeoutMs, timeout, step)
+  afterSpawn(run, own, timeout, step)
   if (run.error !== undefined || run.status !== 0) return false
   // --verbose -z prints source, line, pattern and path, each ended by NUL.
   const [source = '', , pattern = ''] = String(run.stdout ?? '').split('\0')

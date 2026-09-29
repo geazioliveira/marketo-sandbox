@@ -24,7 +24,7 @@ import {
   gateCacheFile,
   planPendingFile,
 } from '../../../scripts/loop-sections.mjs'
-import { afterSpawn, spawnTimeout } from './budget.mjs'
+import { afterSpawn, gitTimeoutMs, spawnTimeout } from './budget.mjs'
 
 export const projectRepo = 'geazioliveira/marketo-sandbox'
 export const trunk = 'main'
@@ -46,12 +46,6 @@ const discoveryVariables = [
   'GIT_PREFIX',
 ]
 
-/**
- * A git hung on a lock or a network mount must not hold the tool call: each
- * run is bounded, and so is the hook's run as a whole (budget.mjs).
- */
-const gitTimeoutMs = 10_000
-
 function gitEnv(env) {
   const clean = { ...env }
   for (const name of discoveryVariables) delete clean[name]
@@ -62,14 +56,18 @@ function gitEnv(env) {
 
 function git(dir, args, env) {
   const step = `ler o repositório de ${dir}`
-  const timeout = spawnTimeout(gitTimeoutMs, step)
+  // A git hung on a lock or a network mount must not hold the tool call:
+  // each run is bounded (10 s, or LOOP_HOOKS_GIT_TIMEOUT_MS), and so is the
+  // hook's run as a whole (budget.mjs).
+  const own = gitTimeoutMs()
+  const timeout = spawnTimeout(own, step)
   const run = spawnSync('git', ['-C', dir, ...args], {
     encoding: 'utf8',
     env: gitEnv(env),
     timeout,
     stdio: ['ignore', 'pipe', 'pipe'],
   })
-  afterSpawn(run, gitTimeoutMs, timeout, step)
+  afterSpawn(run, own, timeout, step)
   // The cause keeps the spawn's code: session-context tells a git that did
   // not answer in time (ETIMEDOUT) from one that could not start.
   if (run.error)

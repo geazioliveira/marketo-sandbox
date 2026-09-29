@@ -32,6 +32,26 @@ export const hookBudgetsMs = Object.freeze({
 /** Lowers the budget of any hook, for the specs; a higher value is ignored. */
 export const budgetVariable = 'LOOP_HOOKS_BUDGET_MS'
 
+/**
+ * Raises or lowers the 10 s each git gets, as LOOP_HOOKS_GH_TIMEOUT_MS does
+ * for gh (#59). Unlike the budget, this one may go up: spawnTimeout still
+ * gives a git what is left of the budget at most, so no value outlasts the
+ * run. The specs raise it, so that a slow git on a loaded machine spends the
+ * budget instead of failing at 10 s.
+ */
+export const gitTimeoutVariable = 'LOOP_HOOKS_GIT_TIMEOUT_MS'
+
+/** The git timeout when the environment gives none. */
+const defaultGitTimeoutMs = 10_000
+
+/** A git's own timeout, in ms: the variable's value when it is a positive integer, else 10 s. */
+export function gitTimeoutMs(env = process.env) {
+  const fromEnv = Number(env?.[gitTimeoutVariable])
+  return Number.isInteger(fromEnv) && fromEnv > 0
+    ? fromEnv
+    : defaultGitTimeoutMs
+}
+
 /** Below this much time left, no process is worth starting. */
 const floorMs = 50
 
