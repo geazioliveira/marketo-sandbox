@@ -213,7 +213,8 @@ type Binding =
       kind: 'parameter'
       parameter: ts.ParameterDeclaration
       initializer: ts.Expression | undefined
-      whole: boolean
+      /** The property a destructured name takes; none for the whole parameter. */
+      property?: string
     }
   | { kind: 'const'; initializer: ts.Expression }
 
@@ -295,7 +296,7 @@ function bindingOf(id: ts.Identifier, scope: Scope): Binding | undefined {
           kind: 'parameter',
           parameter: owner,
           initializer: declaration.initializer,
-          whole: false,
+          property: (declaration.propertyName ?? declaration.name).getText(),
         }
       : undefined
   }
@@ -304,7 +305,6 @@ function bindingOf(id: ts.Identifier, scope: Scope): Binding | undefined {
       kind: 'parameter',
       parameter: declaration,
       initializer: declaration.initializer,
-      whole: true,
     }
   const constant =
     ts.isVariableDeclaration(declaration) &&
@@ -450,25 +450,39 @@ function valueOf(
   return undefined
 }
 
-/**
- * `expression` hands the caller's options on: a parameter typed with a
- * `timeout` (or its `options.timeout`), or a `timeout` destructured from
- * such a parameter with no default.
- */
-function delegates(expression: ts.Expression, scope: Scope): boolean {
-  expression = unwrap(expression)
-  if (
-    ts.isPropertyAccessExpression(expression) &&
-    expression.name.text === 'timeout'
-  )
-    expression = unwrap(expression.expression)
-  if (!ts.isIdentifier(expression)) return false
+/** The parameter a name is bound to, when the parameter's type has a `timeout`. */
+function timedParameter(
+  expression: ts.Expression,
+  scope: Scope,
+): Extract<Binding, { kind: 'parameter' }> | undefined {
+  if (!ts.isIdentifier(expression)) return undefined
   const binding = bindingOf(expression, scope)
-  return (
-    binding?.kind === 'parameter' &&
-    (binding.whole || binding.initializer === undefined) &&
+  return binding?.kind === 'parameter' &&
     hasTimeoutMember(binding.parameter.type, expression.getSourceFile())
-  )
+    ? binding
+    : undefined
+}
+
+/**
+ * `expression` is the caller's options, handed on whole: a parameter typed
+ * with a `timeout`, as an argument or a spread.
+ */
+function handsOptions(expression: ts.Expression, scope: Scope): boolean {
+  const binding = timedParameter(unwrap(expression), scope)
+  return binding !== undefined && binding.property === undefined
+}
+
+/**
+ * `expression` is the caller's timeout: `options.timeout` of such a
+ * parameter, or its `timeout` destructured with no default. Another
+ * property destructured from it (`{ delay }`) is not.
+ */
+function handsTimeout(expression: ts.Expression, scope: Scope): boolean {
+  const value = unwrap(expression)
+  if (ts.isPropertyAccessExpression(value) && value.name.text === 'timeout')
+    return handsOptions(value.expression, scope)
+  const binding = timedParameter(value, scope)
+  return binding?.property === 'timeout' && binding.initializer === undefined
 }
 
 /**
@@ -511,7 +525,7 @@ function timeoutOf(
         timeout =
           spread !== undefined
             ? fromObject(spread, timeout)
-            : !delegates(property.expression, scope)
+            : !handsOptions(property.expression, scope)
               ? { kind: 'unread', text: `...${property.expression.getText()}` }
               : timeout.kind === 'unread'
                 ? timeout
@@ -527,7 +541,7 @@ function timeoutOf(
           : undefined
       if (value === undefined || property.name?.getText() !== 'timeout')
         continue
-      if (delegates(value, scope)) {
+      if (handsTimeout(value, scope)) {
         timeout = { kind: 'read', values: [], delegated: true, missing: false }
         continue
       }
@@ -561,7 +575,7 @@ function timeoutOf(
       )
     const object = objectOf(value, scope)
     if (object !== undefined) return fromObject(object)
-    if (delegates(value, scope))
+    if (handsOptions(value, scope))
       return { kind: 'read', values: [], delegated: true, missing: false }
     // Options handed to a helper that the guard cannot see into may replace
     // its timeout with any other.
@@ -1034,13 +1048,14 @@ function isVitestSetConfig(callee: ts.Expression, scope: Scope): boolean {
 }
 
 /**
- * The case timeout a spec gives with `vi.setConfig({ testTimeout })` as a
- * statement of the file itself: one inside a function may never run. The
- * last one wins, as it does in vitest.
+ * A timeout a spec gives with `vi.setConfig({ testTimeout, hookTimeout })`
+ * as a statement of the file itself: one inside a function may never run.
+ * The last one wins, as it does in vitest.
  */
-function caseTimeout(
+function configTimeout(
   file: ts.SourceFile,
   scope: Scope,
+  key: 'testTimeout' | 'hookTimeout',
 ): (Timeout & { text: string }) | undefined {
   let found: (Timeout & { text: string }) | undefined
   for (const statement of file.statements) {
@@ -1054,7 +1069,7 @@ function caseTimeout(
     const unreadable = (text: string) => {
       found = { ms: Number.NaN, at: where(call), text }
     }
-    // Read as the object is built: a later spread may replace testTimeout.
+    // Read as the object is built: a later spread may replace the timeout.
     const read = (object: ts.ObjectLiteralExpression): void => {
       for (const property of object.properties) {
         if (ts.isSpreadAssignment(property)) {
@@ -1068,8 +1083,7 @@ function caseTimeout(
           : ts.isShorthandPropertyAssignment(property)
             ? property.name
             : undefined
-        if (value === undefined || property.name?.getText() !== 'testTimeout')
-          continue
+        if (value === undefined || property.name?.getText() !== key) continue
         found = {
           ms: valueOf(value, scope) ?? Number.NaN,
           at: where(call),
@@ -1086,6 +1100,125 @@ function caseTimeout(
       unreadable(call.arguments[0].getText())
   }
   return found
+}
+
+/** vitest's timeout for a hook with none of its own and no `hookTimeout`. */
+const defaultHookTimeout = 10_000
+
+/**
+ * What a vitest function is, from its root name: `it`/`test` (a case,
+ * `.each`, `.concurrent` and a `test.extend` included), a hook, `describe`,
+ * or nothing vitest's. The name is vitest's when it is global (vitest's
+ * `globals`), imported from 'vitest', or a `const` made by `.extend` of one.
+ */
+function vitestRole(
+  expression: ts.Expression,
+  scope: Scope,
+): 'case' | 'hook' | 'describe' | undefined {
+  let root = expression
+  while (ts.isPropertyAccessExpression(root) || ts.isCallExpression(root))
+    root = root.expression
+  if (!ts.isIdentifier(root)) return undefined
+  const declaration = scope.checker.getSymbolAtLocation(root)?.declarations?.[0]
+  let name: string | undefined
+  if (declaration === undefined) name = root.text
+  else if (ts.isImportSpecifier(declaration)) {
+    const node = declaration.parent.parent.parent
+    if (
+      ts.isStringLiteral(node.moduleSpecifier) &&
+      node.moduleSpecifier.text === 'vitest'
+    )
+      name = (declaration.propertyName ?? declaration.name).text
+  } else if (
+    ts.isVariableDeclaration(declaration) &&
+    declaration.initializer !== undefined
+  ) {
+    const made = unwrap(declaration.initializer)
+    if (
+      ts.isCallExpression(made) &&
+      ts.isPropertyAccessExpression(made.expression) &&
+      made.expression.name.text === 'extend'
+    )
+      return vitestRole(made.expression.expression, scope)
+  }
+  if (name === 'it' || name === 'test') return 'case'
+  if (
+    name === 'beforeAll' ||
+    name === 'beforeEach' ||
+    name === 'afterAll' ||
+    name === 'afterEach'
+  )
+    return 'hook'
+  return name === 'describe' ? 'describe' : undefined
+}
+
+/** A case or hook of vitest, and the timeout it gives itself, if any. */
+interface Runner {
+  kind: 'case' | 'hook'
+  call: ts.CallExpression
+  timeout?: ts.Expression
+}
+
+/**
+ * The case or hook a node runs in: the nearest function passed to `it`,
+ * `test` or a hook, or a fixture of `test.extend`, which runs in the case's
+ * time. A case gives its timeout as a number or `{ timeout }` beside the
+ * function, a hook as the number after it.
+ */
+function enclosingRunner(node: ts.Node, scope: Scope): Runner | undefined {
+  for (
+    let current = node;
+    current.parent !== undefined;
+    current = current.parent
+  ) {
+    if (!ts.isFunctionLike(current)) continue
+    const parent = current.parent
+    if (
+      ts.isCallExpression(parent) &&
+      parent.arguments.includes(current as ts.Expression)
+    ) {
+      const role = vitestRole(parent.expression, scope)
+      if (role === 'case' || role === 'hook') {
+        const others = parent.arguments.filter(
+          (argument, index) =>
+            argument !== current && !(role === 'case' && index === 0),
+        )
+        let timeout: ts.Expression | undefined
+        for (const argument of others) {
+          const value = unwrap(argument)
+          if (ts.isObjectLiteralExpression(value)) {
+            for (const property of value.properties)
+              if (
+                ts.isPropertyAssignment(property) &&
+                property.name.getText() === 'timeout'
+              )
+                timeout = property.initializer
+          } else timeout = argument
+        }
+        return { kind: role, call: parent, timeout }
+      }
+    }
+    // A fixture: a function in the object handed to `.extend`.
+    const holder = parent.parent
+    if (
+      (ts.isPropertyAssignment(parent) || ts.isMethodDeclaration(current)) &&
+      holder !== undefined &&
+      ts.isObjectLiteralExpression(
+        ts.isMethodDeclaration(current) ? parent : holder,
+      )
+    ) {
+      const object = ts.isMethodDeclaration(current) ? parent : holder
+      const call = object.parent
+      if (
+        ts.isCallExpression(call) &&
+        ts.isPropertyAccessExpression(call.expression) &&
+        call.expression.name.text === 'extend' &&
+        vitestRole(call.expression.expression, scope) === 'case'
+      )
+        return { kind: 'case', call }
+    }
+  }
+  return undefined
 }
 
 /**
@@ -1115,18 +1248,19 @@ function auditSpec(
    * as values, outside types. An import never used, or used only in a type
    * (`typeof runHook`), starts nothing.
    */
-  const used = new Map<string, Helper>()
+  const used: { node: ts.Node; helper: Helper }[] = []
   let startsProcesses = false
   for (const node of walk(file)) {
     if (inType(node)) continue
     const target = targetOf(node, scope)
     const helper = helperOf(target)
     if (target?.kind === 'api') startsProcesses = true
-    if (helper?.spawns === true) used.set(node.getText(), helper)
+    if (helper?.spawns === true) used.push({ node, helper })
   }
-  if (used.size === 0 && !startsProcesses) return []
+  if (used.length === 0 && !startsProcesses) return []
   const problems: string[] = []
-  const timeouts: Timeout[] = []
+  /** Each process timeout, with the node whose case or hook waits on it. */
+  const timeouts: (Timeout & { site: ts.Node })[] = []
   for (const call of [...walk(file)].filter(ts.isCallExpression)) {
     const target = targetOf(call.expression, scope)
     if (
@@ -1139,7 +1273,8 @@ function auditSpec(
       problems.push(unread(call, timeout.text))
       continue
     }
-    for (const ms of timeout.values) timeouts.push({ ms, at: where(call) })
+    for (const ms of timeout.values)
+      timeouts.push({ ms, at: where(call), site: call })
     if (timeout.delegated)
       problems.push(
         `${where(call)}: ${call.expression.getText()}(…) repassa o timeout de quem a chama: num spec, dê o valor na própria chamada`,
@@ -1149,35 +1284,75 @@ function auditSpec(
   problems.push(
     ...indirectUses(file, scope, (target) => follows(target, helperOf)),
   )
-  for (const [name, helper] of used)
+  for (const { node, helper } of used)
     for (const timeout of helper.timeouts)
-      timeouts.push({ ms: timeout.ms, at: `${timeout.at} (${name})` })
-  const declared = caseTimeout(file, scope)
+      timeouts.push({
+        ms: timeout.ms,
+        at: `${timeout.at} (${node.getText()})`,
+        site: node,
+      })
+  const declared = configTimeout(file, scope, 'testTimeout')
   if (declared === undefined)
     return [
       ...problems,
       `${fileName}: dispara processos (${
-        [...used.keys()].join(', ') || 'node:child_process'
+        [...new Set(used.map(({ node }) => node.getText()))].join(', ') ||
+        'node:child_process'
       }) e não declara vi.setConfig({ testTimeout }) no topo do arquivo: o caso fica nos 5 s do vitest`,
     ]
-  if (!(declared.ms > 0))
-    return [
-      ...problems,
-      `${declared.at}: testTimeout ${declared.text}, que o guarda não lê como um número positivo: use um número ou um nome importado de test/support/hooks.ts`,
-    ]
-  return [
-    ...problems,
-    ...[
-      ...new Map(
-        timeouts.map((timeout) => [`${timeout.ms}@${timeout.at}`, timeout]),
-      ).values(),
-    ]
-      .filter((timeout) => timeout.ms >= declared.ms)
-      .map(
-        (timeout) =>
-          `${declared.at}: o caso tem ${declared.ms} ms, e o processo de ${timeout.at} tem ${timeout.ms} ms: o caso precisa esperar mais que o processo`,
-      ),
-  ]
+  const hooks = configTimeout(file, scope, 'hookTimeout')
+  const unreadLimit = (at: string, what: string, text: string): string =>
+    `${at}: ${what} ${text}, que o guarda não lê como um número positivo: use um número ou um nome importado de test/support/hooks.ts`
+  for (const config of [declared, hooks])
+    if (config !== undefined && !(config.ms > 0))
+      problems.push(
+        unreadLimit(
+          config.at,
+          config === declared ? 'testTimeout' : 'hookTimeout',
+          config.text,
+        ),
+      )
+  if (!(declared.ms > 0) || (hooks !== undefined && !(hooks.ms > 0)))
+    return problems
+  /**
+   * The time the case or hook around a node gives it: its own timeout, or
+   * the file's `testTimeout`, or `hookTimeout` (10 s when not set). Outside
+   * any case or hook, as in a function of the file, the file's
+   * `testTimeout`.
+   */
+  const limitOf = (
+    site: ts.Node,
+  ): { ms: number; at: string; what: string } | undefined => {
+    const runner = enclosingRunner(site, scope)
+    const what = runner?.kind === 'hook' ? 'hook' : 'caso'
+    if (runner?.timeout !== undefined) {
+      const ms = valueOf(runner.timeout, scope)
+      if (ms === undefined || !(ms > 0)) {
+        problems.push(
+          unreadLimit(
+            where(runner.call),
+            `o ${what} dá o timeout`,
+            runner.timeout.getText(),
+          ),
+        )
+        return undefined
+      }
+      return { ms, at: where(runner.call), what }
+    }
+    if (runner?.kind === 'hook')
+      return hooks === undefined
+        ? { ms: defaultHookTimeout, at: where(runner.call), what }
+        : { ms: hooks.ms, at: hooks.at, what }
+    return { ms: declared.ms, at: declared.at, what }
+  }
+  const late = new Map<string, string>()
+  for (const timeout of timeouts) {
+    const limit = limitOf(timeout.site)
+    if (limit === undefined || timeout.ms < limit.ms) continue
+    const message = `${limit.at}: o ${limit.what} tem ${limit.ms} ms, e o processo de ${timeout.at} tem ${timeout.ms} ms: o ${limit.what} precisa esperar mais que o processo`
+    late.set(message, message)
+  }
+  return [...new Set(problems), ...late.values()]
 }
 
 // ---------------------------------------------------------------------------
@@ -1476,6 +1651,27 @@ describe('analyzeSupport', () => {
     )
     expect(helpers.get('fake')?.get('run')?.spawns).toBe(true)
     expect(problems).toEqual([untimedAt('fake.mjs:2', 'spawnSync')])
+  })
+
+  it('takes only the timeout itself from the caller, not another option', () => {
+    // delay is not the caller's timeout, even in options typed with one.
+    const { helpers, problems } = analyze([
+      'temp-repo',
+      lines(
+        `import { spawn } from 'node:child_process'`,
+        `export function helper({ delay }: { timeout?: number; delay?: number } = {}) {`,
+        `  return spawn('x', [], { timeout: delay })`,
+        `}`,
+        `export function whole(options: { timeout?: number } = {}) {`,
+        `  return spawn('x', [], { timeout: options })`,
+        `}`,
+      ),
+    ])
+    expect(helpers.get('temp-repo')?.get('helper')?.needsTimeout).toBe(false)
+    expect(problems).toEqual([
+      unreadAt('temp-repo.ts:3', 'spawn', 'delay'),
+      unreadAt('temp-repo.ts:6', 'spawn', 'options'),
+    ])
   })
 
   it('reads a name where it is bound, in its own scope', () => {
@@ -1835,7 +2031,9 @@ describe('auditSpec', () => {
         `vi.setConfig({ testTimeout: 120_000, ...extra })`,
       ),
     ).toEqual([
+      // The opaque spread may replace hookTimeout as well.
       'x.spec.ts:3: testTimeout ...extra, que o guarda não lê como um número positivo: use um número ou um nome importado de test/support/hooks.ts',
+      'x.spec.ts:3: hookTimeout ...extra, que o guarda não lê como um número positivo: use um número ou um nome importado de test/support/hooks.ts',
     ])
   })
 
@@ -1971,6 +2169,49 @@ describe('auditSpec', () => {
         `vi.setConfig({ testTimeout: 120_000 })`,
       ),
     ).toEqual([unreadAt('x.spec.ts:2', 'spawn', 'timeout')])
+  })
+
+  it('compares a process with the case or hook it runs in', () => {
+    expect(
+      audit(
+        `import { spawnSync } from 'node:child_process'`,
+        `vi.setConfig({ testTimeout: 120_000 })`,
+        `it('short', () => { spawnSync('git', [], { timeout: 60_000 }) }, 5_000)`,
+        `test('options', { timeout: 30_000 }, () => { spawnSync('git', [], { timeout: 60_000 }) })`,
+        `it.each([1])('each %i', () => { spawnSync('git', [], { timeout: 60_000 }) })`,
+        `beforeAll(() => { spawnSync('git', [], { timeout: 60_000 }) })`,
+        `beforeEach(() => { spawnSync('git', [], { timeout: 60_000 }) }, 90_000)`,
+      ),
+    ).toEqual([
+      'x.spec.ts:3: o caso tem 5000 ms, e o processo de x.spec.ts:3 tem 60000 ms: o caso precisa esperar mais que o processo',
+      'x.spec.ts:4: o caso tem 30000 ms, e o processo de x.spec.ts:4 tem 60000 ms: o caso precisa esperar mais que o processo',
+      // A hook with no timeout of its own has vitest's 10 s.
+      'x.spec.ts:6: o hook tem 10000 ms, e o processo de x.spec.ts:6 tem 60000 ms: o hook precisa esperar mais que o processo',
+    ])
+    // hookTimeout in vi.setConfig covers the hooks with none of their own.
+    expect(
+      audit(
+        `import { spawnSync } from 'node:child_process'`,
+        `vi.setConfig({ testTimeout: 120_000, hookTimeout: 120_000 })`,
+        `beforeAll(() => { spawnSync('git', [], { timeout: 60_000 }) })`,
+      ),
+    ).toEqual([])
+  })
+
+  it('counts a fixture of test.extend in the case time', () => {
+    expect(
+      audit(
+        `import { test as base } from 'vitest'`,
+        `import { spawnSync } from 'node:child_process'`,
+        `const test = base.extend<{ fresh: number }>({`,
+        `  fresh: async ({}, use) => { spawnSync('git', [], { timeout: 60_000 }); await use(1) },`,
+        `})`,
+        `vi.setConfig({ testTimeout: 30_000 })`,
+        `test('x', ({ fresh }) => { void fresh }, 90_000)`,
+      ),
+    ).toEqual([
+      'x.spec.ts:6: o caso tem 30000 ms, e o processo de x.spec.ts:4 tem 60000 ms: o caso precisa esperar mais que o processo',
+    ])
   })
 
   it('accepts a case timeout above every process timeout, by number or by name', () => {
