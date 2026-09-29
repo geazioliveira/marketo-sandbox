@@ -46,6 +46,10 @@ document is available at
 This project mirrors five Marketo REST APIs and answers every request with
 faker-generated data, so no Marketo tenant is required.
 
+Like Marketo, it reads JSON and urlencoded request bodies up to 1 MB, so a
+300-lead sync fits, and answers `413` above that. Multipart uploads are not
+parsed.
+
 All three generators read the documents in `docs/` and handle both Swagger 2.0
 (`definitions`) and OpenAPI 3 (`components.schemas` / `requestBody` / `content`).
 Each target owns one area under `src/`:

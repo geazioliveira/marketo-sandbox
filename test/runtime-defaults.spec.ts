@@ -1,11 +1,13 @@
 import { readdirSync, readFileSync } from 'node:fs'
 import path from 'node:path'
+import { bodyLimit } from '../src/body-limit'
 import { defaultHost, defaultPort, listenAddress } from '../src/listen-address'
 
 // By default nothing leaves the machine and the server listens on loopback
 // (#9). The listen address is tested through listenAddress; the telemetry
 // guard is static: it reads package.json and every file under src/. The
-// install is covered too: package.json opts out of @scarf/scarf (#20).
+// install is covered too: package.json opts out of @scarf/scarf (#20). The
+// server reads request bodies up to Marketo's 1 MB (#25).
 
 const root = path.resolve(__dirname, '..')
 const read = (file: string): string =>
@@ -51,6 +53,20 @@ describe('listen address', () => {
     const main = read('src/main.ts')
     expect(main).toContain('listenAddress(process.env)')
     expect(main).toMatch(/app\.listen\(\s*port\s*,\s*host\s*\)/)
+  })
+})
+
+describe('request body limit', () => {
+  it('is the 1 MB Marketo documents', () => {
+    expect(bodyLimit).toBe('1mb')
+  })
+
+  it('is applied by src/main.ts before it listens', () => {
+    // test/body-limit.e2e-spec.ts proves the limit on a running app (#25).
+    const main = read('src/main.ts')
+    const applied = main.indexOf('useBodyLimit(app)')
+    expect(applied).toBeGreaterThan(-1)
+    expect(applied).toBeLessThan(main.indexOf('app.listen('))
   })
 })
 
