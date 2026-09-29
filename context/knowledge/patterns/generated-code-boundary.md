@@ -23,22 +23,22 @@ Cada alvo de `TARGETS` escreve numa área de `src/` (`scripts/marketo_codegen.py
 
 | Pasta | O que tem | Gerador |
 | --- | --- | --- |
-| `src/<área>/<área>-definitions/` | Uma interface por schema, em `models/`, `requests/` ou `responses/` | `scripts/generate-marketo-definitions.py` |
+| `src/<área>/<área>-definitions/` | Uma interface por schema, em `models/`, `requests/` ou `responses/`, e na raiz o registro `swagger-source.ts`, com o documento e o sha256 dele (#19) | `scripts/generate-marketo-definitions.py` |
 | `src/<área>/resources/` | Um module, um controller e um service por tag, e o `<Área>ResourcesModule` | `scripts/generate-marketo-resources.py` |
 | `src/<área>/<área>-mocks/` | Uma factory por schema em `factories/`, os `index.ts` | `scripts/generate-marketo-factories.py` |
 | `src/mocks/` | `seed.ts`, `request-id.ts` e `index.ts`, comuns às áreas | `scripts/generate-marketo-factories.py` |
 
-As cinco áreas, com os arquivos medidos na #6:
+As cinco áreas, com os arquivos medidos na #6 e o registro da #19 nas definições:
 
 | Área | Alvo | Definições | Resources | Mocks |
 | --- | --- | ---: | ---: | ---: |
-| `src/asset/` | `asset` | 255 (79 `models/`, 72 `requests/`, 104 `responses/`) | 70 | 257 |
-| `src/data-ingestion/` | `data-ingestion` | 15 | 16 | 17 |
-| `src/identity/` | `identity` | 2 | 4 | 4 |
-| `src/lead-database/` | `mapi` | 175 | 58 | 177 |
-| `src/user-management/` | `user` | 12 | 4 | 14 |
+| `src/asset/` | `asset` | 256 (79 `models/`, 72 `requests/`, 104 `responses/` e o registro) | 70 | 257 |
+| `src/data-ingestion/` | `data-ingestion` | 16 | 16 | 17 |
+| `src/identity/` | `identity` | 3 | 4 | 4 |
+| `src/lead-database/` | `mapi` | 176 | 58 | 177 |
+| `src/user-management/` | `user` | 13 | 4 | 14 |
 
-- Os arquivos de cada pasta são os que o gerador lista em `generated_files` ou em `files()` (`scripts/generate-marketo-definitions.py:142-147`, `scripts/generate-marketo-resources.py:380-397`, `scripts/generate-marketo-factories.py:287-305`).
+- Os arquivos de cada pasta são os que o gerador lista em `generated_files` ou em `files()` (`scripts/generate-marketo-definitions.py:145-164`, `scripts/generate-marketo-resources.py:380-397`, `scripts/generate-marketo-factories.py:287-305`).
 - `seed.ts` e `request-id.ts` também são gerados (`scripts/generate-marketo-factories.py:235-292`). Mudar o seed é mudar o gerador.
 - O resto de `src/` é escrito à mão: `src/main.ts`, `src/listen-address.ts`, `src/app.module.ts` e os cinco `src/<área>/<área>.module.ts`, que só importam o `<Área>ResourcesModule` (`src/identity/identity.module.ts:1-7`). Nenhum gerador os emite.
 
@@ -77,9 +77,11 @@ As cinco áreas, com os arquivos medidos na #6:
 - [0004: O Swagger como fonte única, com o código gerado commitado](../../decisions/0004-swagger-as-single-source-with-committed-generated-code.md)
 - [0006: DTOs como interfaces TypeScript](../../decisions/0006-dtos-as-typescript-interfaces.md)
 - [0009: Comportamento ao lado do código gerado, nunca dentro](../../decisions/0009-behaviour-beside-generated-code.md)
+- [0012: Cada área registra o Swagger que a gerou, com o sha256 dos bytes commitados](../../decisions/0012-swagger-source-record-per-area.md)
 
 ## Status
 
 - **Criado**: 2026-09-25 (Fase: Build), registro retroativo de `0c8e760`..`fb4a804` (#4)
 - **Status**: Active
 - **Atualizado**: 2026-09-26 (Fase: Build), todo arquivo gerado passou a abrir com o cabeçalho de gerado, e as citações seguiram as linhas novas (#7)
+- **Atualizado**: 2026-09-28 (Fase: Build), a pasta de definições ganhou o registro `swagger-source.ts` de cada área, com as contagens e a citação do gerador seguindo as linhas novas ([ADR 0012](../../decisions/0012-swagger-source-record-per-area.md)) (#19)
