@@ -1160,65 +1160,102 @@ interface Runner {
 }
 
 /**
- * The case or hook a node runs in: the nearest function passed to `it`,
- * `test` or a hook, or a fixture of `test.extend`, which runs in the case's
- * time. A case gives its timeout as a number or `{ timeout }` beside the
- * function, a hook as the number after it.
+ * The case or hook a function runs as, when `node` (the function, or a name
+ * of it) is handed to `it`, `test` or a hook, or is a fixture of
+ * `test.extend`, which runs in the case's time. A case gives its timeout as
+ * a number or `{ timeout }` beside the function, a hook as the number after
+ * it.
  */
-function enclosingRunner(node: ts.Node, scope: Scope): Runner | undefined {
+function runnerFor(node: ts.Node, scope: Scope): Runner | undefined {
+  const argument = wrapped(node)
+  const parent = argument.parent
+  if (
+    ts.isCallExpression(parent) &&
+    parent.arguments.includes(argument as ts.Expression)
+  ) {
+    const role = vitestRole(parent.expression, scope)
+    if (role !== 'case' && role !== 'hook') return undefined
+    let timeout: ts.Expression | undefined
+    parent.arguments.forEach((other, index) => {
+      if (other === argument || (role === 'case' && index === 0)) return
+      const value = unwrap(other)
+      if (!ts.isObjectLiteralExpression(value)) {
+        timeout = other
+        return
+      }
+      for (const property of value.properties)
+        if (
+          ts.isPropertyAssignment(property) &&
+          property.name.getText() === 'timeout'
+        )
+          timeout = property.initializer
+    })
+    return { kind: role, call: parent, timeout }
+  }
+  // A fixture: a function in the object handed to `.extend`.
+  const object = ts.isMethodDeclaration(argument)
+    ? parent
+    : ts.isPropertyAssignment(parent)
+      ? parent.parent
+      : undefined
+  const call = object?.parent
+  if (
+    object !== undefined &&
+    ts.isObjectLiteralExpression(object) &&
+    call !== undefined &&
+    ts.isCallExpression(call) &&
+    ts.isPropertyAccessExpression(call.expression) &&
+    call.expression.name.text === 'extend' &&
+    vitestRole(call.expression.expression, scope) === 'case'
+  )
+    return { kind: 'case', call }
+  return undefined
+}
+
+/** The name a function is declared or assigned under, if any. */
+function functionName(fn: ts.Node): ts.Identifier | undefined {
+  if (ts.isFunctionDeclaration(fn)) return fn.name
+  const holder = wrapped(fn).parent
+  return ts.isVariableDeclaration(holder) && ts.isIdentifier(holder.name)
+    ? holder.name
+    : undefined
+}
+
+/**
+ * Every case or hook a node can run in, or `file` when it runs in none the
+ * guard sees. A function handed to a case by name (`it('x', body, 5_000)`),
+ * or called from one, runs in each case that names or calls it: the guard
+ * follows each use of the function's name to its case.
+ */
+function runnersOf(
+  site: ts.Node,
+  scope: Scope,
+  references: (name: ts.Identifier) => ts.Identifier[],
+  seen: Set<ts.Node> = new Set(),
+): (Runner | 'file')[] {
   for (
-    let current = node;
+    let current = site;
     current.parent !== undefined;
     current = current.parent
   ) {
     if (!ts.isFunctionLike(current)) continue
-    const parent = current.parent
-    if (
-      ts.isCallExpression(parent) &&
-      parent.arguments.includes(current as ts.Expression)
-    ) {
-      const role = vitestRole(parent.expression, scope)
-      if (role === 'case' || role === 'hook') {
-        const others = parent.arguments.filter(
-          (argument, index) =>
-            argument !== current && !(role === 'case' && index === 0),
-        )
-        let timeout: ts.Expression | undefined
-        for (const argument of others) {
-          const value = unwrap(argument)
-          if (ts.isObjectLiteralExpression(value)) {
-            for (const property of value.properties)
-              if (
-                ts.isPropertyAssignment(property) &&
-                property.name.getText() === 'timeout'
-              )
-                timeout = property.initializer
-          } else timeout = argument
-        }
-        return { kind: role, call: parent, timeout }
-      }
-    }
-    // A fixture: a function in the object handed to `.extend`.
-    const holder = parent.parent
-    if (
-      (ts.isPropertyAssignment(parent) || ts.isMethodDeclaration(current)) &&
-      holder !== undefined &&
-      ts.isObjectLiteralExpression(
-        ts.isMethodDeclaration(current) ? parent : holder,
-      )
-    ) {
-      const object = ts.isMethodDeclaration(current) ? parent : holder
-      const call = object.parent
-      if (
-        ts.isCallExpression(call) &&
-        ts.isPropertyAccessExpression(call.expression) &&
-        call.expression.name.text === 'extend' &&
-        vitestRole(call.expression.expression, scope) === 'case'
-      )
-        return { kind: 'case', call }
-    }
+    const runner = runnerFor(current, scope)
+    if (runner !== undefined) return [runner]
+    const name = functionName(current)
+    if (name === undefined || seen.has(current)) continue
+    seen.add(current)
+    const uses = references(name).filter(
+      (use) => use.pos < current.pos || use.end > current.end,
+    )
+    if (uses.length > 0)
+      return uses.flatMap((use) => {
+        const direct = runnerFor(use, scope)
+        return direct !== undefined
+          ? [direct]
+          : runnersOf(use, scope, references, seen)
+      })
   }
-  return undefined
+  return ['file']
 }
 
 /**
@@ -1320,12 +1357,33 @@ function auditSpec(
    * any case or hook, as in a function of the file, the file's
    * `testTimeout`.
    */
+  /** Every use of a name in the file, by the symbol it binds, built once. */
+  let index: Map<ts.Symbol, ts.Identifier[]> | undefined
+  const references = (name: ts.Identifier): ts.Identifier[] => {
+    if (index === undefined) {
+      index = new Map()
+      for (const node of walk(file)) {
+        if (!ts.isIdentifier(node) || declares(node)) continue
+        const symbol = checker.getSymbolAtLocation(node)
+        if (symbol !== undefined)
+          index.set(symbol, [...(index.get(symbol) ?? []), node])
+      }
+    }
+    const symbol = checker.getSymbolAtLocation(name)
+    return symbol === undefined ? [] : (index.get(symbol) ?? [])
+  }
+  /**
+   * The time a case or hook gives: its own timeout, or the file's
+   * `testTimeout`, or `hookTimeout` (10 s when not set). Outside any case
+   * or hook the guard sees, the file's `testTimeout`.
+   */
   const limitOf = (
-    site: ts.Node,
+    runner: Runner | 'file',
   ): { ms: number; at: string; what: string } | undefined => {
-    const runner = enclosingRunner(site, scope)
-    const what = runner?.kind === 'hook' ? 'hook' : 'caso'
-    if (runner?.timeout !== undefined) {
+    if (runner === 'file')
+      return { ms: declared.ms, at: declared.at, what: 'caso' }
+    const what = runner.kind === 'hook' ? 'hook' : 'caso'
+    if (runner.timeout !== undefined) {
       const ms = valueOf(runner.timeout, scope)
       if (ms === undefined || !(ms > 0)) {
         problems.push(
@@ -1339,19 +1397,20 @@ function auditSpec(
       }
       return { ms, at: where(runner.call), what }
     }
-    if (runner?.kind === 'hook')
+    if (runner.kind === 'hook')
       return hooks === undefined
         ? { ms: defaultHookTimeout, at: where(runner.call), what }
         : { ms: hooks.ms, at: hooks.at, what }
     return { ms: declared.ms, at: declared.at, what }
   }
   const late = new Map<string, string>()
-  for (const timeout of timeouts) {
-    const limit = limitOf(timeout.site)
-    if (limit === undefined || timeout.ms < limit.ms) continue
-    const message = `${limit.at}: o ${limit.what} tem ${limit.ms} ms, e o processo de ${timeout.at} tem ${timeout.ms} ms: o ${limit.what} precisa esperar mais que o processo`
-    late.set(message, message)
-  }
+  for (const timeout of timeouts)
+    for (const runner of runnersOf(timeout.site, scope, references)) {
+      const limit = limitOf(runner)
+      if (limit === undefined || timeout.ms < limit.ms) continue
+      const message = `${limit.at}: o ${limit.what} tem ${limit.ms} ms, e o processo de ${timeout.at} tem ${timeout.ms} ms: o ${limit.what} precisa esperar mais que o processo`
+      late.set(message, message)
+    }
   return [...new Set(problems), ...late.values()]
 }
 
@@ -2196,6 +2255,25 @@ describe('auditSpec', () => {
         `beforeAll(() => { spawnSync('git', [], { timeout: 60_000 }) })`,
       ),
     ).toEqual([])
+  })
+
+  it('follows a function of the file to each case or hook that names or calls it', () => {
+    expect(
+      audit(
+        `import { spawnSync } from 'node:child_process'`,
+        `vi.setConfig({ testTimeout: 120_000 })`,
+        `function body() { spawnSync('git', [], { timeout: 60_000 }) }`,
+        `it('named', body, 5_000)`,
+        `it('called', () => { body() }, 30_000)`,
+        `const setup = async () => { spawnSync('git', [], { timeout: 60_000 }) }`,
+        `beforeAll(setup)`,
+        `function idle() { spawnSync('git', [], { timeout: 60_000 }) }`,
+      ),
+    ).toEqual([
+      'x.spec.ts:4: o caso tem 5000 ms, e o processo de x.spec.ts:3 tem 60000 ms: o caso precisa esperar mais que o processo',
+      'x.spec.ts:5: o caso tem 30000 ms, e o processo de x.spec.ts:3 tem 60000 ms: o caso precisa esperar mais que o processo',
+      'x.spec.ts:7: o hook tem 10000 ms, e o processo de x.spec.ts:6 tem 60000 ms: o hook precisa esperar mais que o processo',
+    ])
   })
 
   it('counts a fixture of test.extend in the case time', () => {
