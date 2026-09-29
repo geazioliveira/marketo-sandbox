@@ -8,7 +8,7 @@ Um check que regenera e compara só a saída derivada deixa passar toda mudança
 
 - **O `check:all` fazia isso até a #19.** Ele regenera o código de cada área e o compara com o commitado. Um `\n` a mais no fim de `docs/marketo-swagger-asset.json`, ou um `info.title` trocado, não muda nenhum arquivo gerado, e o `check:all` saía com 0 e imprimia as 16 linhas "are current" (medido sobre `e5b013c`).
 - **O registro ao lado envelhecia em silêncio.** O sha256 de cada documento estava na tabela da [ADR 0004](../../decisions/0004-swagger-as-single-source-with-committed-generated-code.md), e nada o conferia: o documento podia mudar, e a tabela continuaria dizendo que o código de `main` saiu da cópia antiga.
-- **A comparação de texto esconde mais.** O `check_output()` lê com `read_text()`, que normaliza as quebras de linha, então nem um checkout que regravasse os documentos com CRLF mudava o veredito.
+- **A comparação de texto esconde mais.** O `check_output()`, hoje `check_outputs()`, lê com `read_text()`, que normaliza as quebras de linha, então nem um checkout que regravasse os documentos com CRLF mudava o veredito.
 
 ## O que fazer em vez disso
 
@@ -28,3 +28,4 @@ stale = [path for path, fresh in regenerated.items() if path.read_text() != fres
 
 - **Criado**: 2026-09-28 (Fase: Learn), da medição do furo no planejamento e no Build da #19 (#19)
 - **Status**: Active
+- **Atualizado**: 2026-09-29 (Fase: Build), o `check_output()` passou a `check_outputs()` (#29)
