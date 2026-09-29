@@ -316,10 +316,17 @@ function bindingOf(id: ts.Identifier, scope: Scope): Binding | undefined {
     const node = ts.isNamespaceImport(declaration)
       ? declaration.parent.parent
       : declaration.parent
-    return node.importClause?.isTypeOnly === true ||
+    if (
+      node.importClause?.isTypeOnly === true ||
       !ts.isStringLiteral(node.moduleSpecifier)
-      ? undefined
-      : { kind: 'namespace', module: node.moduleSpecifier.text }
+    )
+      return undefined
+    const module = node.moduleSpecifier.text
+    // A default import of child_process is the module itself; of a
+    // test/support/ module, its default export.
+    return ts.isImportClause(declaration) && !isChildProcess(module)
+      ? { kind: 'import', module, imported: 'default' }
+      : { kind: 'namespace', module }
   }
   if (ts.isBindingElement(declaration)) {
     const owner = declaration.parent.parent
@@ -527,14 +534,21 @@ function timeoutOf(
   target: Target | undefined,
   helperOf: (target: Target | undefined) => Helper | undefined,
 ): CallTimeout {
-  let timeout: CallTimeout = { kind: 'none' }
-  const read = (object: ts.ObjectLiteralExpression): void => {
+  const none: CallTimeout = { kind: 'none' }
+  /** The object's timeout, reading its properties in order onto `timeout`. */
+  const fromObject = (
+    object: ts.ObjectLiteralExpression,
+    timeout: CallTimeout = none,
+  ): CallTimeout => {
     for (const property of object.properties) {
       if (ts.isSpreadAssignment(property)) {
-        const spread = unwrap(property.expression)
-        if (ts.isObjectLiteralExpression(spread)) read(spread)
-        else if (delegates(spread, scope)) timeout = { kind: 'delegated' }
-        else timeout = { kind: 'unread', text: `...${spread.getText()}` }
+        const spread = objectOf(property.expression, scope)
+        timeout =
+          spread !== undefined
+            ? fromObject(spread, timeout)
+            : delegates(property.expression, scope)
+              ? { kind: 'delegated' }
+              : { kind: 'unread', text: `...${property.expression.getText()}` }
         continue
       }
       const value = ts.isPropertyAssignment(property)
@@ -554,6 +568,33 @@ function timeoutOf(
           ? { kind: 'unread', text: value.getText() }
           : { kind: 'value', ms }
     }
+    return timeout
+  }
+  /** Either branch may run: the worse of the two, the longer of two values. */
+  const either = (a: CallTimeout, b: CallTimeout): CallTimeout =>
+    a.kind === 'unread' || b.kind === 'unread'
+      ? a.kind === 'unread'
+        ? a
+        : b
+      : a.kind === 'delegated' || b.kind === 'delegated'
+        ? { kind: 'delegated' }
+        : a.kind === 'value' && b.kind === 'value'
+          ? { kind: 'value', ms: Math.max(a.ms, b.ms) }
+          : a.kind === 'value'
+            ? a
+            : b
+  const fromArgument = (argument: ts.Expression): CallTimeout => {
+    const value = unwrap(argument)
+    if (ts.isConditionalExpression(value))
+      return either(fromArgument(value.whenTrue), fromArgument(value.whenFalse))
+    const object = objectOf(value, scope)
+    if (object !== undefined) return fromObject(object)
+    if (delegates(value, scope)) return { kind: 'delegated' }
+    // Options handed to a helper that the guard cannot see into may replace
+    // its timeout with any other.
+    return target?.kind === 'helper'
+      ? { kind: 'unread', text: argument.getText() }
+      : none
   }
   // Any object handed to a child_process function is its options; a helper
   // takes them at its parameter typed with a `timeout`, and only there (a
@@ -565,12 +606,28 @@ function timeoutOf(
       : optionsAt === undefined
         ? []
         : call.arguments.slice(optionsAt, optionsAt + 1)
-  for (const argument of options) {
-    const value = unwrap(argument)
-    if (ts.isObjectLiteralExpression(value)) read(value)
-    else if (delegates(value, scope)) timeout = { kind: 'delegated' }
-  }
-  return timeout
+  return options
+    .map(fromArgument)
+    .reduce((timeout, next) => (next.kind === 'none' ? timeout : next), none)
+}
+
+/** The object literal an expression is, or a `const` it names is bound to. */
+function objectOf(
+  expression: ts.Expression,
+  scope: Scope,
+): ts.ObjectLiteralExpression | undefined {
+  const value = unwrap(expression)
+  if (ts.isObjectLiteralExpression(value)) return value
+  if (!ts.isIdentifier(value)) return undefined
+  const binding = bindingOf(value, scope)
+  const initializer =
+    binding?.kind === 'const' || binding?.kind === 'toplevel'
+      ? binding.initializer
+      : undefined
+  return initializer !== undefined &&
+    ts.isObjectLiteralExpression(unwrap(initializer))
+    ? (unwrap(initializer) as ts.ObjectLiteralExpression)
+    : undefined
 }
 
 const untimed = (call: ts.CallExpression): string =>
@@ -786,6 +843,63 @@ function analyzeSupport(
       }
     }
   })
+  // The names a module exports under another name: `export { run as
+  // execute }`, `export default run`, `export default function`, and the
+  // re-exports of another module of test/support/.
+  const reexports: (() => void)[] = []
+  modules.forEach((module, index) => {
+    const byName = helpers.get(module.name)!
+    for (const statement of files[index].statements) {
+      if (
+        ts.isFunctionDeclaration(statement) &&
+        statement.name !== undefined &&
+        (ts.getModifiers(statement) ?? []).some(
+          (modifier) => modifier.kind === ts.SyntaxKind.DefaultKeyword,
+        )
+      )
+        byName.set('default', byName.get(statement.name.text)!)
+      if (
+        ts.isExportAssignment(statement) &&
+        !statement.isExportEquals &&
+        ts.isIdentifier(statement.expression)
+      ) {
+        const helper = byName.get(statement.expression.text)
+        if (helper !== undefined) byName.set('default', helper)
+      }
+      if (!ts.isExportDeclaration(statement) || statement.isTypeOnly) continue
+      const from =
+        statement.moduleSpecifier !== undefined &&
+        ts.isStringLiteral(statement.moduleSpecifier)
+          ? supportFromSupport(statement.moduleSpecifier.text)
+          : undefined
+      const source = () =>
+        statement.moduleSpecifier === undefined
+          ? byName
+          : helpers.get(from ?? '')
+      const clause = statement.exportClause
+      reexports.push(() => {
+        const origin = source()
+        if (origin === undefined) return
+        if (clause === undefined) {
+          for (const [name, helper] of origin)
+            if (name !== 'default' && !byName.has(name))
+              byName.set(name, helper)
+          return
+        }
+        if (ts.isNamedExports(clause))
+          for (const element of clause.elements) {
+            if (element.isTypeOnly) continue
+            const helper = origin.get(
+              (element.propertyName ?? element.name).text,
+            )
+            if (helper !== undefined) byName.set(element.name.text, helper)
+          }
+      })
+    }
+  })
+  // Re-exports can chain; each pass settles one more link.
+  for (let pass = 0; pass < modules.length + 1; pass++)
+    for (const reexport of reexports) reexport()
   const helperOf = (target: Target | undefined): Helper | undefined =>
     target?.kind === 'helper'
       ? helpers.get(target.module)?.get(target.name)
@@ -917,21 +1031,42 @@ function caseTimeout(
     const call = statement.expression
     if (
       !ts.isCallExpression(call) ||
-      !isVitestSetConfig(call.expression, scope) ||
-      call.arguments.length === 0 ||
-      !ts.isObjectLiteralExpression(call.arguments[0])
+      !isVitestSetConfig(call.expression, scope)
     )
       continue
-    for (const property of call.arguments[0].properties)
-      if (
-        ts.isPropertyAssignment(property) &&
-        property.name.getText() === 'testTimeout'
-      )
-        found = {
-          ms: valueOf(property.initializer, scope) ?? Number.NaN,
-          at: where(call),
-          text: property.initializer.getText(),
+    const unreadable = (text: string) => {
+      found = { ms: Number.NaN, at: where(call), text }
+    }
+    // Read as the object is built: a later spread may replace testTimeout.
+    const read = (object: ts.ObjectLiteralExpression): void => {
+      for (const property of object.properties) {
+        if (ts.isSpreadAssignment(property)) {
+          const spread = objectOf(property.expression, scope)
+          if (spread !== undefined) read(spread)
+          else unreadable(`...${property.expression.getText()}`)
+          continue
         }
+        const value = ts.isPropertyAssignment(property)
+          ? property.initializer
+          : ts.isShorthandPropertyAssignment(property)
+            ? property.name
+            : undefined
+        if (value === undefined || property.name?.getText() !== 'testTimeout')
+          continue
+        found = {
+          ms: valueOf(value, scope) ?? Number.NaN,
+          at: where(call),
+          text: value.getText(),
+        }
+      }
+    }
+    const config =
+      call.arguments[0] === undefined
+        ? undefined
+        : objectOf(call.arguments[0], scope)
+    if (config !== undefined) read(config)
+    else if (call.arguments[0] !== undefined)
+      unreadable(call.arguments[0].getText())
   }
   return found
 }
@@ -1388,6 +1523,33 @@ describe('analyzeSupport', () => {
     ])
   })
 
+  it('registers a helper under every name it is exported with', () => {
+    const { helpers } = analyze(
+      [
+        'base',
+        lines(
+          `import { spawnSync } from 'node:child_process'`,
+          `function run() { return spawnSync('git', [], { timeout: 60_000 }) }`,
+          `export { run as execute }`,
+          `export default run`,
+        ),
+      ],
+      [
+        'again',
+        lines(
+          `export { execute as go } from './base'`,
+          `export * from './base'`,
+        ),
+      ],
+    )
+    const run = helpers.get('base')?.get('run')
+    expect(run?.spawns).toBe(true)
+    expect(helpers.get('base')?.get('execute')).toBe(run)
+    expect(helpers.get('base')?.get('default')).toBe(run)
+    expect(helpers.get('again')?.get('go')).toBe(run)
+    expect(helpers.get('again')?.get('execute')).toBe(run)
+  })
+
   it('refuses a process function it cannot follow', () => {
     expect(
       analyze([
@@ -1572,6 +1734,74 @@ describe('auditSpec', () => {
         `run('x', {}, { timeout: 180_000 })`,
       ),
     ).toEqual([indirectAt('x.spec.ts:3', 'runHook')])
+  })
+
+  it('reads the case timeout as vitest gets it: in order, through spreads', () => {
+    expect(
+      audit(
+        `import { spawnSync } from 'node:child_process'`,
+        `spawnSync('git', [], { timeout: 90_000 })`,
+        `vi.setConfig({ testTimeout: 120_000, ...{ testTimeout: 1 } })`,
+      ),
+    ).toEqual([
+      'x.spec.ts:3: o caso tem 1 ms, e o processo de x.spec.ts:2 tem 90000 ms: o caso precisa esperar mais que o processo',
+    ])
+    expect(
+      audit(
+        `import { spawnSync } from 'node:child_process'`,
+        `spawnSync('git', [], { timeout: 90_000 })`,
+        `vi.setConfig({ testTimeout: 120_000, ...extra })`,
+      ),
+    ).toEqual([
+      'x.spec.ts:3: testTimeout ...extra, que o guarda não lê como um número positivo: use um número ou um nome importado de test/support/hooks.ts',
+    ])
+  })
+
+  it('reads the options a helper gets from a const, and refuses ones it cannot read', () => {
+    expect(
+      audit(
+        `import { runHook } from '../support/hooks'`,
+        `vi.setConfig({ testTimeout: 120_000 })`,
+        `const options = { timeout: 180_000 }`,
+        `runHook('x', {}, options)`,
+        `runHook('x', {}, makeOptions())`,
+        `runHook('x', {}, env === undefined ? {} : { env })`,
+      ),
+    ).toEqual([
+      unreadAt('x.spec.ts:5', 'runHook', 'makeOptions()'),
+      'x.spec.ts:2: o caso tem 120000 ms, e o processo de x.spec.ts:4 tem 180000 ms: o caso precisa esperar mais que o processo',
+    ])
+  })
+
+  it('reads a helper through its export alias or its default export', () => {
+    const aliased = analyzeSupport(
+      [
+        {
+          name: 'base',
+          file: 'base.ts',
+          source: lines(
+            `import { spawnSync } from 'node:child_process'`,
+            `function run() { return spawnSync('git', [], { timeout: 60_000 }) }`,
+            `export { run as execute }`,
+            `export default run`,
+          ),
+        },
+      ],
+      names,
+    ).helpers
+    expect(
+      auditSpec(
+        'x.spec.ts',
+        lines(
+          `import { execute } from '../support/base'`,
+          `import main from '../support/base'`,
+          `execute()`,
+          `main()`,
+        ),
+        aliased,
+        names,
+      ),
+    ).toEqual([noCase('execute, main')])
   })
 
   it('takes only the vi of vitest', () => {
