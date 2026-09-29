@@ -3,6 +3,7 @@ import type { NestExpressApplication } from '@nestjs/platform-express'
 import request from 'supertest'
 import { AppModule } from '../src/app.module'
 import { EmailsService } from '../src/asset/resources/emails/emails.service'
+import { useBodyLimit } from '../src/body-limit'
 
 /**
  * Request bodies up to the limit Marketo documents (#25). Marketo syncs up to
@@ -57,6 +58,8 @@ describe('request body limit (e2e, #25)', () => {
     app = moduleFixture.createNestApplication<NestExpressApplication>({
       logger: false,
     })
+    // As src/main.ts does, before init.
+    useBodyLimit(app)
     await app.init()
   })
 
