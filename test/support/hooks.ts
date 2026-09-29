@@ -188,6 +188,11 @@ export interface RunHookOptions {
   timeout?: number
 }
 
+/** The environment a hook runs with when a case gives none. */
+export function hookEnv(): NodeJS.ProcessEnv {
+  return cleanEnv(defaultRoot())
+}
+
 /**
  * Runs hook `name` as Claude Code does: `node .claude/hooks/<name>.mjs`, the
  * input as JSON on stdin (a string is written as it is, to test input that
@@ -205,7 +210,7 @@ export async function runHook(
       : undefined
   const run = await spawnWith(process.execPath, [hookPath(name)], {
     input: text,
-    env: env ?? cleanEnv(defaultRoot()),
+    env: env ?? hookEnv(),
     cwd:
       cwd ??
       (typeof inputCwd === 'string' && existsSync(inputCwd)
@@ -327,6 +332,8 @@ export interface IoLib {
 export interface BudgetLib {
   hookBudgetsMs: Readonly<Record<string, number>>
   budgetVariable: string
+  gitTimeoutVariable: string
+  gitTimeoutMs(env?: Record<string, string | undefined>): number
   BudgetExhausted: new (
     step: string,
     budgetMs: number | null,

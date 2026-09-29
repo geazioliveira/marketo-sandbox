@@ -17,6 +17,8 @@ import {
   planPendingPrefix,
 } from '../../scripts/loop-sections.mjs'
 import {
+  type BudgetLib,
+  hookEnv,
   type HookRepo,
   hookRepo,
   type HookRepoOptions,
@@ -685,6 +687,25 @@ describe.concurrent('the test support (hookRepo)', () => {
     expect(repo.markerPath('sessao-1')).toBe(
       lib.pendingPlanPath(repo.gitDir, 'sessao-1'),
     )
+  })
+
+  test('runs the hooks with git and gh timeouts above every budget (#59)', async ({
+    expect,
+    fresh,
+  }) => {
+    // Under load a git or a gh passes its production timeout, and the hook
+    // answers "o hook falhou" instead of the decision a case checks. In the
+    // specs only the budget bounds a run; a case about a deadline gives its
+    // own values.
+    const budget = await loadHookLib<BudgetLib>('budget')
+    const longest = Math.max(...Object.values(budget.hookBudgetsMs))
+    const repo = await fresh()
+    for (const env of [repo.env(), hookEnv()])
+      for (const name of [
+        budget.gitTimeoutVariable,
+        'LOOP_HOOKS_GH_TIMEOUT_MS',
+      ])
+        expect(Number(env[name]), name).toBeGreaterThan(longest)
   })
 
   test('puts the fake gh first on PATH, with its fixture and log', async ({
