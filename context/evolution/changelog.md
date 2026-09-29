@@ -25,6 +25,7 @@ Uma entrada por mudança mergeada, da mais nova para a mais antiga, escrita no p
 - **Depois**: os três saem com 0 nas três configs, e as falhas saem com 2 sem mudar nenhum arquivo de `src/`.
 - **Tempo**: o `generate:all` caiu de 10,4 s para 4,1 s e o `check:all` de 9,9 s para 3,8 s, com `src/` reescrito byte a byte e as 16 linhas "are current".
 - **`npm run check`**: 3.826 testes em 22 arquivos antes deste Learn, e 3.827 com o caso que o `drift.spec.ts` gera para o anti-pattern novo. O `codegen.spec.ts` foi de 71 para 80 casos. Entraram 17 casos da #29, 14 deles vermelhos antes da correção. Saíram os 6 do Prettier embrulhado, e os 3 de "not executable" e os 2 de "undo the rewrite" foram reescritos. O e2e ficou com 39.
+- **Depois do merge da #24** (`2b48487`): 3.834 testes em 23 arquivos e o e2e com 447. Com a carga média entre 17 e 22, 82 casos dos hooks, do gate e um do `codegen.spec.ts` estouraram o tempo, e o do `codegen.spec.ts` saiu com `status` `null`, o processo morto pelo timeout. Rodados um arquivo de cada vez, os 8 arquivos passaram com os 1.903 casos. As três configs e as falhas deram o mesmo resultado.
 
 ### Decisões tomadas
 
