@@ -12,7 +12,7 @@ Em cada área de `src/`, três pastas são saída de gerador, e `src/mocks/` tam
   - o `5cc5e09` mudou os 69 arquivos de `src/asset/resources/` e deixou em 46 deles um prefixo de import que nenhuma versão do gerador emitia ([editar código gerado à mão](../anti-patterns/hand-editing-generated-code.md)).
 
   Até a #6, os geradores e a saída commitada divergiam, e o `npm run check:all` não passava (#7). Eles já divergiam no `0c8e760`, pelo sufixo `.js` dos imports ([gerar e conferir](generate-and-check.md)).
-- Uma edição à mão não sobrevive. O gerador apaga a pasta de saída inteira antes de escrever (`scripts/marketo_codegen.py:398-400`), e o check acusa todo arquivo mudado e todo `*.ts` a mais (`scripts/marketo_codegen.py:412-418`).
+- Uma edição à mão não sobrevive. O gerador apaga a pasta de saída inteira antes de escrever (`scripts/marketo_codegen.py:409-411`), e o check acusa todo arquivo mudado e todo `*.ts` a mais (`scripts/marketo_codegen.py:427-432`).
 - O mock ainda precisa de comportamento que o Swagger não descreve: estado, autenticação, falhas roteirizadas e validação estrita ([project intent](../../intent/project-intent.md)). Escrito dentro das pastas geradas, ele sumiria na próxima geração.
 
 ## Solução

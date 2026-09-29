@@ -15,6 +15,11 @@ Uma entrada por mudança mergeada, da mais nova para a mais antiga, escrita no p
 - **Os geradores formatam tudo antes de tocar em qualquer pasta.** Cada gerador monta um `Output` por pasta de saída e chama o `write_or_check_outputs()` uma vez. O `format_files()` formata a execução inteira numa chamada, e só então o `write_outputs()` recusa, apaga e grava, ou o `check_outputs()` compara.
 - **Saiu o caminho do CLI:** o `format_with_prettier()`, a conferência do relatório por arquivo, a limpeza das variáveis `PRETTIER_*`, o `.codegen-tmp` e a linha dele no `.gitignore`.
 - **A ADR 0015** substitui a 0011 e mantém dela o que valia: nenhum arquivo de ignore alcança a saída, o `requirePragma` e o range forçados, a saída 2 e a busca do node. As ADRs 0004, 0008, 0009 e 0012, os dois patterns do código gerado e três anti-patterns dizem o mecanismo novo, e as citações do CLI levam o commit `d50fd00`.
+- **Da verificação adversarial** (`814573a`):
+  - o `--check` lê as quebras de linha do texto formatado como o `read_text()` lê as do arquivo. Com `endOfLine: crlf` ou `cr`, ele saía com 1, uma regressão frente ao CLI;
+  - o `write_outputs()` codifica tudo em UTF-8 antes do primeiro `rmtree`;
+  - o formatador manda o `console.log` para o stderr;
+  - o `prettier_environment()` confere o próprio formatador.
 
 ### Números medidos
 
@@ -26,6 +31,10 @@ Uma entrada por mudança mergeada, da mais nova para a mais antiga, escrita no p
 - **Tempo**: o `generate:all` caiu de 10,4 s para 4,1 s e o `check:all` de 9,9 s para 3,8 s, com `src/` reescrito byte a byte e as 16 linhas "are current".
 - **`npm run check`**: 3.826 testes em 22 arquivos antes deste Learn, e 3.827 com o caso que o `drift.spec.ts` gera para o anti-pattern novo. O `codegen.spec.ts` foi de 71 para 80 casos. Entraram 17 casos da #29, 14 deles vermelhos antes da correção. Saíram os 6 do Prettier embrulhado, e os 3 de "not executable" e os 2 de "undo the rewrite" foram reescritos. O e2e ficou com 39.
 - **Depois do merge da #24** (`2b48487`): 3.834 testes em 23 arquivos e o e2e com 447. Com a carga média entre 17 e 22, 82 casos dos hooks, do gate e um do `codegen.spec.ts` estouraram o tempo, e o do `codegen.spec.ts` saiu com `status` `null`, o processo morto pelo timeout. Rodados um arquivo de cada vez, os 8 arquivos passaram com os 1.903 casos. As três configs e as falhas deram o mesmo resultado.
+- **A verificação adversarial**:
+  - comparou o CLI e a API em 15 configs, com a saída de gerar igual byte a byte;
+  - matou 6 mutações e achou 2 que passavam: o `import` pelo nome e a recusa no laço do `rmtree`;
+  - o `codegen.spec.ts` ganhou 10 casos e foi a 90, 7 deles vermelhos no código de antes da correção.
 
 ### Decisões tomadas
 
@@ -46,6 +55,8 @@ Uma entrada por mudança mergeada, da mais nova para a mais antiga, escrita no p
 - **Tirar uma linha de um módulo muito citado custa caro.** O contexto cita o `marketo_codegen.py` e os três geradores por linha em dezenas de lugares. Pôr o `FORMATTER` na linha do `TEMP` e trocar dois imports por dois manteve essas citações no lugar, como a #19 já tinha feito com o `document_path()`.
 - **O protótipo pagou o plano.** A cópia fora do git mediu a paridade dos 1.088 arquivos e os tempos antes do Approve, e o Build só confirmou.
 - **Com o HEAD destacado, o hook nega o `git checkout` de restauração.** Na medição do plano, a árvore voltou regerando com a config original.
+- **Trocar um lado de uma comparação muda o que ela tolera.** O código antigo lia os dois lados com `read_text()`, e a tolerância a CRLF vinha de graça. O novo lia um lado da memória, e as quebras de linha passaram a contar. Nenhum teste tinha uma config com `crlf`, e só a verificação adversarial viu.
+- **Um merge de `main` desloca de novo as citações que acabaram de ser acertadas.** O `is_type_alias()` da #24 somou 15 linhas no meio do módulo, e duas citações que coincidiam nos dois lados escaparam da resolução dos conflitos. Um script que imprime o código de cada citação `arquivo:linha` as achou.
 
 ---
 

@@ -4,7 +4,7 @@
 
 - A toolchain veio no `0c8e760`. Até o `fb4a804`, o único ajuste nos arquivos de config (`tsconfig.json`, `.oxlintrc.json`, `.prettierrc`, as duas configs do vitest e o `nest-cli.json`) foi o `ignoreDeprecations` do `01ee283`. Nenhum commit diz por que cada ferramenta foi escolhida: os arquivos de config são a decisão.
 - O projeto nasceu do starter do NestJS. O pacote se chamava `nest-typescript-starter` (`fb4a804:package.json:2`) até a #9, que o renomeou para `marketo-sandbox` (`package.json:2`) e tirou as sobras do starter.
-- Os geradores Python dependem do lado Node: eles formatam a saída com o prettier de `node_modules`, pela API, num node (`scripts/format-generated.mjs`, `scripts/marketo_codegen.py:325-367`), e, desde a #7, saem com 2 quando ele ou o node faltam ([ADR 0015](0015-generators-format-in-memory-at-the-destination-path.md)).
+- Os geradores Python dependem do lado Node: eles formatam a saída com o prettier de `node_modules`, pela API, num node (`scripts/format-generated.mjs`, `scripts/marketo_codegen.py:327-369`), e, desde a #7, saem com 2 quando ele ou o node faltam ([ADR 0015](0015-generators-format-in-memory-at-the-destination-path.md)).
 - O loop (#2 e #3) acrescentou peças por cima. Esta decisão separa o que é pré-loop do que o loop trouxe, para que ninguém leia um acréscimo do loop como decisão dos commits iniciais.
 
 ## Decisão
@@ -22,7 +22,7 @@
 
   O `tsconfig.build.json` compila só `src` e deixa os specs de fora (`tsconfig.build.json:2-7`).
 - **oxlint.** `oxlint` `^1.58.0` (`package.json:53`), travado em 1.80.0. O `.oxlintrc.json` desliga `no-explicit-any` e deixa `no-floating-promises` como aviso (`.oxlintrc.json:3-5`). O script pré-loop era `oxlint src/ test/` (`fb4a804:package.json:23`).
-- **Prettier.** `prettier` `^3.4.2` (`package.json:54`), travado em 3.9.6. O `.prettierrc` é `singleQuote: true`, `trailingComma: "all"` e `semi: false` (`.prettierrc:1-5`). O script `format` pré-loop escrevia `src/**/*.ts` e `test/**/*.ts` (`fb4a804:package.json:10`). Os geradores passam a saída por esse mesmo prettier (`scripts/marketo_codegen.py:380-384`). Os DTOs chegaram a esse estilo no `e7a0bb6`: no `0c8e760`, 253 dos 255 tinham linhas terminadas em `;`, e depois dele nenhum. Desde a #29, o Prettier dos geradores é chamado pela API, que não lê arquivo de ignore nenhum, com a config do caminho de destino ([ADR 0015](0015-generators-format-in-memory-at-the-destination-path.md)). Na #7, o CLI rodava com `--ignore-path=` e a conferência do relatório por arquivo ([ADR 0011](0011-generators-format-without-ignore-files.md)), e a #6 o fazia ler só o `.prettierignore` (`3ddceb4:scripts/marketo_codegen.py:229-233`), para tirar do caminho o `.gitignore`, que listava a pasta onde o `--check` formatava a saída.
+- **Prettier.** `prettier` `^3.4.2` (`package.json:54`), travado em 3.9.6. O `.prettierrc` é `singleQuote: true`, `trailingComma: "all"` e `semi: false` (`.prettierrc:1-5`). O script `format` pré-loop escrevia `src/**/*.ts` e `test/**/*.ts` (`fb4a804:package.json:10`). Os geradores passam a saída por esse mesmo prettier (`scripts/marketo_codegen.py:382-386`). Os DTOs chegaram a esse estilo no `e7a0bb6`: no `0c8e760`, 253 dos 255 tinham linhas terminadas em `;`, e depois dele nenhum. Desde a #29, o Prettier dos geradores é chamado pela API, que não lê arquivo de ignore nenhum, com a config do caminho de destino ([ADR 0015](0015-generators-format-in-memory-at-the-destination-path.md)). Na #7, o CLI rodava com `--ignore-path=` e a conferência do relatório por arquivo ([ADR 0011](0011-generators-format-without-ignore-files.md)), e a #6 o fazia ler só o `.prettierignore` (`3ddceb4:scripts/marketo_codegen.py:229-233`), para tirar do caminho o `.gitignore`, que listava a pasta onde o `--check` formatava a saída.
 - **vitest, com duas configs.** `vitest` `^4.1.2` (`package.json:60`), travado em 4.1.11:
   - `vitest.config.ts` pega `**/*.spec.ts` (`vitest.config.ts:11`);
   - `vitest.config.e2e.ts` pega `**/*.e2e-spec.ts` (`vitest.config.e2e.ts:9`);
@@ -41,7 +41,7 @@
 | `.claude/hooks/` no `lint`, no `format` e no `format:check` (`package.json`) | `3a6ac45` | #34, fatia 1 da #5 |
 | O Prettier dos geradores lendo só o `.prettierignore` (`3ddceb4:scripts/marketo_codegen.py:229-233`) | `b399cde` | #6 |
 | O Prettier dos geradores sem arquivo de ignore, com a conferência do relatório por arquivo e a saída 2 (`d50fd00:scripts/marketo_codegen.py:268-362`) | `8f358fb` | #7 |
-| O Prettier dos geradores pela API, em memória, com a config do caminho de destino, antes de tocar em qualquer pasta (`scripts/format-generated.mjs`, `scripts/marketo_codegen.py:309-431`) | `3cd85e8` | #29 |
+| O Prettier dos geradores pela API, em memória, com a config do caminho de destino, antes de tocar em qualquer pasta (`scripts/format-generated.mjs`, `scripts/marketo_codegen.py:309-445`) | `3cd85e8` | #29 |
 | `check:all` no fim do `check` (`package.json:32`) | `232b930` | #7 |
 | `typecheck` (`tsc --noEmit`), `check:context` e `check`, que roda lint, typecheck, testes, `check:context` e build nessa ordem (`package.json:24`, `:31-32`) | `410d295` | #3 |
 | `format:check` (`prettier --check`), que o `check` roda logo depois do lint, e `scripts` no `format` e no `format:check` (`package.json:9-10`, `:32`) | `620ac9d` | #9 |
@@ -53,7 +53,7 @@ O check `Qualidade / check` roda `npm ci`, `npm run check` e o e2e (`.github/wor
 - **A maior parte veio do starter.** O nome antigo do pacote e o Hello World, que a #9 tirou, mostravam o starter do NestJS por baixo. oxlint, prettier, vitest e o `nest build` vieram com ele (inferido; confirmar).
 - **O `ignoreDeprecations` é obrigatório nesta config.** Numa cópia do `tsconfig.json` sem ele, o tsc 6.0.3 recusa a config com TS5107: `moduleResolution=node10` "is deprecated and will stop functioning in TypeScript 7.0". Manter `commonjs` com a resolução `node` preserva a saída CommonJS que `node dist/main` roda (inferido; confirmar).
 - **Imports sem extensão.** No `0c8e760`, os geradores emitiam imports com o sufixo `.js` (`0c8e760:scripts/generate-marketo-resources.py:73`), mas nenhum arquivo commitado o tinha. O `a967f26` tirou o sufixo dos geradores. A resolução `node` aceita o import sem extensão, e alinhar o gerador ao código commitado foi o motivo (inferido; confirmar).
-- **O prettier faz parte do contrato gerado.** O `check:*` compara os arquivos commitados com a saída gerada já formatada (`scripts/marketo_codegen.py:408-426`). Outra versão ou outra config do prettier mudaria a saída esperada (inferido; confirmar).
+- **O prettier faz parte do contrato gerado.** O `check:*` compara os arquivos commitados com a saída gerada já formatada (`scripts/marketo_codegen.py:419-440`). Outra versão ou outra config do prettier mudaria a saída esperada (inferido; confirmar).
 - **Python só com a biblioteca padrão.** Os geradores não pedem `pip install`, só um `python3` no PATH. O histórico não diz por que Python, e não TypeScript (inferido; confirmar).
 
 ## Alternativas consideradas
