@@ -15,14 +15,15 @@ Uma entrada por mudança mergeada, da mais nova para a mais antiga, escrita no p
 - **Resposta string.** Uma resposta 2xx primitiva ganha um valor do faker e sai como JSON, e `invite.json` responde 200 com uma string JSON.
 - **Headers.** O controller envia os headers que a resposta 2xx declara, e os 7 POSTs de Data Ingestion respondem 202 com um `X-Request-Id` do `mockRequestId()`.
 - **Multipart.** O `MultipartInterceptor`, escrito à mão em `src/multipart/`, lê o corpo com o `multer().any()` e põe cada parte em `req.body`. As 11 operações `multipart/form-data` recebem as partes pelo `@Body()` gerado, sem mudar o gerador, e um corpo malformado responde 400.
-- **Dois testes novos.** O `test/response-schema.e2e-spec.ts` confere as 388 operações contra o 2xx documentado: o status, o corpo contra o schema e os headers. As 10 contradições do próprio documento ficam numa lista nomeada. O `test/multipart.e2e-spec.ts` acha as operações multipart pelo documento e confere que cada parte chega ao service.
+- **Três testes novos.** O `test/response-schema.e2e-spec.ts` confere as 388 operações contra o 2xx documentado: o status, o corpo contra o schema, com toda propriedade declarada, e os headers. As 10 contradições do próprio documento ficam numa lista nomeada. O `test/multipart.e2e-spec.ts` acha as operações multipart pelo documento e confere que cada parte chega ao service. O `test/type-aliases.spec.ts` guarda os aliases com `@ts-expect-error`.
 
 ### Números medidos
 
 - **Antes**, na cabeça dos testes (`9a37fc7`): 10 de 390 linhas da conformidade e 10 de 15 do multipart falharam.
 - **A saída**: 11 arquivos gerados mudaram, e um segundo `npm run generate:all` não mudou nenhum.
-- **Depois**: o e2e passa com 439 testes em 5 arquivos. Dos 3.751 testes unitários, 11 falharam por tempo na primeira rodada, com média de carga entre 22 e 25, e passaram quando os 3 arquivos (1.033 testes) rodaram de novo. `check:context`, `build` e `check:all` passam.
+- **Depois**: o e2e passa com 441 testes em 5 arquivos. Dos 3.751 testes unitários, 11 falharam por tempo na primeira rodada, com média de carga entre 22 e 25, e passaram quando os 3 arquivos (1.033 testes) rodaram de novo. `check:context`, `build` e `check:all` passam.
 - **As citações**: 103 citações de `context/` seguiram as linhas novas por um remapeamento pelo diff, e 6 foram refeitas à mão.
+- **A verificação adversarial**: 388 operações em 6 variantes, contra a base e a cabeça. Ela achou 3 pontos a corrigir e 6 nits, e todos os 3 entraram na PR.
 
 ### Decisões tomadas
 
@@ -44,6 +45,8 @@ Uma entrada por mudança mergeada, da mais nova para a mais antiga, escrita no p
 - **Uma falha intermitente num teste de muitas requisições pode vir de outro processo.** O `403 text/plain`, que o app não sabe dar, apontou para a porta efêmera do supertest, não para o seed.
 - **O plano publicado no mesmo comando que outra consulta não tirou o marcador do `plan-to-issue`.** O hook só aceita um `gh issue comment` sozinho na linha. Publicar de novo cancelaria o Approve, e o dono apagou o marcador à mão.
 - **Um `npm install <pacote>` sem versão sobe a versão do lockfile.** Para usar direto uma dependência transitiva, declare a versão que o lockfile já tem.
+- **Um e2e que só confere a resposta não guarda um tipo.** Com o gerador de aliases revertido, os dois testes novos e o `check:all` passavam, porque `string[]` cabe em `{}`. Um `@ts-expect-error` num teste é o que faz o `tsc` notar.
+- **Um envelope sem `required` aceita `{}`.** Conferir só as propriedades obrigatórias deixava passar uma factory vazia em 236 das 379 respostas com corpo.
 - **Os testes dos hooks e do gate falham por tempo com a máquina carregada**, como a #30 já registrou. Com a carga acima de 20, 11 falharam, e a nova rodada dos mesmos arquivos passou.
 
 ---

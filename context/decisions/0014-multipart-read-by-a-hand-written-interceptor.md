@@ -2,7 +2,7 @@
 
 ## Contexto
 
-- **Um upload não chegava ao handler.** O Nest sobre Express monta só os parsers de JSON e de urlencoded. O gerador de resources mapeia `formData` para `@Body('<nome>')` e `in: body` para `@Body()` (`scripts/generate-marketo-resources.py:37-42`), e sem parser de multipart o `req.body` ficava `undefined`. Medido em `e5b013c` com um `vi.spyOn` no service: `POST /bulk/v1/leads.json?format=csv` com `leads.csv` anexado respondia 200, e o service recebia `file` como `undefined`.
+- **Um upload não chegava ao handler.** O Nest sobre Express monta só os parsers de JSON e de urlencoded. O gerador de resources mapeia `formData` para `@Body('<nome>')` e `in: body` para `@Body()` (`scripts/generate-marketo-resources.py:38-43`), e sem parser de multipart o `req.body` ficava `undefined`. Medido em `e5b013c` com um `vi.spyOn` no service: `POST /bulk/v1/leads.json?format=csv` com `leads.csv` anexado respondia 200, e o service recebia `file` como `undefined`.
 - **Os documentos declaram as partes de dois jeitos.** São 11 POSTs que consomem `multipart/form-data`:
   - 3 bulk imports de Lead Database, com `file` declarado `type: file` em `formData`;
   - 5 uploads de assets com o corpo num `in: body` cujo schema traz a parte de arquivo como uma propriedade `string`, que só a descrição chama de "Multipart file", como `CreateFileRequest.file`;
@@ -14,7 +14,9 @@
 
 - **O `MultipartInterceptor`, escrito à mão em `src/multipart/`, lê o corpo multipart** e põe cada parte em `req.body`, com o nome com que ela foi enviada: uma parte de texto vira string, e uma de arquivo, o arquivo que o multer leu em memória (`src/multipart/multipart.interceptor.ts`). O `MultipartModule` o registra como `APP_INTERCEPTOR`, e o `AppModule` importa o `MultipartModule` (`src/app.module.ts:6,15`).
 - **O gerador não muda.** O `@Body('file')` e o `@Body()` gerados recebem as partes como vieram, nas 11 operações.
-- **Um corpo multipart malformado responde 400** e não chega ao handler.
+- **Vale para toda rota.** O interceptor lê um corpo `multipart/*` mandado a qualquer rota, declarada multipart ou não.
+- **Um corpo vazio passa.** Com `Content-Length: 0`, o interceptor nem chama o multer, e o handler é chamado sem partes, como antes da #24. Um cliente que manda o `consumes` documentado sem nada para enviar, como o `activate.json` de uma smart campaign, continua recebendo 200. A verificação adversarial da #24 achou o 400 que o multer dava aí, em toda rota.
+- **Um corpo multipart malformado responde 400** e não chega ao handler. A resposta é o erro do Nest, `{statusCode, message, error}`, não o envelope da Marketo. Um corpo vazio em chunked, sem `Content-Length`, também cai aqui.
 - **Sem limite de tamanho.** O arquivo fica em memória (pergunta 3 do plano da #24).
 - **O `multer` entra em `dependencies` com `^2.2.0`**, e o lockfile continua na 2.2.0, a mesma do `@nestjs/platform-express`. O `@types/multer` entra em `devDependencies`, porque o multer 2.2 não traz tipos.
 - **Os tipos gerados ficam como o documento diz.** `CreateFileRequest.file` continua `string`, e o handler recebe o objeto do multer.
@@ -44,6 +46,8 @@
   - **o interceptor roda em toda rota.** Ele lê um corpo multipart mandado a uma rota que não o declara. O multer ignora uma requisição que não é multipart, e o teste do multipart prova que JSON e urlencoded não mudam;
   - **o tipo mente nas 5 operações de assets.** O handler recebe o objeto do multer onde o tipo diz `string`. Hoje nenhum service lê os argumentos;
   - **um upload grande fica inteiro em memória.**
+  - **as partes repetidas não viram lista.** Dois arquivos com o mesmo nome, ou um arquivo e um texto com o mesmo nome, deixam em `req.body` o último arquivo. Uma parte de arquivo sem `filename` o multer descarta, e um campo de arquivo como `c[d]` fica em `req.body['c[d]']`, onde o texto de mesmo nome seria aninhado;
+  - **um `FileInterceptor` do Nest numa rota não conviveria com este.** O interceptor global já teria lido o corpo, e a requisição ficaria esperando. Uma rota que precise dele tira o multipart deste interceptor primeiro.
 
 ## Relacionados
 

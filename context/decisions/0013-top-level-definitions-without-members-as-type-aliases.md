@@ -3,10 +3,10 @@
 ## Contexto
 
 - **A ADR 0006 diz que todo DTO é uma `export interface`** ([ADR 0006](0006-dtos-as-typescript-interfaces.md)), e a ADR 0007, que toda factory é `makeX(overrides: Partial<X> = {})` e espalha `...overrides` sobre um objeto ([ADR 0007](0007-faker-factories-with-overrides-and-seed.md)). As duas supõem que toda definição é um objeto com membros.
-- **Três definições dos cinco documentos não têm membros.** Medido em `e5b013c`:
+- **Nove definições dos cinco documentos não têm `properties` nem `allOf`.** Medido em `e5b013c`, três delas pedem outra forma:
   - `LeadAttribute2SearchableFields`, de Lead Database, é `{type: array, items: string}` (`docs/marketo-swagger-mapi.json:7381`). Saía como `export interface LeadAttribute2SearchableFields {}`, e a factory devolvia `{}`. Por isso `GET /rest/v1/leads/describe2.json` e `GET /rest/v1/programs/members/describe.json` respondiam `searchableFields: [{}, …]`, e o documento diz um array de arrays de string.
   - `Person` e `CustomObject`, de Data Ingestion, são objetos só com `additionalProperties: true`. Saíam como `export interface X {}`. Os dois só aparecem em requisições.
-- **`Empty`, de Lead Database, não declara nada**, nem `type`. Continua uma interface vazia.
+- **As outras seis continuam interfaces vazias**, e com razão: não declaram forma nenhuma além de objeto. `Empty`, de Lead Database, não declara nem `type`. Cinco são só `{type: object}`: `ModelResponse` e `MultipartFile`, de assets, e `InputStream`, `ObservableOfInputStreamContent` e `ObservableOfInputStreamRangeContent`, de Lead Database.
 
 ## Decisão
 
@@ -36,10 +36,11 @@
 
 - **Mais fácil**:
   - o tipo e o mock de uma definição sem membros seguem o documento, e o `test/response-schema.e2e-spec.ts` confere cada resposta contra o schema documentado;
-  - uma definição nova sem membros, de qualquer tipo, sai certa sem mudar o gerador.
+  - uma definição nova que seja um array, um primitivo ou um objeto só com `additionalProperties: true` sai certa sem mudar o gerador.
 - **Mais difícil**:
   - **duas formas de DTO e duas de factory.** Quem lê uma definição precisa ver se ela é interface ou alias, e quem chama uma factory, se ela recebe `Partial<X>` ou o valor inteiro;
-  - **o override de um array não é parcial.** Para mudar um item, passe o array inteiro.
+  - **o override de um array não é parcial.** Para mudar um item, passe o array inteiro;
+  - **duas formas que nenhum documento usa hoje ainda sairiam erradas**, achadas pela verificação adversarial da #24 numa área sintética. Um objeto de topo só com `additionalProperties: {$ref: Item}` vira `Record<string, Item>`, mas a factory de overrides não compila (TS2322). E uma resposta 2xx que é um `$ref` para uma definição primitiva sairia como `text/html`, porque só a resposta primitiva inline é mandada como JSON. O `tsc` e o `test/response-schema.e2e-spec.ts` pegariam as duas, e a correção é mandar todo alias para a factory de valor e tratar o `$ref` para um primitivo como primitivo.
 
 ## Relacionados
 
