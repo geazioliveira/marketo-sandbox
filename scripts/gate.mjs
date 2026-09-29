@@ -1826,17 +1826,25 @@ function main() {
     )
     // A merge of this branch's own published copy (a `git pull` that made a
     // merge commit) lands above too; the remedy then is a rebase, not a recut.
+    // Ancestry tells the two apart only while the merge is not published:
+    // origin/<branch> is then the copy from before the merge, and only that
+    // copy is its ancestor. Once pushed, origin/<branch> holds the merge
+    // itself, so every parent of every merge is its ancestor, another branch
+    // the push published along included (#32). A published merge gets the
+    // recut, right for both, which says nothing of where the merge came from.
     const ownCopy = `refs/remotes/origin/${facts.branch}`
     const ownCopyMerge =
       foreignMerges.length > 0 &&
       gitOut('rev-parse', '--verify', '--quiet', ownCopy) !== null &&
-      foreignMerges.every((commit) =>
-        commit.parents
-          .slice(1)
-          .every(
-            (parent) =>
-              isAncestor(parent, originMain) || isAncestor(parent, ownCopy),
-          ),
+      foreignMerges.every(
+        (commit) =>
+          !isAncestor(commit.sha, ownCopy) &&
+          commit.parents
+            .slice(1)
+            .every(
+              (parent) =>
+                isAncestor(parent, originMain) || isAncestor(parent, ownCopy),
+            ),
       )
     const shortRef = (ref) => ref.replace(/^refs\/(?:heads|remotes)\//, '')
     // Another branch of #N, local or on origin, gets its own remedy, one per
