@@ -17,6 +17,7 @@ import {
   hookRepo,
   type IoLib,
   loadHookLib,
+  raiseInProcessGitTimeout,
   type RepoInfo,
   type RepoLib,
   type ShellLib,
@@ -143,6 +144,8 @@ afterAll(() => {
 }, setupTimeout)
 
 vi.setConfig({ testTimeout: processTimeout, maxConcurrency: 12 })
+// The libraries run in this process: their git gets 60 s, as a hook's does (#59).
+raiseInProcessGitTimeout()
 
 /**
  * repoAt's answers by directory: the repositories are only read here, and

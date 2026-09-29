@@ -25,6 +25,7 @@ import {
   type IoLib,
   loadHookLib,
   PROJECT,
+  raiseInProcessGitTimeout,
   type RepoInfo,
   type ShellLib,
   setupTimeout,
@@ -136,6 +137,8 @@ beforeAll(async () => {
 }, setupTimeout)
 
 vi.setConfig({ testTimeout: processTimeout, maxConcurrency: 12 })
+// The libraries run in this process: their git gets 60 s, as a hook's does (#59).
+raiseInProcessGitTimeout()
 
 const HEAD = 'a'.repeat(40)
 const BRANCH = 'feature/5-hooks-claude-code'

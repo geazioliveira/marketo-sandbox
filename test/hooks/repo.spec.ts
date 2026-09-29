@@ -24,6 +24,7 @@ import {
   type HookRepoOptions,
   loadHookLib,
   PROJECT,
+  raiseInProcessGitTimeout,
   type RepoLib,
   setupTimeout,
   processTimeout,
@@ -79,6 +80,8 @@ const test = base.extend<{
 })
 
 vi.setConfig({ testTimeout: processTimeout, maxConcurrency: 12 })
+// The libraries run in this process: their git gets 60 s, as a hook's does (#59).
+raiseInProcessGitTimeout()
 
 const BRANCH = 'feature/42-a-thing'
 

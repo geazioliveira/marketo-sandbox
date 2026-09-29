@@ -14,9 +14,9 @@ import {
   ownerRule,
   readyLabel,
 } from '../../scripts/loop-sections.mjs'
-import { cleanEnv } from '../support/clean-env'
 import {
   gitShim,
+  hookEnv,
   type HookRepo,
   hookRepo,
   type HookRepoOptions,
@@ -258,7 +258,7 @@ describe.concurrent('session-context on SessionStart', () => {
     const run = await runHook(
       'session-context',
       { ...start(), cwd: dir },
-      { env: cleanEnv(dir) },
+      { env: hookEnv(dir) },
     )
     expect(run.status).toBe(0)
     expect(run.stdout).toBe('')
@@ -304,7 +304,7 @@ describe.concurrent('session-context on UserPromptSubmit', () => {
     const outside = await runHook(
       'session-context',
       { ...prompt, cwd: dir },
-      { env: cleanEnv(dir) },
+      { env: hookEnv(dir) },
     )
     expect(contextOf(outside)).toBe(REMINDER)
     const elsewhere = await fresh({
@@ -404,11 +404,14 @@ describe.concurrent(
       expect,
     }) => {
       const repo = await fresh({ branch: BRANCH, cache: true })
+      // The git's own production timeout, not the 60 s the specs give it
+      // (#59): here the git, and not the budget, gives up first.
       const { run, elapsed } = await withGit(
         repo,
         scratch(),
         'exec sleep 120',
         start(),
+        { LOOP_HOOKS_GIT_TIMEOUT_MS: '10000' },
       )
       expect(run.status).toBe(0)
       expect(elapsed).toBeLessThan(configuredTimeoutMs('SessionStart'))
