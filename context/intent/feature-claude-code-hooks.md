@@ -166,6 +166,4 @@ Para o dono:
 
 - **Criado**: 2026-09-25 (Fase: Intent), do plano aprovado na issue #5 (#5)
 - **Status**: Completed
-- **Atualizado**: 2026-09-28 (Fase: Intent), a #5 virou uma stack de 8 fatias (#34 a #41) com o plano revisado, depois de a PR #26 ser fechada (#5)
-- **Atualizado**: 2026-09-28 (Fase: Intent), o plano revisado passou a stack a 10 fatias, com as sub-issues #49 e #50, e trouxe o critério do tamanho da PR (#5)
 - **Atualizado**: 2026-09-28 (Fase: Learn), as dez fatias entraram em `main`, e o `.claude/settings.json` da última liga os hooks (#5)

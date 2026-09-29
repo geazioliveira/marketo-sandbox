@@ -86,6 +86,4 @@ Uma mudança grande demais para uma PR vem numa stack de PRs pequenas, uma sobre
 
 - **Criado**: 2026-09-24 (Fase: Build), do plano aprovado na #2 e do pattern equivalente do lite-campaign (#2)
 - **Status**: Active
-- **Atualizado**: 2026-09-25 (Fase: Build), a PR passou a abrir em draft, com o monitor de CI do app ligado, e a sair de draft só com o Learn commitado; o merge passou a exigir uma revisão do Copilot na cabeça, que não falhou, e nenhuma thread de revisão aberta, com cada thread respondida antes de resolvida; a revisão passou a ser pedida de novo quando a timeline da PR não mostra o pedido depois de um push; e o veredito fresco passou a ser só o gate em modo CI na head da PR ou o rerun do `issue-link` acompanhado até o fim, nunca um disparo do refresh sozinho (#13)
-- **Atualizado**: 2026-09-27 (Fase: Build), uma mudança grande pode vir numa stack, com uma sub-issue por fatia, a branch cortada da fatia de baixo e a PR em draft até ela mergear (#31)
 - **Atualizado**: 2026-09-28 (Fase: Build), o veredito fresco antes do merge passou a ser só o gate em modo CI (#30)

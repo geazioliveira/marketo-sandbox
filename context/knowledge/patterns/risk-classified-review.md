@@ -80,5 +80,4 @@ As issues já seguem isso. A #6 e a #7 são HIGH porque mexem nos geradores e em
 
 - **Criado**: 2026-09-25 (Fase: Build), do que o loop das #2, #3 e #13 já pratica, registrado na #4 (#4)
 - **Status**: Active
-- **Atualizado**: 2026-09-26 (Fase: Build), o `check:all` passou a rodar no CI, e as citações dos geradores seguiram as linhas novas (#7)
 - **Atualizado**: 2026-09-28 (Fase: Build), as citações dos geradores, do `AppModule`, do `package.json` e do lockfile seguiram as linhas novas (#24)

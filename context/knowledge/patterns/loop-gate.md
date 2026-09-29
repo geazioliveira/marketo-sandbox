@@ -230,7 +230,4 @@ Este repositório tem uma conta só no GitHub. O dono e o agente postam com o me
 
 - **Criado**: 2026-09-24 (Fase: Build), do gate do lite-campaign (brunohab/lite-campaign#101), dos três defeitos dele e do plano aprovado na #2 (#2)
 - **Status**: Active
-- **Atualizado**: 2026-09-25 (Fase: Build), a regra de autoria passou a distinguir a transição `needs-triage` para `ready-for-human`, feita pelo agente ao publicar o plano, do Approve e da aplicação de `ready-for-agent`, exclusivos do dono (#17)
-- **Atualizado**: 2026-09-27 (Fase: Build), uma fatia de stack passou a ser julgada pela mãe: o estado, o plano, o Approve e a branch na seção `Stack`; o `pr-base` passou a aceitar a fatia de baixo em draft, o `stacked` a isentar as fatias da mesma stack, o `intent-first` e o `learn` a bloquear pela posição da fatia, e o `pr-size` novo a relatar o tamanho da PR (#31)
-- **Atualizado**: 2026-09-28 (Fase: Build), os hooks da #5 passaram a ler o cache pelo `gateStatus()`, com o plano pendente fechando o cache até ser publicado, e a fazer valer, numa sessão do Claude Code, o Approve do dono e responder antes de resolver (#5)
 - **Atualizado**: 2026-09-28 (Fase: Build), os passos `copilot-review` e `review-threads` passaram a só relatar no `issue-link` (`--review-report`), com aviso na PR, e o sinal de revisão saiu (#30)

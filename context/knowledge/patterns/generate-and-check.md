@@ -70,6 +70,4 @@ npm run check:all      # sai com 0 só quando a saída commitada é a que os ger
 
 - **Criado**: 2026-09-25 (Fase: Build), registro retroativo de `0c8e760`..`fb4a804` (#4)
 - **Status**: Active
-- **Atualizado**: 2026-09-26 (Fase: Build), os geradores saem com 2 quando não conseguem formatar, nenhum arquivo de ignore os alcança, todo arquivo gerado abre com o cabeçalho, e o `check:all` roda no `npm run check` e no CI (#7)
-- **Atualizado**: 2026-09-28 (Fase: Build), o check confere o Swagger pelo registro `swagger-source.ts` de cada área, com o nome de um documento novo, o `git checkout -- docs/` de um checkout antigo com CRLF e a citação do gerador de definições seguindo as linhas novas (#19)
 - **Atualizado**: 2026-09-28 (Fase: Build), as citações dos geradores, do `AppModule`, do `package.json` e do lockfile seguiram as linhas novas (#24)
