@@ -41,8 +41,9 @@ A branch `fix/23-test-timeout-child-process` nasce de `origin/main` em `e5b013c`
   - `3fdfae8`: este intent;
   - `f9d4333`: `test/test-timeouts.spec.ts`, vermelho em `refresh-issue-link.spec.ts` (caso e processo com 60 s) e em `loop-sections.spec.ts` (sem `testTimeout`). O guarda classifica cada export de `test/support/` pelo próprio corpo, e não pelo módulo inteiro. Senão o `check-context.spec.ts`, que só usa o `exec`, herdaria os 60 s do gate do `TempRepo`, que ele não roda;
   - `37864d8`: `refresh-issue-link.spec.ts` com `testTimeout: 120_000`, e `loop-sections.spec.ts` com `timeout: 30_000` no `spawnSync` e `testTimeout: 60_000`. O guarda fica verde;
-  - o Learn: este intent, o pattern [Timeouts de testes que disparam processos](../knowledge/patterns/process-test-timeouts.md), citado no `CODING_STANDARDS.md`, e o changelog.
-- **O guarda foi conferido por mutação.** Ele reconhece como disparadores 15 specs: os de `test/hooks/`, menos `budget`, `settings` e `shell`, que carregam as libs no mesmo processo, e os de `test/scripts/`, menos `drift` e `forms-parity`. Com o `testTimeout` do `check-context.spec.ts` baixado para 30 s, ele recusa o arquivo citando `:183` e `:216`.
+  - `66e7a01`: o Learn, com este intent, o pattern [Timeouts de testes que disparam processos](../knowledge/patterns/process-test-timeouts.md), citado no `CODING_STANDARDS.md`, e o changelog;
+  - `09974a8` e `64ff029`, da revisão do Copilot na PR #61. O guarda passou a ler os imports por alias, a somar os repetidos e a deixar de fora os de tipo. Ele passou também a achar cada chamada de processo, fora de strings e comentários, e a exigir que ela dê o próprio timeout, nos specs e em `test/support/`. Um helper que repassa as opções, como o `exec`, deixa o timeout para quem o chama. As 15 chamadas sem timeout dos specs e as 4 dos helpers (`realGit`, `HookRepo.git`, o `rev-parse` do `HookRepo` e `TempRepo.git`) ganharam um: `spawnTimeout` nos helpers e specs dos hooks, 60 s nos specs de 120 s e em `temp-repo.ts`, e 30 s no `check-context.spec.ts` e no `python3` do `codegen.spec.ts`.
+- **O guarda foi conferido por mutação e pela contagem.** As 19 chamadas sem timeout que ele acusou em `09974a8` são as mesmas que um script à parte contou. Ele reconhece como disparadores 15 specs: os de `test/hooks/`, menos `budget`, `settings` e `shell`, que carregam as libs no mesmo processo, e os de `test/scripts/`, menos `drift` e `forms-parity`. Com o `testTimeout` do `check-context.spec.ts` baixado para 30 s, ele recusa o arquivo citando `:183` e `:216`.
 - **A causa raiz se confirmou, e era a menor parte do problema.** O descompasso existia, mas a medição mostrou que a carga derruba a suíte por outras causas.
 - **Medido** em `37864d8`, numa worktree destacada com `npm ci` feito: uma rodada sozinha e cinco rodadas de duas `npx vitest run` ao mesmo tempo, com load average entre 16 e 26 no início de cada uma:
 
@@ -57,15 +58,15 @@ A branch `fix/23-test-timeout-child-process` nasce de `origin/main` em `e5b013c`
 
   Das 625 falhas, nenhuma caiu em `refresh-issue-link.spec.ts`, `loop-sections.spec.ts` ou `check-context.spec.ts`, e nenhuma vem de um caso com timeout menor ou igual ao do processo que ele espera. Pela causa:
   - 488 são respostas de hook que mudam sob carga. Delas, 248 citam na mensagem o `git` ou o `gh` lento, ou o prazo do hook, e as outras 240 são asserções sobre uma resposta diferente, compatíveis com a mesma causa;
-  - 110 são casos que passam dos 120 s inteiros, com processos de timeout abaixo disso: ou o caso soma muitos processos, ou espera um `git` de helper sem timeout;
+  - 110 são casos que passam dos 120 s inteiros, com processos de timeout abaixo disso: ou o caso soma muitos processos, ou esperava um `git` de helper sem timeout, que a revisão do Copilot corrigiu;
   - 27 são processos mortos pelo próprio timeout antes do caso, como a correção quer: o gate e o `audit-main` com 60 s, o `plan-to-issue` com 90 s e um gerador do `codegen` com 30 s.
 
   As 598 primeiras foram para a #59, com a tabela por arquivo.
 - **Desvios do plano aprovado:**
-  - o critério 2 vale para os timeouts escritos. Os `git` que os helpers `HookRepo.git` e `TempRepo.git` rodam, e o `sh` do `realGit`, não têm timeout nenhum, e o guarda não tem o que comparar. A #59 ficou com esse ponto;
+  - o critério 2 ficou mais estrito que o plano. A revisão do Copilot mostrou que um processo sem timeout escapava do guarda e que o timeout do caso não o encerra. O guarda passou a exigir o timeout de cada chamada, nos specs e em `test/support/`, e as 19 chamadas sem timeout ganharam um. O item dos processos de helper sem timeout saiu da #59;
   - o `TempRepo` e o `HookRepo` entraram na lista de helpers que disparam processos, junto com os cinco do plano, porque o `gate.spec.ts` e os specs dos hooks os usam. O guarda descobre essa lista pelo corpo de cada export, sem uma lista fixa;
   - a primeira medição do plano, sem `npm ci` na worktree, trouxe 46 falhas falsas do `codegen.spec.ts` por falta do Prettier.
-- **Fica para depois:** a #59, com os prazos dos hooks sob carga, os casos acima de 120 s e os processos de helper sem timeout.
+- **Fica para depois:** a #59, com os prazos dos hooks sob carga e os casos acima de 120 s.
 
   O último critério, a revisão do Copilot na cabeça, as threads e o veredito fresco, é conferido no fluxo da PR, depois deste Learn.
 
@@ -73,4 +74,4 @@ A branch `fix/23-test-timeout-child-process` nasce de `origin/main` em `e5b013c`
 
 - **Criado**: 2026-09-28 (Fase: Intent), do plano vigente na issue #23 (#23)
 - **Status**: Resolved
-- **Atualizado**: 2026-09-28 (Fase: Learn), o guarda confere o timeout de caso de todo spec que dispara processos, os dois specs com o descompasso foram corrigidos, e a medição sob carga foi para a #59 (#23)
+- **Atualizado**: 2026-09-29 (Fase: Build), da revisão do Copilot na PR #61: o guarda confere o timeout de cada chamada de processo, e as 19 chamadas sem timeout ganharam um (#23)
