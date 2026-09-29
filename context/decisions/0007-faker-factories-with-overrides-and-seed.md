@@ -27,9 +27,9 @@
 - **O seed vem do ambiente.** `seedMockData()` lê `MARKETO_MOCK_SEED` e `MARKETO_MOCK_REF_DATE`, com a data padrão `2024-01-01T00:00:00.000Z` (`src/mocks/seed.ts:7`, `:14-17`):
   - sem seed, ela volta sem tocar no faker (`:18-20`), e as respostas são aleatórias;
   - com seed, chama `faker.seed(seed)` e `faker.setDefaultRefDate(refDate)` (`:22-25`);
-  - o boot a chama uma vez, antes de criar a aplicação (`src/main.ts:8`). O README documenta as duas variáveis (`README.md:95-105`).
+  - o boot a chama uma vez, antes de criar a aplicação (`src/main.ts:10`). O README documenta as duas variáveis (`README.md:95-105`).
 - **Tudo isso é código gerado.** `seed.ts`, `request-id.ts` e os dois `index.ts` também saem do gerador (`610e101:scripts/generate-marketo-factories.py:227-297`). A fronteira da [ADR 0004](0004-swagger-as-single-source-with-committed-generated-code.md) vale para eles.
-- **Desde a #6, o seed e o `requestId` são comuns às áreas.** `seed.ts`, `request-id.ts` e um `index.ts` ficam em `src/mocks/` (`scripts/generate-marketo-factories.py:319-325`), e cada área tem as factories dela em `src/<área>/<área>-mocks/factories/`. O `src/main.ts` importa o `seedMockData()` de `./mocks` (`src/main.ts:4`).
+- **Desde a #6, o seed e o `requestId` são comuns às áreas.** `seed.ts`, `request-id.ts` e um `index.ts` ficam em `src/mocks/` (`scripts/generate-marketo-factories.py:319-325`), e cada área tem as factories dela em `src/<área>/<área>-mocks/factories/`. O `src/main.ts` importa o `seedMockData()` de `./mocks` (`src/main.ts:6`).
 - **faker é dependência de runtime.** `@faker-js/faker` `^10.6.0` está em `dependencies` (`package.json:35`) desde o `01ee283`. Os serviços chamam as factories a cada requisição, e esse foi o motivo da mudança (inferido; confirmar). O lockfile o trava em 10.6.0.
 
 ## Racional

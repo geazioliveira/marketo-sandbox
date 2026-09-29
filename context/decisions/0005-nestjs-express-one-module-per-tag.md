@@ -31,6 +31,7 @@
 - **A ordem das rotas é a do Swagger, com uma exceção (#8).** O gerador percorre os caminhos na ordem do documento e anexa cada operação à tag dela nessa ordem (`scripts/generate-marketo-resources.py:448-451`). Dentro de cada tag, uma rota que uma rota anterior do mesmo método capturaria sobe para logo antes da primeira rota que a captura (`order_routes()`, `:97-117`, chamada em `:456`). Uma rota captura outra quando o caminho da outra, com os parâmetros trocados por `{}`, casa com o padrão dela, em que cada `{param}` aceita um segmento, sem distinguir maiúsculas de minúsculas, como o Express (`:81-94`). Nenhum segmento literal tem chaves, então uma rota literal nunca captura uma rota com parâmetro. Se duas rotas se capturam uma à outra, nenhuma ordem serve as duas, e a geração falha com o par (`:110-116`). O controller e o service seguem a mesma ordem. Entre módulos, a ordem continua a alfabética.
 - **Desde a #6, um módulo de recursos por área.** Cada área tem um `<Área>ResourcesModule` em `src/<área>/resources/`, importado por um `<Área>Module` escrito à mão, e o `AppModule` importa os cinco, com o `MultipartModule` escrito à mão da #24 (`src/app.module.ts:10-17`, [Pattern: A forma de um módulo de recurso](../knowledge/patterns/resource-module-shape.md)). São 49 tags e 388 operações. A forma de cada recurso é a mesma.
 - **Desde a #6, o status 2xx documentado.** Quando o menor 2xx que o Swagger declara difere do padrão do Nest (201 num POST, 200 no resto), o método ganha `@HttpCode` (`scripts/generate-marketo-resources.py:134-142`). Os 139 POSTs de assets passaram de 201 para 200, como o Swagger declara, e os 7 de Data Ingestion respondem 202. Uma resposta sem schema, como esse 202, sai sem corpo: o método do service não devolve nada (`:379-381`).
+- **Desde a #25, o corpo até 1 MB, como o Marketo.** O `src/main.ts` chama `useBodyLimit(app)`, de `src/body-limit.ts`, que registra o parser JSON e o urlencoded com `limit: '1mb'` pelo `app.useBodyParser`, antes do `init()`. O urlencoded leva `extended: true`, como o padrão do Nest. A documentação pública do Marketo diz que ele só responde 413 quando o payload passa de 1 MB, e que o sync de leads aceita até 300 registros (Adobe Experience League, páginas "Leads" e "Error Codes"). Acima de 1 MB, o mock também responde 413. O multipart, que o Marketo aceita até 10 MB no Import Lead, não passa por parser nenhum. `test/body-limit.e2e-spec.ts` prova o limite no app, e `test/runtime-defaults.spec.ts` exige o `src/main.ts` chamando a função.
 
 ## Racional
 
@@ -41,6 +42,7 @@
 - **O service exportado.** O `exports` deixa outro módulo injetar o service, o que abre lugar para comportamento ao lado do código gerado ([ADR 0009](0009-behaviour-beside-generated-code.md)) (inferido; confirmar).
 - **Um envelope de sucesso fixo.** O comentário do gerador diz que o envelope do Marketo precisa parecer uma chamada que deu certo, não ruído aleatório (`610e101:scripts/generate-marketo-factories.py:30`).
 - **O status documentado.** O status faz parte do formato documentado que o mock promete, e um cliente que confere o status veria 201 onde o Marketo documenta 200 (inferido; confirmar).
+- **O limite do Marketo, não um folgado.** Com o limite do Marketo, o lite-campaign recebe 413 onde o Marketo real também daria 413, e não descobre isso só em produção. O dono pediu seguir o Marketo nos dois parsers (perguntas 1 e 2 do plano da #25).
 
 ## Alternativas consideradas
 
@@ -54,8 +56,11 @@ O histórico não registra alternativas. As linhas abaixo são as óbvias, e cad
 | Um prefixo por controller, como `@Controller('rest/asset/v1')` | O gerador teria de partir cada caminho em prefixo e resto, e a rota deixaria de ser a cópia literal do Swagger (inferido; confirmar) |
 | A ordem do Swagger sem exceção | 13 rotas nunca chegavam ao próprio handler (medido na #4, na #6 e na #8) |
 | Toda rota literal antes das rotas com parâmetro, numa ordenação estável pelo número de parâmetros | Move 1.308 linhas em 52 arquivos gerados, contra 181 em 16 da regra escolhida, e afasta a ordem do Swagger sem ganho no roteamento (medido no plano da #8) |
+| O limite padrão do Express, 100 KiB | Um lote de 300 leads com campos reais passa dele: 175,7 KiB responderam 413 em `leads.json` e em `persons` (medido na #25) |
+| Um limite folgado, como 10 MB | O mock aceitaria lotes que o Marketo recusa com 413 (pergunta 1 do plano da #25) |
+| Subir só o parser JSON | O mesmo 413 continuaria nos 58 POSTs de assets que leem o form do corpo (pergunta 2 do plano da #25) |
 
-As duas últimas linhas vêm do plano da #8 e foram medidas.
+A quinta e a sexta linhas vêm do plano da #8 e foram medidas; as três últimas, do plano da #25.
 
 ## Consequências
 
@@ -69,7 +74,7 @@ As duas últimas linhas vêm do plano da #8 e foram medidas.
   - **Entre módulos, a ordem alfabética decide.** `GET form/fields.json` e `GET form/programMemberFields.json`, de `form-fields`, casam com `form/:id.json`, de `forms`, e chegam ao próprio handler só porque o `FormFieldsModule` vem antes do `FormsModule` (`src/asset/resources/asset-resources.module.ts:39-40`), na ordem que o gerador dá (`scripts/generate-marketo-resources.py:462-464`). A regra da #8 vale dentro de uma tag, e renomear uma tag pode inverter esse caso (inferido; confirmar). Se inverter, o `test/route-order.e2e-spec.ts` falha.
   - **Desde a #6, o consumidor vê outro status.** Um cliente que esperava o 201 de um POST de assets recebe 200.
   - **Desde a #8, o consumidor vê outra resposta nas 13 rotas.** Onde o tipo documentado da rota literal difere do da rota com parâmetro, como `smartCampaign/rules.json`, que respondia um `ResponseOfSmartCampaignResponseWithFlow` e agora responde o `ResponseOfSmartCampaignRuleType` documentado, a resposta muda de forma.
-  - **Um corpo acima de 100 KiB responde 413**, em qualquer rota. É o limite padrão do body parser do Express, que o `src/main.ts` não muda. Isso já valia antes da #6, e com ela passa a pegar também os lotes de Lead Database e de Data Ingestion: 250 leads com 110,8 KiB em `POST /rest/v1/leads.json` dão 413 (medido na #6; #25).
+  - **Desde a #25, um corpo acima de 1 MB responde 413**, como no Marketo. Até a #25, o limite era o padrão do body parser do Express, 100 KiB, e pegava os lotes de Lead Database e de Data Ingestion: 300 leads com 175,7 KiB em `POST /rest/v1/leads.json` davam 413 (medido na #25). O corpo do 413 é o JSON padrão do Nest, `{"statusCode":413,"message":"request entity too large"}`, e o formato do Marketo nesse caso não foi medido.
   - Nenhum pipe converte ou valida um parâmetro, nem o `@Param('id') id: number` ([ADR 0006](0006-dtos-as-typescript-interfaces.md)).
   - O service ignora os argumentos: a resposta não depende do id nem do corpo, e não há estado. Estado, autenticação e falhas roteirizadas entram com a Track A, e a [ADR 0009](0009-behaviour-beside-generated-code.md), ainda `Proposed`, põe esse comportamento ao lado do código gerado.
   - A forma de controller, service e módulo vem do gerador. Mudá-la é mudar o gerador e regenerar ([ADR 0004](0004-swagger-as-single-source-with-committed-generated-code.md)).
@@ -85,6 +90,7 @@ As duas últimas linhas vêm do plano da #8 e foram medidas.
 - [Anti-pattern: Rota literal declarada depois de uma rota com parâmetro](../knowledge/anti-patterns/literal-route-after-param-route.md)
 - [Anti-pattern: Mensagem de commit que diz menos do que o commit faz](../knowledge/anti-patterns/commit-message-understating-its-content.md)
 - A correção das rotas sombreadas (#8) e as sobras do starter (#9)
+- [Bug: Corpo acima de 100 KiB responde 413](../intent/bug-body-limit-413.md) (#25)
 
 ## Status
 
@@ -94,4 +100,5 @@ As duas últimas linhas vêm do plano da #8 e foram medidas.
 - **Atualizado**: 2026-09-26 (Fase: Learn), um módulo de recursos por área e o `@HttpCode` do status 2xx documentado; as citações do gerador de antes da #6 passaram a levar o commit `610e101`, e as do controller de snippets, do `asset-resources.module.ts` e do `AppModule` seguiram as linhas novas (#6)
 - **Atualizado**: 2026-09-26 (Fase: Learn), a ordem das rotas ganhou a exceção da #8: dentro de uma tag, uma rota sobe para logo antes da primeira que a capturaria, e a geração falha com duas rotas ambíguas; as consequências e as alternativas registram as 13 rotas sombreadas até então e a ordenação medida e descartada, e as citações do gerador seguiram as linhas novas (#8)
 - **Atualizado**: 2026-09-26 (Fase: Build), as citações dos arquivos gerados e dos geradores seguiram as linhas novas, depois do cabeçalho de gerado (#7)
+- **Atualizado**: 2026-09-28 (Fase: Learn), o mock passou a ler corpos JSON e urlencoded até 1 MB, o limite que o Marketo documenta, pelo `useBodyLimit` de `src/body-limit.ts`; a consequência do 413 acima de 100 KiB virou a de 413 acima de 1 MB, e as alternativas ganharam o limite padrão, um limite folgado e só o JSON (#25)
 - **Atualizado**: 2026-09-28 (Fase: Build), as citações dos geradores, do `AppModule`, do `package.json` e do lockfile seguiram as linhas novas (#24)
