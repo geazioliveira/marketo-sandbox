@@ -28,6 +28,10 @@ Uma entrada por mudança mergeada, da mais nova para a mais antiga, escrita no p
   - o alias de toda função que dispara processo é recusado;
   - os specs de `src/` são lidos;
   - só o `vi` do vitest conta.
+- **Da sétima revisão:**
+  - o `vi.setConfig` é lido na ordem, com spreads;
+  - as opções de helper são lidas por `const` e por ternário;
+  - os helpers são registrados pelos nomes de export, default e re-export.
 - **A regra virou pattern:** [Timeouts de testes que disparam processos](../knowledge/patterns/process-test-timeouts.md).
 
 ### Números medidos
