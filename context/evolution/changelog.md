@@ -32,6 +32,7 @@ Uma entrada por mudança mergeada, da mais nova para a mais antiga, escrita no p
   - o `vi.setConfig` é lido na ordem, com spreads;
   - as opções de helper são lidas por `const` e por ternário;
   - os helpers são registrados pelos nomes de export, default e re-export.
+- **Da oitava revisão, o ternário guarda cada ramo.** O timeout de uma chamada guarda todo valor, se algum ramo repassa o de quem chama e se algum não dá nenhum. O default export anônimo de um helper é lido.
 - **A regra virou pattern:** [Timeouts de testes que disparam processos](../knowledge/patterns/process-test-timeouts.md).
 
 ### Números medidos
