@@ -1,0 +1,4 @@
+# The Swagger documents keep the bytes they were committed with, in every checkout:
+# the sha256 each area records in swagger-source.ts is taken from those bytes, and
+# docs/marketo-swagger-user.json already arrives from Adobe with CRLF (#19).
+docs/marketo-swagger-*.json -text
