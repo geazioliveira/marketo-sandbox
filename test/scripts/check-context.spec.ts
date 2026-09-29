@@ -1008,6 +1008,196 @@ describe('scripts/check-context.mjs', () => {
         /^context\/agents\/agent-reviewer\.md:10: status "Accepted" não vale para Agent; use "Active", "Superseded" ou "Deprecated"$/,
       )
     })
+
+    // The guide's "O bloco Status": a decision keeps every Atualizado line,
+    // oldest first; every other typed file keeps only the last (#66). The
+    // typed() block ends at line 10, with its Criado of 2026-09-25 at line 9,
+    // so the first line appended to it is line 11.
+    const updated = (date: string): string =>
+      `- **Atualizado**: ${date} (Fase: Learn), de um teste (#3)`
+    const escaped = (file: string): string => file.replace(/[.]/g, '\\.')
+
+    it.each([
+      [
+        'context/intent/project-intent.md',
+        'Project intent: sandbox',
+        'In Progress',
+      ],
+      ['context/intent/feature-loop.md', 'Feature: Loop', 'Completed'],
+      ['context/intent/bug-link.md', 'Bug: Link', 'Resolved'],
+      ['context/knowledge/patterns/gate.md', 'Pattern: Gate', 'Active'],
+      [
+        'context/knowledge/anti-patterns/double.md',
+        'Anti-pattern: Dublê',
+        'Active',
+      ],
+      ['context/agents/agent-reviewer.md', 'Agent: Revisor', 'Active'],
+    ])(
+      'refuses in %s a second Atualizado line',
+      async (file, title, status) => {
+        const run = await check({
+          [file]: `${typed(title, status)}${lines(
+            updated('2026-09-26'),
+            updated('2026-09-27'),
+          )}`,
+        })
+        expectProblems(
+          run,
+          new RegExp(
+            `^${escaped(file)}:12: linha "- \\*\\*Atualizado\\*\\*:" a mais no bloco Status \\(a primeira está na linha 11\\); fora das decisões, o bloco guarda só a última linha Atualizado$`,
+          ),
+        )
+      },
+    )
+
+    it('names every Atualizado line after the first outside a decision', async () => {
+      const run = await check({
+        'context/knowledge/patterns/gate.md': `${typed('Pattern: Gate', 'Active')}${lines(
+          updated('2026-09-26'),
+          updated('2026-09-27'),
+          updated('2026-09-28'),
+        )}`,
+      })
+      expectProblems(
+        run,
+        /^context\/knowledge\/patterns\/gate\.md:12: linha "- \*\*Atualizado\*\*:" a mais no bloco Status \(a primeira está na linha 11\)/,
+        /^context\/knowledge\/patterns\/gate\.md:13: linha "- \*\*Atualizado\*\*:" a mais no bloco Status \(a primeira está na linha 11\)/,
+      )
+    })
+
+    it('accepts every Atualizado line of a decision, oldest first, the same day repeated', async () => {
+      const run = await check({
+        'context/decisions/0001-first.md': `${typed('ADR 0001: Primeira', 'Accepted')}${lines(
+          updated('2026-09-25'),
+          updated('2026-09-26'),
+          updated('2026-09-26'),
+          updated('2026-10-01'),
+        )}`,
+      })
+      expect(run.stdout + run.stderr).toMatch(/nenhum problema/)
+      expect(run.status).toBe(0)
+    })
+
+    it('refuses a decision Atualizado line dated before the line above it', async () => {
+      const run = await check({
+        'context/decisions/0001-first.md': `${typed('ADR 0001: Primeira', 'Accepted')}${lines(
+          updated('2026-09-27'),
+          updated('2026-09-26'),
+        )}`,
+      })
+      expectProblems(
+        run,
+        /^context\/decisions\/0001-first\.md:12: linha "- \*\*Atualizado\*\*:" de 2026-09-26 antes da de 2026-09-27 \(linha 11\); as linhas Atualizado vão da mais antiga para a mais nova, e nenhuma vem antes do Criado$/,
+      )
+    })
+
+    it.each([
+      ['context/decisions/0001-first.md', 'ADR 0001: Primeira', 'Accepted'],
+      ['context/knowledge/patterns/gate.md', 'Pattern: Gate', 'Active'],
+    ])(
+      'refuses in %s an Atualizado line dated before the Criado',
+      async (file, title, status) => {
+        const run = await check({
+          [file]: `${typed(title, status)}${lines(updated('2026-09-24'))}`,
+        })
+        expectProblems(
+          run,
+          new RegExp(
+            `^${escaped(file)}:11: linha "- \\*\\*Atualizado\\*\\*:" de 2026-09-24 antes do Criado de 2026-09-25 \\(linha 9\\); as linhas Atualizado vão da mais antiga para a mais nova, e nenhuma vem antes do Criado$`,
+          ),
+        )
+      },
+    )
+
+    it.each([
+      ['no phase', '- **Atualizado**: 2026-09-26, de um teste (#3)'],
+      [
+        'a phase out of the vocabulary',
+        '- **Atualizado**: 2026-09-26 (Fase: Review), de um teste (#3)',
+      ],
+      [
+        'a date in another shape',
+        '- **Atualizado**: 26/09/2026 (Fase: Learn), de um teste (#3)',
+      ],
+      [
+        'a date no calendar has',
+        '- **Atualizado**: 2026-02-30 (Fase: Learn), de um teste (#3)',
+      ],
+      [
+        'an ordered list',
+        '1. **Atualizado**: 2026-09-26 (Fase: Learn), de um teste (#3)',
+      ],
+      [
+        'a blockquote',
+        '> **Atualizado**: 2026-09-26 (Fase: Learn), de um teste (#3)',
+      ],
+      [
+        'bold with underscores',
+        '- __Atualizado__: 2026-09-26 (Fase: Learn), de um teste (#3)',
+      ],
+      [
+        'the colon inside the bold',
+        '- **Atualizado:** 2026-09-26 (Fase: Learn), de um teste (#3)',
+      ],
+      [
+        'an indented item',
+        '  - **Atualizado**: 2026-09-26 (Fase: Learn), de um teste (#3)',
+      ],
+    ])(
+      'refuses an Atualizado line with %s inside the block',
+      async (_case, line) => {
+        const run = await check({
+          'context/decisions/0001-first.md': `${typed('ADR 0001: Primeira', 'Accepted')}${lines(line)}`,
+        })
+        const quoted = line.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+        expectProblems(
+          run,
+          new RegExp(
+            `^context/decisions/0001-first\\.md:11: linha Atualizado fora do formato "- \\*\\*Atualizado\\*\\*: AAAA-MM-DD \\(Fase: Intent \\| Build \\| Learn\\), …": "${quoted}"$`,
+          ),
+        )
+      },
+    )
+
+    it('counts an Atualizado line of another shape outside a decision', async () => {
+      // A quoted or numbered line is still a second Atualizado line: the
+      // count must not be dodged by writing it in another shape.
+      const run = await check({
+        'context/knowledge/patterns/gate.md': `${typed('Pattern: Gate', 'Active')}${lines(
+          updated('2026-09-26'),
+          '> **Atualizado**: 2026-09-27 (Fase: Learn), de um teste (#3)',
+        )}`,
+      })
+      expectProblems(
+        run,
+        /^context\/knowledge\/patterns\/gate\.md:12: linha Atualizado fora do formato /,
+        /^context\/knowledge\/patterns\/gate\.md:12: linha "- \*\*Atualizado\*\*:" a mais no bloco Status \(a primeira está na linha 11\)/,
+      )
+    })
+
+    it('reads the Atualizado lines outside code and comments only', async () => {
+      // A pattern that shows the block in an example still has one line.
+      const run = await check({
+        'context/knowledge/patterns/gate.md': lines(
+          '# Pattern: Gate',
+          '',
+          '## Status',
+          '',
+          '- **Criado**: 2026-09-25 (Fase: Build), de um teste (#3)',
+          '- **Status**: Active',
+          '<!-- Antes:',
+          updated('2026-09-26'),
+          '-->',
+          '```markdown',
+          updated('2026-09-01'),
+          '- **Atualizado**: 26/09/2026, sem fase',
+          '```',
+          updated('2026-09-27'),
+        ),
+      })
+      expect(run.stdout + run.stderr).toMatch(/nenhum problema/)
+      expect(run.status).toBe(0)
+    })
   })
 
   describe('(c) the decision index', () => {
@@ -1259,6 +1449,32 @@ describe('the context vocabularies in scripts/loop-sections.mjs', () => {
     }
     expect([...typedTemplates.keys()].sort()).toEqual([...kinds].sort())
     expect(changelogEntries).toBe(1)
+  })
+
+  it('keep every Atualizado line in a decision only, as the Context Mesh guide says', () => {
+    // The checker holds the rule the guide states for people (#66).
+    expect(
+      contextKinds
+        .filter((rule) => rule.keepsEveryUpdate)
+        .map(({ kind }) => kind),
+    ).toEqual(['ADR'])
+    expect(contextKindOf('decisions/0001-first.md')?.keepsEveryUpdate).toBe(
+      true,
+    )
+    expect(contextKindOf('knowledge/patterns/gate.md')?.keepsEveryUpdate).toBe(
+      false,
+    )
+    const guide = readFileSync(
+      path.join(projectRoot, 'context', 'README.md'),
+      'utf8',
+    )
+    const [, afterBlock = ''] = guide.split('\n## O bloco Status\n')
+    const [section = ''] = afterBlock.split('\n## ')
+    expect(section).toContain(
+      'Uma decisão mantém todas as linhas `Atualizado`, da mais antiga para a mais nova',
+    )
+    expect(section).toContain('Os outros arquivos mantêm só a última')
+    expect(section).toContain('`npm run check:context`')
   })
 
   it('name every title kind the Context Mesh guide shows', () => {
