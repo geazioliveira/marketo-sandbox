@@ -8,11 +8,12 @@ import ts from 'typescript'
 // outlasts that timeout, so a slow child is killed first and fails the case
 // with its output. vitest.config.ts keeps vitest's 5 s default, which catches
 // a hung pure test fast, so each spec that spawns declares its own case
-// timeout with vi.setConfig. This guard parses the specs and test/support/
-// with the TypeScript compiler, so comments, strings and template literals
-// read as they run, and checks both rules on every process call it finds.
-// What it cannot follow, a process function used other than by a direct
-// call, it refuses.
+// timeout with vi.setConfig. This guard reads the specs and test/support/
+// with the TypeScript compiler: the parser, so comments, strings and
+// template literals read as they run, and the binder, so each name resolves
+// to what it is bound to where it is used. It checks both rules on every
+// process call it finds, and refuses a process function used other than by
+// a direct call, which it cannot follow.
 
 const root = path.resolve(__dirname, '..')
 
@@ -51,14 +52,77 @@ const isChildProcess = (module: string): boolean =>
 // ---------------------------------------------------------------------------
 // Reading the source
 
-const parse = (file: string, source: string): ts.SourceFile =>
-  ts.createSourceFile(
-    file,
-    source,
-    ts.ScriptTarget.Latest,
-    true,
-    /\.[cm]?js$/.test(file) ? ts.ScriptKind.JS : ts.ScriptKind.TS,
-  )
+/** A source file to read, by the path it is reported with. */
+interface Source {
+  file: string
+  source: string
+}
+
+/**
+ * The files parsed and bound together, with a checker to resolve names. No
+ * lib and no module resolution: the guard only needs each file's own
+ * bindings, and an import resolves to its import declaration.
+ */
+function compile(sources: Source[]): {
+  checker: ts.TypeChecker
+  files: ts.SourceFile[]
+} {
+  const byName = new Map(sources.map((source) => [source.file, source.source]))
+  const parsed = new Map<string, ts.SourceFile>()
+  const lookup = (name: string): string | undefined =>
+    byName.has(name)
+      ? name
+      : byName.has(name.slice(1))
+        ? name.slice(1)
+        : undefined
+  const host: ts.CompilerHost = {
+    getSourceFile: (name) => {
+      const file = lookup(name)
+      if (file === undefined) return undefined
+      if (!parsed.has(file))
+        parsed.set(
+          file,
+          ts.createSourceFile(
+            file,
+            byName.get(file)!,
+            ts.ScriptTarget.Latest,
+            true,
+            /\.[cm]?js$/.test(file) ? ts.ScriptKind.JS : ts.ScriptKind.TS,
+          ),
+        )
+      return parsed.get(file)
+    },
+    getDefaultLibFileName: () => 'lib.d.ts',
+    writeFile: () => undefined,
+    getCurrentDirectory: () => '/',
+    getCanonicalFileName: (name) => name,
+    useCaseSensitiveFileNames: () => true,
+    getNewLine: () => '\n',
+    fileExists: (name) => lookup(name) !== undefined,
+    readFile: (name) => {
+      const file = lookup(name)
+      return file === undefined ? undefined : byName.get(file)
+    },
+  }
+  const program = ts.createProgram({
+    rootNames: sources.map((source) => source.file),
+    options: {
+      noLib: true,
+      noResolve: true,
+      allowJs: true,
+      types: [],
+      target: ts.ScriptTarget.Latest,
+    },
+    host,
+  })
+  const checker = program.getTypeChecker()
+  return {
+    checker,
+    files: sources.map((source) =>
+      host.getSourceFile(source.file, ts.ScriptTarget.Latest)!,
+    ),
+  }
+}
 
 /** `file:line` of a node. */
 const where = (node: ts.Node): string => {
@@ -179,13 +243,123 @@ function importsOf(file: ts.SourceFile): Imports {
 
 /** How a file's names resolve. */
 interface Scope {
-  imports: Imports
+  checker: ts.TypeChecker
   /** The test/support/ module an import path names, if it names one. */
   supportOf: (module: string) => string | undefined
-  /** In a test/support/ module: its name and its own exports. */
-  own?: { module: string; names: Set<string> }
+  /** In a test/support/ module: its name. */
+  module?: string
   /** test/support/hooks.ts's named timeouts, by the name it exports. */
   names: Map<string, number>
+}
+
+/** What a name is bound to where it is used, as far as the guard reads it. */
+type Binding =
+  | { kind: 'import'; module: string; imported: string }
+  | { kind: 'namespace'; module: string }
+  | { kind: 'export'; name: string; initializer?: ts.Expression }
+  | {
+      kind: 'parameter'
+      parameter: ts.ParameterDeclaration
+      initializer: ts.Expression | undefined
+      whole: boolean
+    }
+  | { kind: 'const'; initializer: ts.Expression }
+
+/** A top-level declaration the module exports, by its name. */
+function exportedDeclaration(declaration: ts.Declaration): string | undefined {
+  const statement = ts.isVariableDeclaration(declaration)
+    ? declaration.parent.parent
+    : declaration
+  if (
+    !ts.isSourceFile(statement.parent) ||
+    !ts.canHaveModifiers(statement) ||
+    !(ts.getModifiers(statement) ?? []).some(
+      (modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword,
+    )
+  )
+    return undefined
+  const name = (declaration as ts.NamedDeclaration).name
+  return name !== undefined && ts.isIdentifier(name) ? name.text : undefined
+}
+
+/**
+ * What `id` is bound to, by the checker: the declaration it resolves to
+ * where it is used. A local `spawnTimeout` shadows the imported one only
+ * where it is visible.
+ */
+function bindingOf(id: ts.Identifier, scope: Scope): Binding | undefined {
+  const symbol =
+    ts.isShorthandPropertyAssignment(id.parent) && id.parent.name === id
+      ? scope.checker.getShorthandAssignmentValueSymbol(id.parent)
+      : scope.checker.getSymbolAtLocation(id)
+  const declaration = symbol?.declarations?.[0]
+  if (declaration === undefined) return undefined
+  if (ts.isImportSpecifier(declaration)) {
+    const node = declaration.parent.parent.parent
+    return declaration.isTypeOnly ||
+      node.importClause?.isTypeOnly === true ||
+      !ts.isStringLiteral(node.moduleSpecifier)
+      ? undefined
+      : {
+          kind: 'import',
+          module: node.moduleSpecifier.text,
+          imported: (declaration.propertyName ?? declaration.name).text,
+        }
+  }
+  if (ts.isNamespaceImport(declaration) || ts.isImportClause(declaration)) {
+    const node = ts.isNamespaceImport(declaration)
+      ? declaration.parent.parent
+      : declaration.parent
+    return node.importClause?.isTypeOnly === true ||
+      !ts.isStringLiteral(node.moduleSpecifier)
+      ? undefined
+      : { kind: 'namespace', module: node.moduleSpecifier.text }
+  }
+  if (ts.isBindingElement(declaration)) {
+    const owner = declaration.parent.parent
+    const module =
+      ts.isVariableDeclaration(owner) && owner.initializer !== undefined
+        ? loadedModule(owner.initializer)
+        : undefined
+    if (module !== undefined)
+      return {
+        kind: 'import',
+        module,
+        imported: (declaration.propertyName ?? declaration.name).getText(),
+      }
+    return ts.isParameter(owner)
+      ? {
+          kind: 'parameter',
+          parameter: owner,
+          initializer: declaration.initializer,
+          whole: false,
+        }
+      : undefined
+  }
+  if (ts.isParameter(declaration))
+    return {
+      kind: 'parameter',
+      parameter: declaration,
+      initializer: declaration.initializer,
+      whole: true,
+    }
+  const constant =
+    ts.isVariableDeclaration(declaration) &&
+    declaration.initializer !== undefined &&
+    (ts.getCombinedNodeFlags(declaration) & ts.NodeFlags.Const) !== 0
+      ? declaration.initializer
+      : undefined
+  const exported =
+    scope.module === undefined ? undefined : exportedDeclaration(declaration)
+  if (exported !== undefined)
+    return { kind: 'export', name: exported, initializer: constant }
+  if (ts.isVariableDeclaration(declaration) && declaration.initializer) {
+    const module = loadedModule(declaration.initializer)
+    if (module !== undefined) return { kind: 'namespace', module }
+  }
+  return constant === undefined
+    ? undefined
+    : { kind: 'const', initializer: constant }
 }
 
 /** What an expression names: a child_process function, or a test/support/ export. */
@@ -212,8 +386,18 @@ function declares(node: ts.Identifier): boolean {
   )
 }
 
+/** The module an expression names: a namespace binding, or a loaded module. */
+function moduleOf(expression: ts.Expression, scope: Scope): string | undefined {
+  expression = unwrap(expression)
+  if (ts.isIdentifier(expression)) {
+    const binding = bindingOf(expression, scope)
+    return binding?.kind === 'namespace' ? binding.module : undefined
+  }
+  return loadedModule(expression)
+}
+
 /**
- * What an expression names: an imported name, one of the module's own
+ * What an expression names: a bound import, one of the module's own
  * exports, or `receiver.name` where the receiver is a namespace or a loaded
  * module (`require('node:child_process').spawnSync`).
  */
@@ -227,16 +411,14 @@ function targetOf(expression: ts.Node, scope: Scope): Target | undefined {
       : { kind: 'helper', module: support, name }
   }
   if (ts.isIdentifier(expression) && !declares(expression)) {
-    const named = scope.imports.named.get(expression.text)
-    if (named !== undefined) return origin(named.module, named.imported)
-    if (scope.own?.names.has(expression.text) === true)
-      return { kind: 'helper', module: scope.own.module, name: expression.text }
+    const binding = bindingOf(expression, scope)
+    if (binding?.kind === 'import')
+      return origin(binding.module, binding.imported)
+    if (binding?.kind === 'export' && scope.module !== undefined)
+      return { kind: 'helper', module: scope.module, name: binding.name }
   }
   if (ts.isPropertyAccessExpression(expression)) {
-    const receiver = unwrap(expression.expression)
-    const module = ts.isIdentifier(receiver)
-      ? scope.imports.namespaces.get(receiver.text)
-      : loadedModule(receiver)
+    const module = moduleOf(expression.expression, scope)
     if (module !== undefined) return origin(module, expression.name.text)
   }
   return undefined
@@ -246,17 +428,6 @@ function targetOf(expression: ts.Node, scope: Scope): Target | undefined {
 const calledDirectly = (node: ts.Node): boolean =>
   ts.isCallExpression(wrapped(node).parent) &&
   (wrapped(node).parent as ts.CallExpression).expression === wrapped(node)
-
-/**
- * The functions a node sits in, the nearest first. A closure sees its outer
- * functions' parameters: exec's spawn runs inside a `new Promise` callback.
- */
-function enclosingFunctions(node: ts.Node): ts.SignatureDeclaration[] {
-  const found: ts.SignatureDeclaration[] = []
-  for (let parent = node.parent; parent !== undefined; parent = parent.parent)
-    if (ts.isFunctionLike(parent)) found.push(parent)
-  return found
-}
 
 /** A type (literal, or declared in the same file by name) with a `timeout` member. */
 function hasTimeoutMember(
@@ -282,87 +453,39 @@ function hasTimeoutMember(
   return false
 }
 
-const declarationCache = new WeakMap<
-  ts.SourceFile,
-  Map<string, ts.VariableDeclaration[]>
->()
-
-/** The variables a file declares under `name`, at any depth. */
-function declarationsOf(
-  file: ts.SourceFile,
-  name: string,
-): ts.VariableDeclaration[] {
-  let byName = declarationCache.get(file)
-  if (byName === undefined) {
-    byName = new Map()
-    for (const node of walk(file))
-      if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name))
-        byName.set(node.name.text, [
-          ...(byName.get(node.name.text) ?? []),
-          node,
-        ])
-    declarationCache.set(file, byName)
-  }
-  return byName.get(name) ?? []
-}
-
 /**
- * The value of `expression` in ms, if the guard can read it as a number. A
- * name resolves where it is bound: a parameter of a function around it (its
- * default, if it has one), a declaration in the file, or an import of
- * test/support/hooks.ts's named timeouts. A local `processTimeout` is the
- * local one, not hooks.ts's.
+ * The value of `expression` in ms, if the guard can read it as a number: a
+ * number literal, or a name bound to one where it is used (a parameter's
+ * default, a `const`, or an import of test/support/hooks.ts's named
+ * timeouts).
  */
 function valueOf(
   expression: ts.Expression,
   scope: Scope,
-  seen: Set<string> = new Set(),
+  seen: Set<ts.Node> = new Set(),
 ): number | undefined {
   expression = unwrap(expression)
   if (ts.isNumericLiteral(expression)) return Number(expression.text)
-  if (!ts.isIdentifier(expression) || seen.has(expression.text))
-    return undefined
-  const name = expression.text
-  const next = new Set([...seen, name])
-  for (const fn of enclosingFunctions(expression))
-    for (const parameter of fn.parameters) {
-      const bound = ts.isIdentifier(parameter.name)
-        ? parameter.name.text === name
-          ? parameter
-          : undefined
-        : ts.isObjectBindingPattern(parameter.name)
-          ? parameter.name.elements.find(
-              (element) =>
-                ts.isIdentifier(element.name) && element.name.text === name,
-            )
-          : undefined
-      if (bound !== undefined)
-        return bound.initializer === undefined
-          ? undefined
-          : valueOf(bound.initializer, scope, next)
-    }
-  const declarations = declarationsOf(expression.getSourceFile(), name)
-  if (declarations.length > 0)
-    return declarations.length === 1 &&
-      declarations[0].initializer !== undefined
-      ? valueOf(declarations[0].initializer, scope, next)
-      : undefined
-  const named = scope.imports.named.get(name)
-  return named !== undefined && scope.supportOf(named.module) === 'hooks'
-    ? scope.names.get(named.imported)
-    : undefined
+  if (!ts.isIdentifier(expression)) return undefined
+  const binding = bindingOf(expression, scope)
+  const next = (initializer: ts.Expression | undefined) =>
+    initializer === undefined || seen.has(initializer)
+      ? undefined
+      : valueOf(initializer, scope, new Set([...seen, initializer]))
+  if (binding?.kind === 'parameter') return next(binding.initializer)
+  if (binding?.kind === 'const' || binding?.kind === 'export')
+    return next(binding.initializer)
+  if (binding?.kind === 'import' && scope.supportOf(binding.module) === 'hooks')
+    return scope.names.get(binding.imported)
+  return undefined
 }
 
 /**
- * `expression` is a parameter of a function around the call that hands the
- * caller's options on: `options` typed with a `timeout`, its
- * `options.timeout`, or a `timeout` destructured from such options with no
- * default.
+ * `expression` hands the caller's options on: a parameter typed with a
+ * `timeout` (or its `options.timeout`), or a `timeout` destructured from
+ * such a parameter with no default.
  */
-function delegates(
-  expression: ts.Expression,
-  functions: ts.SignatureDeclaration[],
-): boolean {
+function delegates(expression: ts.Expression, scope: Scope): boolean {
   expression = unwrap(expression)
   if (
     ts.isPropertyAccessExpression(expression) &&
@@ -370,21 +493,11 @@ function delegates(
   )
     expression = unwrap(expression.expression)
   if (!ts.isIdentifier(expression)) return false
-  const file = expression.getSourceFile()
-  return functions.some((fn) =>
-    fn.parameters.some((parameter) =>
-      ts.isIdentifier(parameter.name)
-        ? parameter.name.text === expression.text &&
-          hasTimeoutMember(parameter.type, file)
-        : ts.isObjectBindingPattern(parameter.name) &&
-          parameter.name.elements.some(
-            (element) =>
-              ts.isIdentifier(element.name) &&
-              element.name.text === expression.text &&
-              element.initializer === undefined &&
-              hasTimeoutMember(parameter.type, file),
-          ),
-    ),
+  const binding = bindingOf(expression, scope)
+  return (
+    binding?.kind === 'parameter' &&
+    (binding.whole || binding.initializer === undefined) &&
+    hasTimeoutMember(binding.parameter.type, expression.getSourceFile())
   )
 }
 
@@ -396,7 +509,7 @@ type CallTimeout =
   | { kind: 'delegated' }
 
 /**
- * The timeout in a call's arguments, read in order as the object is built: a
+ * The timeout in a call's options, read in order as the object is built: a
  * `timeout` property, or a spread that comes after it and may replace it.
  * A spread of the caller's options (a parameter typed with a `timeout`)
  * hands the timeout to the caller; a spread the guard cannot see into makes
@@ -408,14 +521,13 @@ function timeoutOf(
   target: Target | undefined,
   helperOf: (target: Target | undefined) => Helper | undefined,
 ): CallTimeout {
-  const functions = enclosingFunctions(call)
   let timeout: CallTimeout = { kind: 'none' }
   const read = (object: ts.ObjectLiteralExpression): void => {
     for (const property of object.properties) {
       if (ts.isSpreadAssignment(property)) {
         const spread = unwrap(property.expression)
         if (ts.isObjectLiteralExpression(spread)) read(spread)
-        else if (delegates(spread, functions)) timeout = { kind: 'delegated' }
+        else if (delegates(spread, scope)) timeout = { kind: 'delegated' }
         else timeout = { kind: 'unread', text: `...${spread.getText()}` }
         continue
       }
@@ -426,7 +538,7 @@ function timeoutOf(
           : undefined
       if (value === undefined || property.name?.getText() !== 'timeout')
         continue
-      if (delegates(value, functions)) {
+      if (delegates(value, scope)) {
         timeout = { kind: 'delegated' }
         continue
       }
@@ -450,7 +562,7 @@ function timeoutOf(
   for (const argument of options) {
     const value = unwrap(argument)
     if (ts.isObjectLiteralExpression(value)) read(value)
-    else if (delegates(value, functions)) timeout = { kind: 'delegated' }
+    else if (delegates(value, scope)) timeout = { kind: 'delegated' }
   }
   return timeout
 }
@@ -478,6 +590,16 @@ function indirectUses(
       `${where(node)}: ${what} fora de uma chamada direta: o guarda não segue o processo; chame a função pelo nome`,
     )
   }
+  const processModule = (module: string | undefined): boolean =>
+    module !== undefined &&
+    (isChildProcess(module) || scope.supportOf(module) !== undefined)
+  const asReceiver = (node: ts.Node): boolean => {
+    const parent = wrapped(node).parent
+    return (
+      ts.isPropertyAccessExpression(parent) &&
+      parent.expression === wrapped(node)
+    )
+  }
   for (const node of walk(root)) {
     if (
       (ts.isIdentifier(node) || ts.isPropertyAccessExpression(node)) &&
@@ -486,29 +608,20 @@ function indirectUses(
     )
       refuse(node, node.getText())
     if (ts.isIdentifier(node) && !declares(node)) {
-      const module = scope.imports.namespaces.get(node.text)
-      const parent = wrapped(node).parent
+      const binding = bindingOf(node, scope)
       if (
-        module !== undefined &&
-        (isChildProcess(module) || scope.supportOf(module) !== undefined) &&
-        !(
-          ts.isPropertyAccessExpression(parent) &&
-          parent.expression === wrapped(node)
-        )
+        binding?.kind === 'namespace' &&
+        processModule(binding.module) &&
+        !asReceiver(node)
       )
         refuse(node, node.text)
     }
     if (ts.isCallExpression(node)) {
       const module = loadedModule(node)
-      const parent = wrapped(node).parent
       if (
-        module !== undefined &&
-        (isChildProcess(module) || scope.supportOf(module) !== undefined) &&
-        !ts.isVariableDeclaration(parent) &&
-        !(
-          ts.isPropertyAccessExpression(parent) &&
-          parent.expression === wrapped(node)
-        )
+        processModule(module) &&
+        !ts.isVariableDeclaration(wrapped(node).parent) &&
+        !asReceiver(node)
       )
         refuse(node, node.getText())
     }
@@ -520,10 +633,8 @@ function indirectUses(
 // test/support/
 
 /** A test/support/ module, by the name a spec imports it with. */
-interface SupportModule {
+interface SupportModule extends Source {
   name: string
-  file: string
-  source: string
 }
 
 /** A module file of test/support/, TypeScript or JavaScript. */
@@ -599,21 +710,19 @@ function analyzeSupport(
     scope: Scope
     helper: Helper
   }
+  const { checker, files } = compile(modules)
   const helpers = new Map<string, Map<string, Helper>>()
   const exports: Export[] = []
-  const files: { file: ts.SourceFile; scope: Scope }[] = []
-  for (const module of modules) {
-    const file = parse(module.file, module.source)
+  const scopes: { file: ts.SourceFile; scope: Scope }[] = []
+  modules.forEach((module, index) => {
+    const file = files[index]
     const scope: Scope = {
-      imports: importsOf(file),
+      checker,
       supportOf: supportFromSupport,
-      own: {
-        module: module.name,
-        names: new Set(file.statements.flatMap(exportedNames)),
-      },
+      module: module.name,
       names,
     }
-    files.push({ file, scope })
+    scopes.push({ file, scope })
     const byName = new Map<string, Helper>()
     helpers.set(module.name, byName)
     for (const statement of file.statements)
@@ -627,7 +736,7 @@ function analyzeSupport(
         byName.set(name, helper)
         exports.push({ statement, scope, helper })
       }
-  }
+  })
   const helperOf = (target: Target | undefined): Helper | undefined =>
     target?.kind === 'helper'
       ? helpers.get(target.module)?.get(target.name)
@@ -675,6 +784,7 @@ function analyzeSupport(
       const calls = processCalls(entry)
       const used = usedBy(entry)
       const next: Helper = {
+        ...entry.helper,
         spawns:
           [...walk(entry.statement)].some(
             (node) => targetOf(node, entry.scope)?.kind === 'api',
@@ -708,7 +818,7 @@ function analyzeSupport(
         return []
       }),
     ),
-    ...files.flatMap(({ file, scope }) => indirectUses(file, scope, required)),
+    ...scopes.flatMap(({ file, scope }) => indirectUses(file, scope, required)),
   ]
   return { helpers, problems: [...new Set(problems)] }
 }
@@ -763,23 +873,21 @@ function auditSpec(
   helpers: Map<string, Map<string, Helper>>,
   names: Map<string, number>,
 ): string[] {
-  const file = parse(fileName, source)
-  const scope: Scope = {
-    imports: importsOf(file),
-    supportOf: supportFromSpec,
-    names,
-  }
+  const { checker, files } = compile([{ file: fileName, source }])
+  const file = files[0]
+  const scope: Scope = { checker, supportOf: supportFromSpec, names }
   const helperOf = (target: Target | undefined): Helper | undefined =>
     target?.kind === 'helper'
       ? helpers.get(target.module)?.get(target.name)
       : undefined
   const required = (target: Target | undefined): boolean =>
     target?.kind === 'api' || helperOf(target)?.needsTimeout === true
+  const imports = importsOf(file)
   /** The spawning helpers the spec names, and whether it names child_process. */
   const used = new Map<string, Helper>()
   let startsProcesses = [
-    ...[...scope.imports.named.values()].map(({ module }) => module),
-    ...scope.imports.namespaces.values(),
+    ...[...imports.named.values()].map(({ module }) => module),
+    ...imports.namespaces.values(),
   ].some(isChildProcess)
   for (const node of walk(file)) {
     const target = targetOf(node, scope)
@@ -847,7 +955,12 @@ const read = (file: string): string =>
   readFileSync(path.join(root, file), 'utf8')
 
 const names = namedTimeouts(
-  parse('test/support/hooks.ts', read('test/support/hooks.ts')),
+  ts.createSourceFile(
+    'test/support/hooks.ts',
+    read('test/support/hooks.ts'),
+    ts.ScriptTarget.Latest,
+    true,
+  ),
 )
 
 const support = analyzeSupport(
@@ -936,7 +1049,7 @@ const indirectAt = (at: string, what: string): string =>
 describe('importsOf', () => {
   it('reads aliases, merges repeated imports and leaves type-only names out', () => {
     const imports = importsOf(
-      parse(
+      ts.createSourceFile(
         'x.ts',
         lines(
           `import { exec as run, type HookRepo } from '../support/temp-repo'`,
@@ -946,6 +1059,8 @@ describe('importsOf', () => {
           `const { spawnSync: sync } = await import('node:child_process')`,
           `const repo = require('../support/temp-repo')`,
         ),
+        ts.ScriptTarget.Latest,
+        true,
       ),
     )
     expect([...imports.named]).toEqual([
@@ -1162,6 +1277,22 @@ describe('analyzeSupport', () => {
     expect(problems).toEqual([untimedAt('fake.mjs:2', 'spawnSync')])
   })
 
+  it('reads a name where it is bound, in its own scope', () => {
+    // A `const limit` in another function is not the parameter here.
+    expect(
+      analyze([
+        'temp-repo',
+        lines(
+          `import { spawnSync } from 'node:child_process'`,
+          `export function run(limit: number) {`,
+          `  return spawnSync('git', [], { timeout: limit })`,
+          `}`,
+          `export function other() { const limit = 1_000; return limit }`,
+        ),
+      ]).problems,
+    ).toEqual([unreadAt('temp-repo.ts:3', 'spawnSync', 'limit')])
+  })
+
   it('refuses a process function it cannot follow', () => {
     expect(
       analyze([
@@ -1357,6 +1488,31 @@ describe('auditSpec', () => {
         `vi.setConfig({ testTimeout: 120_000 })`,
       ),
     ).toEqual([unreadAt('x.spec.ts:2', 'spawnSync', 'spawnTimeout')])
+  })
+
+  it('resolves a name in its own scope: a sibling declaration does not shadow it', () => {
+    // The top-level spawnSync takes hooks.ts's 90 s spawnTimeout; the
+    // 1 s one lives only inside other().
+    expect(
+      audit(
+        `import { spawnSync } from 'node:child_process'`,
+        `import { spawnTimeout } from '../support/hooks'`,
+        `spawnSync('git', [], { timeout: spawnTimeout })`,
+        `function other() { const spawnTimeout = 1_000; return spawnTimeout }`,
+        `vi.setConfig({ testTimeout: 60_000 })`,
+      ),
+    ).toEqual([
+      'x.spec.ts:5: o caso tem 60000 ms, e o processo de x.spec.ts:3 tem 90000 ms: o caso precisa esperar mais que o processo',
+    ])
+    // A local exec in another function does not hide the imported one.
+    expect(
+      audit(
+        `import { exec } from '../support/temp-repo'`,
+        `vi.setConfig({ testTimeout: 60_000 })`,
+        `function local() { const exec = (x: string) => x; return exec('git') }`,
+        `await exec('git')`,
+      ),
+    ).toEqual([untimedAt('x.spec.ts:4', 'exec')])
   })
 
   it('accepts a case timeout above every process timeout, by number or by name', () => {
