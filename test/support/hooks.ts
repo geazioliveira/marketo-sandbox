@@ -619,6 +619,8 @@ export class HookRepo {
       env: this.gitEnv(),
       timeout: spawnTimeout,
     })
+    if (run.status !== 0)
+      throw new Error(`git rev-parse falhou em ${dir}: ${run.stderr}`)
     return { dir, gitDir: run.stdout.trim() }
   }
 
