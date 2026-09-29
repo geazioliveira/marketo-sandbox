@@ -208,11 +208,18 @@ export function schemaErrors(
   if (type === 'object') {
     const record = value as Record<string, unknown>
     const properties = schema.properties ?? {}
-    for (const name of schema.required ?? []) {
+    // Every property, not only the required ones: the factories fill each
+    // declared property (ADR 0007), and with the envelopes declaring nothing
+    // required, `{}` would otherwise pass for most responses.
+    const declared = new Set([
+      ...(schema.required ?? []),
+      ...Object.keys(properties),
+    ])
+    for (const name of declared) {
       if (!(name in record)) {
         errors.push({
           at,
-          message: `missing required ${name}`,
+          message: `missing ${name}`,
           definition: owner,
           missing: name,
         })
