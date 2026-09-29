@@ -196,6 +196,18 @@ describe('multipart requests (e2e)', () => {
     expect(file.buffer.toString('utf8')).toBe(csv)
   })
 
+  it('a malformed multipart body answers 400 and never reaches the handler', async () => {
+    const [spy] = spyOnHandler(app, 'importLeadUsingPOST')
+
+    await request(origin)
+      .post('/bulk/v1/leads.json?format=csv')
+      .set('Content-Type', 'multipart/form-data; boundary=missing')
+      .send('--missing\r\nContent-Disposition: form-data; name="file"')
+      .expect(400)
+
+    expect(spy).not.toHaveBeenCalled()
+  })
+
   it('a urlencoded formData request still reaches its handler', async () => {
     const [spy] = spyOnHandler(app, 'addSmartListRuleUsingPOST')
 
