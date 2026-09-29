@@ -22,6 +22,7 @@ Uma entrada por mudança mergeada, da mais nova para a mais antiga, escrita no p
   - vale o último `vi.setConfig`;
   - os helpers JavaScript são lidos;
   - o `rev-parse` do `HookRepo`, que ganhou timeout, confere o status.
+- **Da quinta revisão, os nomes resolvem pelo binder do TypeScript.** Um nome vale o que ele liga no escopo léxico do uso, e não mais o que qualquer declaração com a mesma grafia no arquivo liga.
 - **A regra virou pattern:** [Timeouts de testes que disparam processos](../knowledge/patterns/process-test-timeouts.md).
 
 ### Números medidos
