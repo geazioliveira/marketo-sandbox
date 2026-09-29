@@ -26,6 +26,7 @@ As regras vivem no Context Mesh. Esta página só aponta para elas.
 - [Guarda que só reconhece o nome literal](context/knowledge/anti-patterns/guard-by-literal-name.md)
 - [Limite da auditoria tirado do evento](context/knowledge/anti-patterns/audit-bound-from-the-event.md)
 - [Mensagem de commit que diz menos do que o commit faz](context/knowledge/anti-patterns/commit-message-understating-its-content.md)
+- [Mergear com uma re-execução do check em andamento](context/knowledge/anti-patterns/merge-with-a-run-in-flight.md)
 - [Middleware do Nest para todas as rotas, que vira uma rota](context/knowledge/anti-patterns/nest-middleware-as-a-catch-all-route.md)
 - [Mover as pastas geradas sem o gerador](context/knowledge/anti-patterns/moving-generated-folders-without-the-generator.md)
 - [Padrão com `??` para uma variável de ambiente](context/knowledge/anti-patterns/nullish-default-for-an-env-var.md)

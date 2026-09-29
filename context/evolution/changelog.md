@@ -60,6 +60,41 @@ Uma entrada por mudança mergeada, da mais nova para a mais antiga, escrita no p
 
 ---
 
+## 2026-09-29: A auditoria de main nomeia o check em andamento no merge, e o fluxo pede nenhum no merge (#48)
+
+**Fase**: Learn
+**Tipo**: Bug Fix
+
+### O que foi construído / corrigido
+
+- **O motivo novo da auditoria.** Um merge cuja run mais nova de um check exigido começou antes dele e não tinha concluído nele continua fora do loop, agora com `PR #P mergeada com <workflow / job> em andamento; a última run concluída antes do merge: <conclusão | nenhuma>`. Até aqui, ele saía como `mergeada sem … verde`, o motivo de um check vermelho. O `greenAtMerge` de `scripts/audit-main.mjs` virou `checkAtMerge`.
+- **O fluxo pede nenhum check em andamento no merge**, também no merge feito à mão: `gh pr checks <n>` sem nenhum `pending`. O hook de `gh pr merge` já negava o caso para o agente desde a #5. A triagem da auditoria diz como ler o motivo novo.
+- **A ADR 0002** lista o motivo novo, e o `drift.spec.ts` confere que o fluxo e a ADR citam os dois motivos dos checks como a auditoria os escreve.
+- **Um anti-pattern novo**, [Mergear com uma re-execução do check em andamento](../knowledge/anti-patterns/merge-with-a-run-in-flight.md), com o merge da PR #43 como caso.
+
+### Números medidos
+
+- **O caso da #43**, conferido no GitHub: tentativas 1 e 2 da run 36407495291 verdes às 10:04:59 e às 10:05:27, merge às 10:05:51, tentativa 3 começada às 10:05:42 e vermelha às 10:05:59 com `issue-open: #35 está fechada`.
+- **Os testes**: 5 casos novos em `required checks` falharam antes da correção; depois, os 188 do `audit-main.spec.ts` e os 206 do `drift.spec.ts` passam. Quatro mutações da correção, numa cópia fora do git, foram pegas.
+- **`npm run check`**: 3.831 testes em 23 arquivos; o e2e com 447, em 6 arquivos. Na primeira rodada, com a média de carga entre 18 e 19, 41 testes ficaram vermelhos em `test/hooks/` e em `test/scripts/gate.spec.ts`, por `git` estourando o prazo dentro dos hooks e 19 testes com 120 s. Rodado de novo com a carga mais baixa, o `gate.spec.ts` passou inteiro (365). O lint, o `format:check`, o typecheck, o `check:context`, o build e o `check:all` passaram. A prova da cadeia inteira é o `Qualidade / check` da PR.
+
+### Decisões tomadas
+
+- [0002: Enforcement soft do loop no GitHub Free](../decisions/0002-soft-enforcement-on-github-free.md): o motivo novo, com o merge em andamento ainda fora do loop.
+- As respostas do Approve da #48: manter a regra e nomear o caso, em vez de julgar pela última run concluída como o relato pedia; pôr no motivo a última conclusão antes do merge; e criar o anti-pattern.
+
+### Patterns aplicados ou criados
+
+- [Mergear com uma re-execução do check em andamento](../knowledge/anti-patterns/merge-with-a-run-in-flight.md), anti-pattern novo
+- [Revisão classificada por risco](../knowledge/patterns/risk-classified-review.md): HIGH, porque a PR mexe na auditoria de `main` e nos testes do harness
+
+### Aprendizados / surpresas
+
+- **A causa do relato não se confirmou.** A #48 dizia que a auditoria lia o check como ele estava na hora de auditar. O código já julgava pelo horário do merge, e um teste já fixava que uma run em andamento no merge conta como não verde. O defeito era só o motivo, que não separava esse caso de um vermelho. Ler o código antes de planejar evitou afrouxar uma regra que estava certa.
+- **O Build do harness precisou do dono presente.** No modo automático, o hook negou a edição de `scripts/audit-main.mjs`; fora dele, cada edição passou pela confirmação do dono. As mutações rodaram numa cópia fora do git, para não escrever no harness pelo shell.
+
+---
+
 ## 2026-09-28: O código gerado segue o schema documentado, e um upload multipart chega ao handler (#24)
 
 **Fase**: Learn
