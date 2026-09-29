@@ -50,6 +50,7 @@
 - [ADR 0009: Comportamento ao lado do código gerado, nunca dentro](0009-behaviour-beside-generated-code.md), que esta decisão aplica ao transporte, sem aceitá-la: a 0009 continua `Proposed` até a primeira sub-issue da Track A
 - [ADR 0010: O mock só fala com a própria máquina por padrão](0010-loopback-only-by-default.md)
 - [Pattern: A forma de um módulo de recurso](../knowledge/patterns/resource-module-shape.md)
+- [Anti-pattern: Middleware do Nest para todas as rotas, que vira uma rota](../knowledge/anti-patterns/nest-middleware-as-a-catch-all-route.md)
 - [Bug: Código gerado fora do schema e upload multipart que não chega ao handler](../intent/bug-generated-code-off-schema.md)
 
 ## Status
