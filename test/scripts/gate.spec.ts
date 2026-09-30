@@ -98,6 +98,11 @@ function templated(
       const repo = await TempRepo.create()
       templates.push(repo)
       return repo
+    }).catch((error: unknown) => {
+      // A build that failed is not kept: the next case tries again, and
+      // only the cases that waited on this one fail with it.
+      template = undefined
+      throw error
     })
     return fresh(await template)
   }

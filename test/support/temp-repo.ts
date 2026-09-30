@@ -193,9 +193,12 @@ export class TempRepo {
   static fromTemplate(template: TempRepo): TempRepo {
     const repo = new TempRepo()
     try {
+      // verbatimSymlinks: a relative link stays relative, instead of
+      // pointing back into the template.
       cpSync(template.dir, repo.dir, {
         recursive: true,
         preserveTimestamps: true,
+        verbatimSymlinks: true,
       })
     } catch (error) {
       repo.remove()
