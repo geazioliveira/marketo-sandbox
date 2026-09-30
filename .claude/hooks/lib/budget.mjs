@@ -3,9 +3,10 @@
 // Claude Code kills a hook past the timeout settings.json gives it, and a
 // killed hook is a non-blocking error: the tool call goes through, decided by
 // nobody. Each git and gh the hooks start is bounded on its own (10 s for
-// git, LOOP_HOOKS_GH_TIMEOUT_MS for gh), but a long command line starts many
-// of them one after the other, and the sum can pass the hook's timeout. So a
-// run has one deadline, shared by every process it starts: each one's timeout
+// git or LOOP_HOOKS_GIT_TIMEOUT_MS, 6 s for gh or LOOP_HOOKS_GH_TIMEOUT_MS),
+// but a long command line starts many of them one after the other, and the
+// sum can pass the hook's timeout. So a run has one deadline, shared by
+// every process it starts: each one's timeout
 // is its own or what is left of the budget, whichever is shorter, and once
 // the budget is spent no process starts. The hook then answers with the
 // budget's reason (guard-bash and build-guard ask, critical; session-context
@@ -37,7 +38,11 @@ export const budgetVariable = 'LOOP_HOOKS_BUDGET_MS'
  * for gh (#59). Unlike the budget, this one may go up: spawnTimeout still
  * gives a git what is left of the budget at most, so no value outlasts the
  * run. The specs raise it, so that a slow git on a loaded machine spends the
- * budget instead of failing at 10 s.
+ * budget instead of failing at 10 s. It is a knob for the specs: raised in
+ * production up to the budget, a hung git no longer ends in a deny ("o hook
+ * falhou") after 10 s, but in the budget's critical ask once it runs out,
+ * still a deny in bypassPermissions, dontAsk or auto. The plan-to-issue
+ * fallback git keeps its own 10 s.
  */
 export const gitTimeoutVariable = 'LOOP_HOOKS_GIT_TIMEOUT_MS'
 
