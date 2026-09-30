@@ -17,11 +17,14 @@ import {
   planPendingPrefix,
 } from '../../scripts/loop-sections.mjs'
 import {
+  type BudgetLib,
+  hookEnv,
   type HookRepo,
   hookRepo,
   type HookRepoOptions,
   loadHookLib,
   PROJECT,
+  raiseInProcessGitTimeout,
   type RepoLib,
   setupTimeout,
   processTimeout,
@@ -47,6 +50,11 @@ beforeAll(async () => {
  * finishes, so the cases can run concurrently: every repository costs a few
  * git spawns, and on a machine where each spawn is scanned that is minutes
  * one by one (gate.spec.ts does the same).
+ *
+ * Except the groups that call lib.repoAt or lib.configuredRemote (#59): they
+ * run git with spawnSync in this process, which blocks the worker, and the
+ * timers of the other cases in flight keep running meanwhile. Those groups
+ * run one case at a time.
  */
 const test = base.extend<{
   fresh: (options?: HookRepoOptions) => Promise<HookRepo>
@@ -77,6 +85,8 @@ const test = base.extend<{
 })
 
 vi.setConfig({ testTimeout: processTimeout, maxConcurrency: 12 })
+// The libraries run in this process: their git gets 60 s, as a hook's does (#59).
+raiseInProcessGitTimeout()
 
 const BRANCH = 'feature/42-a-thing'
 
@@ -87,7 +97,7 @@ describe('constants', () => {
   })
 })
 
-describe.concurrent('repoAt', () => {
+describe('repoAt', () => {
   test('reads top, git dir, branch and project from the worktree top', async ({
     expect,
     fresh,
@@ -368,7 +378,7 @@ describe.concurrent('existingDirOf', () => {
   })
 })
 
-describe.concurrent('real paths', () => {
+describe('real paths', () => {
   test('reads a target through a symlink as git reports it', async ({
     expect,
     fresh,
@@ -687,6 +697,25 @@ describe.concurrent('the test support (hookRepo)', () => {
     )
   })
 
+  test('runs the hooks with git and gh timeouts above every budget (#59)', async ({
+    expect,
+    fresh,
+  }) => {
+    // Under load a git or a gh passes its production timeout, and the hook
+    // answers "o hook falhou" instead of the decision a case checks. In the
+    // specs only the budget bounds a run; a case about a deadline gives its
+    // own values.
+    const budget = await loadHookLib<BudgetLib>('budget')
+    const longest = Math.max(...Object.values(budget.hookBudgetsMs))
+    const repo = await fresh()
+    for (const env of [repo.env(), hookEnv()])
+      for (const name of [
+        budget.gitTimeoutVariable,
+        'LOOP_HOOKS_GH_TIMEOUT_MS',
+      ])
+        expect(Number(env[name]), name).toBeGreaterThan(longest)
+  })
+
   test('puts the fake gh first on PATH, with its fixture and log', async ({
     expect,
     fresh,
@@ -826,136 +855,127 @@ describe('the git config a command gives git (Copilot review of #26, seventh rou
   })
 })
 
-describe.concurrent(
-  'configuredRemote (Copilot review of #26, seventh round)',
-  () => {
-    const project = 'https://github.com/geazioliveira/marketo-sandbox.git'
-    const other = 'https://github.com/alguem/outro.git'
-    const withVars = (repo: HookRepo, pairs: [string, string][]) => {
-      const env: NodeJS.ProcessEnv = {
-        ...repo.env(),
-        GIT_CONFIG_COUNT: String(pairs.length),
-      }
-      for (const [index, [key, value]] of pairs.entries()) {
-        env[`GIT_CONFIG_KEY_${index}`] = key
-        env[`GIT_CONFIG_VALUE_${index}`] = value
-      }
-      return env
+describe('configuredRemote (Copilot review of #26, seventh round)', () => {
+  const project = 'https://github.com/geazioliveira/marketo-sandbox.git'
+  const other = 'https://github.com/alguem/outro.git'
+  const withVars = (repo: HookRepo, pairs: [string, string][]) => {
+    const env: NodeJS.ProcessEnv = {
+      ...repo.env(),
+      GIT_CONFIG_COUNT: String(pairs.length),
     }
+    for (const [index, [key, value]] of pairs.entries()) {
+      env[`GIT_CONFIG_KEY_${index}`] = key
+      env[`GIT_CONFIG_VALUE_${index}`] = value
+    }
+    return env
+  }
 
-    test('reads origin with the command’s config', async ({
-      expect,
-      fresh,
-    }) => {
-      const repo = await fresh()
-      const info = lib.repoAt(repo.dir, { env: repo.env() })
-      expect(info).not.toBeNull()
-      if (info === null) return
-      expect(
-        lib.configuredRemote(info, withVars(repo, [['user.name', 'Outro']])),
-      ).toEqual({ known: true, repo: PROJECT })
-      // The same URL twice is still one repository.
-      expect(
-        lib.configuredRemote(
-          info,
-          withVars(repo, [['remote.origin.url', project]]),
-        ),
-      ).toEqual({ known: true, repo: PROJECT })
-      expect(
-        lib.configuredRemote(
-          info,
-          withVars(repo, [['remote.origin.url', other]]),
-        ),
-      ).toEqual({
-        known: false,
-        why: 'o origin aponta para mais de um repositório',
-      })
+  test('reads origin with the command’s config', async ({ expect, fresh }) => {
+    const repo = await fresh()
+    const info = lib.repoAt(repo.dir, { env: repo.env() })
+    expect(info).not.toBeNull()
+    if (info === null) return
+    expect(
+      lib.configuredRemote(info, withVars(repo, [['user.name', 'Outro']])),
+    ).toEqual({ known: true, repo: PROJECT })
+    // The same URL twice is still one repository.
+    expect(
+      lib.configuredRemote(
+        info,
+        withVars(repo, [['remote.origin.url', project]]),
+      ),
+    ).toEqual({ known: true, repo: PROJECT })
+    expect(
+      lib.configuredRemote(
+        info,
+        withVars(repo, [['remote.origin.url', other]]),
+      ),
+    ).toEqual({
+      known: false,
+      why: 'o origin aponta para mais de um repositório',
     })
+  })
 
-    test.for<[string, [string, string][], string]>([
-      [
-        'a rewriting of URLs',
-        [[`url.${project}.insteadOf`, other]],
-        'ela reescreve URLs',
-      ],
-      [
-        'a push rewriting',
-        [[`url.${project}.pushInsteadOf`, other]],
-        'ela reescreve URLs',
-      ],
-      [
-        'an include',
-        [['include.path', '/nao/existe.cfg']],
-        'ela inclui outro arquivo',
-      ],
-      [
-        'a conditional include',
-        [['includeIf.gitdir:/x/.path', '/nao/existe.cfg']],
-        'ela inclui outro arquivo',
-      ],
-      [
-        'gh’s default repository',
-        [['remote.origin.gh-resolved', 'base']],
-        'ela dá ao gh um repositório padrão',
-      ],
-      [
-        'another remote',
-        [['remote.upstream.url', project]],
-        'ela tem outro remote além do origin (upstream)',
-      ],
-      [
-        'a push URL of origin',
-        [['remote.origin.pushurl', project]],
-        'o origin tem uma URL de push própria',
-      ],
-    ])('is unknown with %s', async ([, pairs, why], { expect, fresh }) => {
-      const repo = await fresh({ origin: other })
-      const info = lib.repoAt(repo.dir, { env: repo.env() })
-      expect(info).not.toBeNull()
-      if (info === null) return
-      const found = lib.configuredRemote(info, withVars(repo, pairs))
-      expect(found.known).toBe(false)
-      expect(found.known ? '' : found.why).toContain(why)
-    })
+  test.for<[string, [string, string][], string]>([
+    [
+      'a rewriting of URLs',
+      [[`url.${project}.insteadOf`, other]],
+      'ela reescreve URLs',
+    ],
+    [
+      'a push rewriting',
+      [[`url.${project}.pushInsteadOf`, other]],
+      'ela reescreve URLs',
+    ],
+    [
+      'an include',
+      [['include.path', '/nao/existe.cfg']],
+      'ela inclui outro arquivo',
+    ],
+    [
+      'a conditional include',
+      [['includeIf.gitdir:/x/.path', '/nao/existe.cfg']],
+      'ela inclui outro arquivo',
+    ],
+    [
+      'gh’s default repository',
+      [['remote.origin.gh-resolved', 'base']],
+      'ela dá ao gh um repositório padrão',
+    ],
+    [
+      'another remote',
+      [['remote.upstream.url', project]],
+      'ela tem outro remote além do origin (upstream)',
+    ],
+    [
+      'a push URL of origin',
+      [['remote.origin.pushurl', project]],
+      'o origin tem uma URL de push própria',
+    ],
+  ])('is unknown with %s', async ([, pairs, why], { expect, fresh }) => {
+    const repo = await fresh({ origin: other })
+    const info = lib.repoAt(repo.dir, { env: repo.env() })
+    expect(info).not.toBeNull()
+    if (info === null) return
+    const found = lib.configuredRemote(info, withVars(repo, pairs))
+    expect(found.known).toBe(false)
+    expect(found.known ? '' : found.why).toContain(why)
+  })
 
-    test('is unknown when git refuses the config', async ({
-      expect,
-      fresh,
-    }) => {
-      const repo = await fresh()
-      const info = lib.repoAt(repo.dir, { env: repo.env() })
-      if (info === null) throw new Error('sem repositório')
-      const env = { ...repo.env(), GIT_CONFIG_COUNT: '1' }
-      const found = lib.configuredRemote(info, env)
-      expect(found.known).toBe(false)
-      expect(found.known ? '' : found.why).toContain(
-        'o git recusou essa configuração',
-      )
-    })
+  test('is unknown when git refuses the config', async ({ expect, fresh }) => {
+    const repo = await fresh()
+    const info = lib.repoAt(repo.dir, { env: repo.env() })
+    if (info === null) throw new Error('sem repositório')
+    const env = { ...repo.env(), GIT_CONFIG_COUNT: '1' }
+    const found = lib.configuredRemote(info, env)
+    expect(found.known).toBe(false)
+    expect(found.known ? '' : found.why).toContain(
+      'o git recusou essa configuração',
+    )
+  })
 
-    test('gives no repository without origin, and reads a linked worktree through its git dir', async ({
-      expect,
-      fresh,
-    }) => {
-      const bare = await fresh({ origin: null })
-      const info = lib.repoAt(bare.dir, { env: bare.env() })
-      if (info === null) throw new Error('sem repositório')
-      expect(
-        lib.configuredRemote(info, withVars(bare, [['user.name', 'Outro']])),
-      ).toEqual({ known: true, repo: null })
-      const repo = await fresh()
-      const tree = await repo.addWorktree('arvore', 'feature/8-outra')
-      const linked = lib.repoAt(tree.dir, { env: repo.env() })
-      if (linked === null) throw new Error('sem worktree')
-      expect(
-        lib.configuredRemote(
-          linked,
-          withVars(repo, [[`url.${other}.insteadOf`, project]]),
-        ),
-      ).toMatchObject({ known: false })
-      expect(
-        lib.configuredRemote(linked, withVars(repo, [['user.name', 'Outro']])),
-      ).toEqual({ known: true, repo: PROJECT })
-    })
-  },
-)
+  test('gives no repository without origin, and reads a linked worktree through its git dir', async ({
+    expect,
+    fresh,
+  }) => {
+    const bare = await fresh({ origin: null })
+    const info = lib.repoAt(bare.dir, { env: bare.env() })
+    if (info === null) throw new Error('sem repositório')
+    expect(
+      lib.configuredRemote(info, withVars(bare, [['user.name', 'Outro']])),
+    ).toEqual({ known: true, repo: null })
+    const repo = await fresh()
+    const tree = await repo.addWorktree('arvore', 'feature/8-outra')
+    const linked = lib.repoAt(tree.dir, { env: repo.env() })
+    if (linked === null) throw new Error('sem worktree')
+    expect(
+      lib.configuredRemote(
+        linked,
+        withVars(repo, [[`url.${other}.insteadOf`, project]]),
+      ),
+    ).toMatchObject({ known: false })
+    expect(
+      lib.configuredRemote(linked, withVars(repo, [['user.name', 'Outro']])),
+    ).toEqual({ known: true, repo: PROJECT })
+  })
+})

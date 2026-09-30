@@ -72,6 +72,25 @@ describe('spawnTimeout and checkBudget', () => {
   })
 })
 
+describe('gitTimeoutMs (#59)', () => {
+  it('gives each git 10 s, or what the environment asks for, higher or lower', () => {
+    const env = (value: string) => ({ [budget.gitTimeoutVariable]: value })
+    expect(budget.gitTimeoutMs({})).toBe(10_000)
+    expect(budget.gitTimeoutMs(env('60000'))).toBe(60_000)
+    expect(budget.gitTimeoutMs(env('500'))).toBe(500)
+    for (const value of ['0', '-1', '1.5', 'x', ''])
+      expect(budget.gitTimeoutMs(env(value)), value).toBe(10_000)
+  })
+
+  it('never lets a git outlast the budget, however high its timeout', () => {
+    budget.startBudget('guard-bash', { [budget.budgetVariable]: '10000' })
+    const own = budget.gitTimeoutMs({ [budget.gitTimeoutVariable]: '600000' })
+    expect(budget.spawnTimeout(own, 'ler o git')).toBe(10_000)
+    later(9_000)
+    expect(budget.spawnTimeout(own, 'ler o git')).toBe(1_000)
+  })
+})
+
 describe('holdBack and releaseHeld', () => {
   it('keeps a slice for a fallback, at most a third of the budget, and gives it back', () => {
     budget.startBudget('plan-to-issue', { [budget.budgetVariable]: '9000' })

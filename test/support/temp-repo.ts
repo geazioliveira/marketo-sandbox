@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process'
 import {
   chmodSync,
   copyFileSync,
+  cpSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -120,6 +121,18 @@ export function installGate(at: string): string {
 }
 
 /**
+ * The identity of every commit in a TempRepo, given through the environment:
+ * three `git config` runs less for each repository (#59). The global and
+ * system config are empty (cleanEnv), so no signing is ever asked for.
+ */
+const identity = {
+  GIT_AUTHOR_NAME: 'Gate Spec',
+  GIT_AUTHOR_EMAIL: 'gate-spec@example.invalid',
+  GIT_COMMITTER_NAME: 'Gate Spec',
+  GIT_COMMITTER_EMAIL: 'gate-spec@example.invalid',
+}
+
+/**
  * A throwaway repository shaped like this one: main with AGENTS.md, the gate
  * and an empty changelog, an origin pointing at the real repository name, and
  * refs/remotes/origin/main at main. Nothing is ever fetched or pushed; remote
@@ -132,6 +145,8 @@ export class TempRepo {
   readonly bin: string
   readonly log: string
   readonly fixturePath: string
+  /** How many times the gate ran here (#59): gate.spec.ts caps it per case. */
+  gateRuns = 0
 
   private constructor() {
     this.root = mkdtempSync(path.join(tmpdir(), 'gate-spec-'))
@@ -153,9 +168,6 @@ export class TempRepo {
     const repo = new TempRepo()
     try {
       await repo.git('init', '-q', '-b', 'main')
-      await repo.git('config', 'user.name', 'Gate Spec')
-      await repo.git('config', 'user.email', 'gate-spec@example.invalid')
-      await repo.git('config', 'commit.gpgsign', 'false')
       await repo.git('remote', 'add', 'origin', ORIGIN)
       installGate(repo.dir)
       await repo.commit(
@@ -173,12 +185,37 @@ export class TempRepo {
     return repo
   }
 
+  /**
+   * A copy of `template`'s repository in a root of its own, with the same
+   * commits, branches and refs and no process started (#59). The copy is
+   * independent: nothing a case does in it reaches the template.
+   */
+  static fromTemplate(template: TempRepo): TempRepo {
+    const repo = new TempRepo()
+    try {
+      // verbatimSymlinks: a relative link stays relative, instead of
+      // pointing back into the template.
+      cpSync(template.dir, repo.dir, {
+        recursive: true,
+        preserveTimestamps: true,
+        verbatimSymlinks: true,
+      })
+    } catch (error) {
+      repo.remove()
+      throw error
+    }
+    return repo
+  }
+
   remove(): void {
     rmSync(this.root, { recursive: true, force: true })
   }
 
   env(extra: Record<string, string> = {}): NodeJS.ProcessEnv {
-    return cleanEnv(this.root, { bin: this.bin, extra })
+    return cleanEnv(this.root, {
+      bin: this.bin,
+      extra: { ...identity, ...extra },
+    })
   }
 
   /** git in the repository; rejects with git's stderr when it fails. */
@@ -223,6 +260,7 @@ export class TempRepo {
 
   /** Runs the gate as a child process, the way npm run gate and CI do. */
   async gate(args: string[] = [], options: RunOptions = {}): Promise<GateRun> {
+    this.gateRuns++
     writeFileSync(
       this.fixturePath,
       JSON.stringify({ owner: OWNER, name: NAME, ...options.fixture }),

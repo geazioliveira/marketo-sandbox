@@ -143,6 +143,29 @@ describe('.claude/settings.json (#5)', () => {
     }
   })
 
+  it('never lets a git timeout from the environment stretch a run past its budget (#59)', async () => {
+    // LOOP_HOOKS_GIT_TIMEOUT_MS may raise a git's own timeout, as the gh one
+    // may: each process still gets what is left of the budget at most, so
+    // the margin above holds whatever the variable says.
+    const budget = await loadHookLib<{
+      gitTimeoutVariable: string
+      gitTimeoutMs: (env: Record<string, string>) => number
+      hookBudgetsMs: Record<string, number>
+      startBudget: (name: string, env: Record<string, string>) => number
+      spawnTimeout: (ownMs: number, step: string) => number
+    }>('budget')
+    const own = budget.gitTimeoutMs({
+      [budget.gitTimeoutVariable]: String(10 * 60_000),
+    })
+    expect(own).toBe(10 * 60_000)
+    for (const [name, ms] of Object.entries(budget.hookBudgetsMs)) {
+      budget.startBudget(name, {})
+      expect(budget.spawnTimeout(own, 'ler o git'), name).toBeLessThanOrEqual(
+        ms,
+      )
+    }
+  })
+
   it('holds back at most a third of a budget for a fallback, and gives it back (Copilot review of #26, fifth round)', async () => {
     // plan-to-issue marks an accepted plan even when the repository could
     // not be read in time: the slice held back is what that write runs in,

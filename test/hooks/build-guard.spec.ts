@@ -973,6 +973,31 @@ describe.concurrent('passed before the gate', () => {
     expect((await editIn(repo, 'dist/a.js')).decision).toBe('pass')
   })
 
+  test('ends a hung check-ignore at the timeout LOOP_HOOKS_GIT_TIMEOUT_MS gives it, as a failed one (#59)', async ({
+    expect,
+    fresh,
+    scratch,
+  }) => {
+    const repo = await fresh({ branch: BRANCH })
+    await repo.commit({ '.gitignore': 'dist/\n' }, 'Ignore')
+    const bin = gitShim(
+      scratch(),
+      'for arg in "$@"; do [ "$arg" = check-ignore ] && exec sleep 15; done',
+    )
+    const started = Date.now()
+    const run = verdict(
+      await repo.run('build-guard', toolCall(`${repo.dir}/dist/a.js`), {
+        env: withShim(repo, bin, { LOOP_HOOKS_GIT_TIMEOUT_MS: '2000' }),
+      }),
+    )
+    // Before the 10 s a git gets when the variable is not read, and well
+    // inside the 30 s budget: the git's own timeout ended it.
+    expect(Date.now() - started).toBeLessThan(10_000)
+    expect(run.decision).toBe('deny')
+    expect(run.reason).toContain(MISSING)
+    expect(run.reason).not.toContain('o prazo de')
+  })
+
   test('reads the ignore rules of the repository around the file, whatever GIT_* says', async ({
     expect,
     fresh,

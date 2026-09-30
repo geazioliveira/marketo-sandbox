@@ -4,6 +4,48 @@ Uma entrada por mudança mergeada, da mais nova para a mais antiga, escrita no p
 
 ---
 
+## 2026-09-29: Os hooks toleram um git lento nos specs, e o gate.spec copia a stack e limita as rodadas por caso (#59)
+
+**Fase**: Learn
+**Tipo**: Bug Fix
+
+### O que foi construído / corrigido
+
+- **O `git` dos hooks ganhou um ajuste.** O `LOOP_HOOKS_GIT_TIMEOUT_MS` sobe ou baixa os 10 s de cada `git`, como o `LOOP_HOOKS_GH_TIMEOUT_MS` já fazia com o `gh`. Ele é lido num lugar só (`gitTimeoutMs()` em `.claude/hooks/lib/budget.mjs`) e fica sempre limitado pelo que resta do orçamento, que continua só baixando. Sem a variável, a produção não muda.
+- **Os specs dos hooks rodam com o `git` e o `gh` de 60 s**, acima de todo orçamento (`hookProcessTimeouts` e `hookEnv()` em `test/support/hooks.ts`), e só o caso do `git` que estoura o próprio tempo dá os 10 s de produção.
+- **O `repo.spec.ts` roda em sequência os grupos que chamam o `git` da lib no mesmo processo**, porque o `spawnSync` bloqueia o worker enquanto o timer dos outros casos corre.
+- **O `gate.spec.ts` monta a stack uma vez e a copia por caso** (`templated()` e `TempRepo.fromTemplate()`), e a fixture falha um caso que rode o gate mais de 3 vezes. Os 5 casos que passavam disso viraram linhas ou casos menores.
+
+### Números medidos
+
+- **A medição**, com cinco rodadas de duas `npx vitest run` ao mesmo tempo, numa worktree destacada com `npm ci`, foi de 513 falhas em `main` (`22059b6`) para 200 na cabeça `274635f`. A carga no início das rodadas 2 a 5 foi mais alta depois: 18,7 a 20,8, contra 16,0 a 17,1.
+  - "o hook falhou" foi de 187 para 2;
+  - o `ETIMEDOUT` do `git` no mesmo processo, de 23 para 0;
+  - o `repo.spec.ts`, de 42 falhas para 0;
+  - os casos acima de 120 s, de 56 para 44.
+- **A verificação adversarial** não achou bloqueio. Os três achados que pediam correção entraram, e com eles três casos de comportamento que falham quando um ponto de `git` ignora a variável.
+- **`npm run check`**: 3.847 testes em 23 arquivos, e o `gate.spec.ts` foi de 365 para 386 casos com as linhas novas. O e2e passou com 447.
+
+### Decisões tomadas
+
+- As quatro respostas do Approve da #59, todas com a recomendação: a variável `LOOP_HOOKS_GIT_TIMEOUT_MS`, nenhum teto de workers por enquanto, a stack copiada com os casos pesados divididos e uma PR só.
+- Ao ver a medição, o dono mandou os resíduos para a #74 em vez de estender esta PR. Lá ficaram o orçamento de produção que se esgota, os casos dos hooks acima de 120 s, o gate de 60 s e a pergunta do teto de workers.
+
+### Patterns aplicados ou criados
+
+- [Timeouts de testes que disparam processos](../knowledge/patterns/process-test-timeouts.md), atualizado. Ele ganhou três regras: os prazos de processo dos hooks nos specs, a lib no mesmo processo fora de grupos concorrentes e a soma dos processos de um caso. O "Quando NÃO usar" deixou de dizer que o `git` de 10 s é intocável.
+
+### Aprendizados / surpresas
+
+- **Tirar o prazo curto muda a falha, não só a apaga.** Com o `git` de 60 s, um hook lento deixa de responder "o hook falhou" e passa a gastar o orçamento inteiro. Os casos que rodam o hook muitas vezes passaram dos 120 s, e os orçamentos mais curtos, de 15 s e 20 s, se esgotaram.
+- **O relatório JSON do vitest guarda um caso acima do timeout como `STACK_TRACE_ERROR`.** Um classificador que procura "Test timed out" conta esses casos como outra causa.
+- **Um regex que aceita duas mensagens não prova qual caminho rodou.** O caso do `git` preso passava com a mensagem do orçamento no lugar da do `git`, e nenhum teste ligava os pontos de `git` à variável. A verificação adversarial achou os dois, com uma mutação que ignora o ambiente.
+- **Um teto medido na fixture acha os casos que a leitura do código não acha.** A primeira rodada com o `maxGateRuns` apontou um quinto caso acima de 3 rodadas, que a lista do plano não tinha.
+- **Os hooks desta sessão estouraram o `git` de 10 s** várias vezes durante a medição de partida, com a carga em 22. É o mesmo defeito que a #59 trata nos specs, agora visto em produção.
+- **Um hook do harness não analisa redirecionamentos para caminhos montados com variáveis.** O `guard-bash` recusou um script de shell que escrevia em `$out/...`, e a medição passou a rodar num script Node, que abre os arquivos por `fs`.
+
+---
+
 ## 2026-09-29: O check:context confere as linhas Atualizado do bloco Status, e fora das decisões só a última fica (#66)
 
 **Fase**: Learn

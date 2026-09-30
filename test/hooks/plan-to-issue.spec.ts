@@ -24,6 +24,7 @@ import {
 } from '../../scripts/loop-sections.mjs'
 import {
   gitShim,
+  hookEnv,
   type HookRepo,
   hookRepo,
   type HookRepoOptions,
@@ -34,7 +35,6 @@ import {
   spawnWith,
 } from '../support/hooks'
 import { projectRoot } from '../support/temp-repo'
-import { cleanEnv } from '../support/clean-env'
 
 /**
  * The plan-to-issue hook (.claude/hooks/plan-to-issue.mjs), PostToolUse on
@@ -320,7 +320,7 @@ describe.concurrent('plan-to-issue on ExitPlanMode', () => {
         tool_name: 'ExitPlanMode',
         tool_input: { plan: '# Plano' },
       },
-      { env: cleanEnv(dir) },
+      { env: hookEnv(dir) },
     )
     expect(run.status).toBe(0)
     expect(run.stdout).toBe('')

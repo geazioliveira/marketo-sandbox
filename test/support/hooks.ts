@@ -189,6 +189,36 @@ export interface RunHookOptions {
 }
 
 /**
+ * The git and gh timeouts a hook gets in the specs (#59). In production each
+ * git has 10 s and each gh 6 s; on a loaded machine a spec's git passes that,
+ * and the hook answers "o hook falhou" instead of the decision the case
+ * checks. At 60 s, above every budget, only the budget bounds a run
+ * (.claude/hooks/lib/budget.mjs caps each process at what is left of it). A
+ * case about a deadline gives its own values after these.
+ */
+export const hookProcessTimeouts: Readonly<Record<string, string>> =
+  Object.freeze({
+    LOOP_HOOKS_GIT_TIMEOUT_MS: '60000',
+    LOOP_HOOKS_GH_TIMEOUT_MS: '60000',
+  })
+
+/**
+ * For a spec that runs the hook libraries in its own process, as repo.spec.ts
+ * does: their git reads LOOP_HOOKS_GIT_TIMEOUT_MS from process.env, and with
+ * no budget started nothing else bounds it. Only the git one: a gh read in
+ * process takes its timeout from the env it is given.
+ */
+export function raiseInProcessGitTimeout(): void {
+  process.env.LOOP_HOOKS_GIT_TIMEOUT_MS =
+    hookProcessTimeouts.LOOP_HOOKS_GIT_TIMEOUT_MS
+}
+
+/** The environment a hook runs with when a case gives none. */
+export function hookEnv(root: string = defaultRoot()): NodeJS.ProcessEnv {
+  return cleanEnv(root, { extra: { ...hookProcessTimeouts } })
+}
+
+/**
  * Runs hook `name` as Claude Code does: `node .claude/hooks/<name>.mjs`, the
  * input as JSON on stdin (a string is written as it is, to test input that
  * is not JSON).
@@ -205,7 +235,7 @@ export async function runHook(
       : undefined
   const run = await spawnWith(process.execPath, [hookPath(name)], {
     input: text,
-    env: env ?? cleanEnv(defaultRoot()),
+    env: env ?? hookEnv(),
     cwd:
       cwd ??
       (typeof inputCwd === 'string' && existsSync(inputCwd)
@@ -327,6 +357,8 @@ export interface IoLib {
 export interface BudgetLib {
   hookBudgetsMs: Readonly<Record<string, number>>
   budgetVariable: string
+  gitTimeoutVariable: string
+  gitTimeoutMs(env?: Record<string, string | undefined>): number
   BudgetExhausted: new (
     step: string,
     budgetMs: number | null,
@@ -506,6 +538,7 @@ export class HookRepo {
       extra: {
         FAKE_GH_FIXTURE: this.fixturePath,
         FAKE_GH_LOG: this.log,
+        ...hookProcessTimeouts,
         ...extra,
       },
     })
