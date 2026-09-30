@@ -23,6 +23,7 @@ Uma entrada por mudança mergeada, da mais nova para a mais antiga, escrita no p
   - o `ETIMEDOUT` do `git` no mesmo processo, de 23 para 0;
   - o `repo.spec.ts`, de 42 falhas para 0;
   - os casos acima de 120 s, de 56 para 44.
+- **A verificação adversarial** não achou bloqueio. Os três achados que pediam correção entraram, e com eles três casos de comportamento que falham quando um ponto de `git` ignora a variável.
 - **`npm run check`**: 3.847 testes em 23 arquivos, e o `gate.spec.ts` foi de 365 para 386 casos com as linhas novas. O e2e passou com 447.
 
 ### Decisões tomadas
@@ -38,6 +39,7 @@ Uma entrada por mudança mergeada, da mais nova para a mais antiga, escrita no p
 
 - **Tirar o prazo curto muda a falha, não só a apaga.** Com o `git` de 60 s, um hook lento deixa de responder "o hook falhou" e passa a gastar o orçamento inteiro. Os casos que rodam o hook muitas vezes passaram dos 120 s, e os orçamentos mais curtos, de 15 s e 20 s, se esgotaram.
 - **O relatório JSON do vitest guarda um caso acima do timeout como `STACK_TRACE_ERROR`.** Um classificador que procura "Test timed out" conta esses casos como outra causa.
+- **Um regex que aceita duas mensagens não prova qual caminho rodou.** O caso do `git` preso passava com a mensagem do orçamento no lugar da do `git`, e nenhum teste ligava os pontos de `git` à variável. A verificação adversarial achou os dois, com uma mutação que ignora o ambiente.
 - **Um teto medido na fixture acha os casos que a leitura do código não acha.** A primeira rodada com o `maxGateRuns` apontou um quinto caso acima de 3 rodadas, que a lista do plano não tinha.
 - **Os hooks desta sessão estouraram o `git` de 10 s** várias vezes durante a medição de partida, com a carga em 22. É o mesmo defeito que a #59 trata nos specs, agora visto em produção.
 - **Um hook do harness não analisa redirecionamentos para caminhos montados com variáveis.** O `guard-bash` recusou um script de shell que escrevia em `$out/...`, e a medição passou a rodar num script Node, que abre os arquivos por `fs`.

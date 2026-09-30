@@ -16,7 +16,7 @@ Lida no código em `22059b6`; a medição de partida confirma ou corrige a divis
 - **O `git` dos hooks tem 10 s fixos, sem ajuste.** São três constantes privadas: `.claude/hooks/lib/repo.mjs:53`, `.claude/hooks/lib/edit-gate.mjs:52` e `.claude/hooks/lib/git-rules.mjs:392`. O `gh` já tem o `LOOP_HOOKS_GH_TIMEOUT_MS` (`.claude/hooks/lib/gh-rules.mjs:137-141`). Os dois passam por `spawnTimeout()`, que dá a cada processo o menor entre o timeout dele e o que resta do orçamento do hook (`.claude/hooks/lib/budget.mjs:106-109`). O orçamento só baixa pelo ambiente (`budget.mjs:57-66`).
 - **Os specs dos hooks rodam com os prazos de produção.** O ambiente padrão dos helpers não leva nenhum dos dois prazos de processo (`test/support/hooks.ts:196-225`, `:503-512`). Sob carga, um `git` passa de 10 s, e o hook responde "o hook falhou" em vez da decisão que o caso confere.
 - **O `repo.spec.ts` bloqueia os próprios casos.** Ele roda a lib no mesmo processo, com `spawnSync` de `git`, dentro de grupos `describe.concurrent` com `maxConcurrency: 12` (`test/hooks/repo.spec.ts:79`, `:90`). Um `spawnSync` bloqueia o worker, e o timer dos outros casos continua correndo.
-- **O `gate.spec.ts` refaz a mesma stack a cada caso.** 49 casos começam com `await stack(fresh)` (`test/scripts/gate.spec.ts:3979-4012`), cada um com uns 26 `git`. Os casos mais pesados rodam o gate 8 ou 9 vezes em sequência (`:5442`, `:5875`).
+- **O `gate.spec.ts` refaz a mesma stack a cada caso.** 49 chamadas a `await stack(fresh)`, em 44 casos, montam a stack (`test/scripts/gate.spec.ts:3979-4012`), cada uma com uns 26 `git`. Os casos mais pesados rodam o gate 8 ou 9 vezes em sequência (`:5442`, `:5875`).
 
 ## Abordagem da correção
 
@@ -56,7 +56,7 @@ Os commits seguem os passos do plano: o intent (`6990fd6`), os testes que falham
 - **O que foi construído:**
   - `gitTimeoutMs()` e `gitTimeoutVariable` em `.claude/hooks/lib/budget.mjs`. O `repo.mjs`, o `edit-gate.mjs` e o `git-rules.mjs` passaram a ler o timeout do `git` dali, sempre por `spawnTimeout()`. Sem a variável, a produção não mudou;
   - `hookProcessTimeouts`, `hookEnv()` e `raiseInProcessGitTimeout()` em `test/support/hooks.ts`. O `HookRepo.env()` leva os dois prazos de 60 s. Os três casos que rodavam um hook com `cleanEnv(dir)` passaram a usar `hookEnv(dir)`;
-  - os casos de prazo foram relidos. Só um dependia dos 10 s, o "SessionStart, git hung" do `session-context.spec.ts`, que passou a dá-los explícitos. Os outros dão o próprio orçamento, e o orçamento corta antes;
+  - os casos de prazo foram relidos. Os que mudam o orçamento continuam valendo, porque o orçamento corta antes do `git`. O "SessionStart, git hung" do `session-context.spec.ts` passou a dar os 10 s explícitos, mas a verificação adversarial mostrou que ele também passava sem eles, com o orçamento cortando, porque o `LATE` aceita as duas mensagens. Ele passou a exigir "o git não respondeu a tempo" (`fea262f`);
   - no `repo.spec.ts`, os grupos `repoAt`, `real paths` e `configuredRemote` saíram de `describe.concurrent`;
   - no `gate.spec.ts`, o `templated()` monta uma vez a stack padrão, a `stackWithoutIntent` e a `middleOverForeign`. O `middleOverExcluded` ficou sem template, porque é chamado uma vez só. O `TempRepo.fromTemplate()` copia o repositório com `fs.cpSync`, e o `TempRepo` passou a dar a identidade do `git` pelo ambiente, sem os 3 `git config`;
   - a fixture `fresh` soma as rodadas do gate do caso e falha acima de 3 (`maxGateRuns`). A primeira rodada achou 5 casos acima do teto, com 9, 8, 6, 4 e 4 rodadas: os 4 do plano e "fails closed when the parent is refused, missing, or unread in CI". Eles viraram linhas de `test.for` ou casos menores, com as mesmas asserções, e o arquivo foi de 365 para 386 casos;
@@ -79,12 +79,26 @@ Os commits seguem os passos do plano: o intent (`6990fd6`), os testes que falham
   - o gate morto pelo próprio timeout de 60 s: 17 e 17;
   - outras respostas: de 224 para 124.
 - **As falhas que sobraram, explicadas.** Agora só o orçamento limita um hook, e as falhas que restam mudaram de natureza:
-  - **o orçamento de produção se esgota.** São 15 s no `session-context` e 20 s no `plan-to-issue`. A maior parte das 43 falhas do `session-context` e das 71 do `plan-to-issue` é uma resposta diferente: uma linha a menos no contexto, o marcador que fica, uma saída onde se esperava nenhuma. O orçamento só baixa pelo ambiente, de propósito, e o plano o manteve assim;
+  - **o orçamento de produção se esgota.** São 15 s no `session-context` e 20 s no `plan-to-issue`. As 13 falhas com "o prazo de N s do hook acabou" provam isso. A maior parte das 43 falhas do `session-context` e das 71 do `plan-to-issue` é uma resposta diferente: uma linha a menos no contexto, o marcador que fica, uma saída onde se esperava nenhuma. Atribuí-las ao orçamento é plausível, mas o classificador só vê o texto da asserção, e isso não foi provado caso a caso. O orçamento só baixa pelo ambiente, de propósito, e o plano o manteve assim;
   - **os casos dos hooks acima de 120 s.** Antes o hook desistia aos 10 s de `git`, e agora gasta até o orçamento. Os casos que rodam o hook muitas vezes num laço passam do tempo, como "each variable that moves git's config" no `guard-bash.spec.ts` e "asks, critical, for every harness path" no `build-guard.spec.ts`. É o mesmo problema que o `gate.spec.ts` tinha;
   - **o gate morto pelos 60 s do `TempRepo.gate`**, sem mudança;
   - **um caso de prazo sensível à carga:** "asks when gh is slower than the timeout" mediu 16,4 s contra um limite de 15 s.
 
   Pela decisão do dono ao ver a medição, esses resíduos foram para a #74, com a pergunta 2 do plano (o teto de workers do vitest), em vez de estender esta PR.
+- **A verificação adversarial** (risco HIGH), feita por um revisor independente em cópias da branch, não achou bloqueio. Os três achados que pediam correção entraram:
+  - **nenhum teste ligava os três pontos de `git` à variável.** Com os três lendo `gitTimeoutMs({})`, ou seja, ignorando o ambiente, todos os testes passavam. Entraram três casos de comportamento, um por ponto, com o `git` preso e a variável em 2 s: o `session-context` (`repo.mjs`), um `check-ignore` preso no `build-guard` (`edit-gate.mjs`) e uma leitura das regras no `guard-bash` (`git-rules.mjs`). Cada um exige a resposta antes dos 10 s do padrão, e a mesma mutação derruba os três (`fea262f`);
+  - **o caso do `git` preso não provava o próprio timeout**, descrito acima (`fea262f`);
+  - **subir a variável em produção troca o `deny` de um `git` preso ("o hook falhou") pelo `ask` crítico do orçamento**, que continua `deny` em `bypassPermissions`, `dontAsk` e `auto`. O README dos hooks e o `budget.mjs` passaram a chamar as duas variáveis de ajustes para os testes e a dizer o que muda. Eles dizem também que o `git` de reserva do `plan-to-issue` fica fora da variável (`88227e6`).
+
+  Dos nits, entraram o `verbatimSymlinks` na cópia do template, para um link relativo não apontar de volta para o template, e o `templated()` que não guarda uma construção que falhou (`c3ae58c`). O que resistiu:
+  - todo ponto de `git` dos hooks está coberto, e cada hook começa o orçamento antes do primeiro `git`;
+  - o timeout sai do `process.env` do hook, nunca do ambiente do comando;
+  - com a variável em 1, todo hook falha fechado;
+  - sem a variável, a produção não muda;
+  - o teto de rodadas falha o caso no vitest 4.1.11;
+  - a cópia é igual à stack montada: refs, config, índice, autores e o resultado do gate;
+  - os cinco casos divididos guardam as mesmas asserções;
+  - os números da medição foram refeitos a partir dos relatórios JSON.
 - **O relatório JSON do vitest guarda um caso acima do timeout como `Error: STACK_TRACE_ERROR`.** É o erro que o vitest cria antes de rodar o caso, e o "Test timed out" não aparece. Um classificador que só procura "Test timed out" deixa esses casos passarem por outra causa.
 - **Os hooks desta sessão estouraram o `git` de 10 s** várias vezes durante a medição de partida, com a carga em 22, ao conferir uma edição ou um comando. É o mesmo defeito, em produção, com a máquina carregada.
 - **Numa rodada inicial dos specs dos hooks,** o caso "ends the read of the .gitignore, hung, when the budget runs out" (`build-guard.spec.ts`) falhou uma vez: o orçamento de 3 s acabou antes do passo que ele confere. Na medição depois, ele falhou em 1 das 10 execuções. É um caso de prazo sensível à carga, como o do `gh`, e foi junto para a #74.
